@@ -1,0 +1,13 @@
+{
+  "name": "trump-multiplayer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Online multiplayer TRUMP — a 250-point bid & capture trick-taking card game (2–4 humans + AI fill).",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

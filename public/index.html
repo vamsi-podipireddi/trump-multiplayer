@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TRUMP — Multiplayer</title>
+<style>
+  :root {
+    --felt-1:#1f7a4d; --felt-2:#0d4d2e; --wood-1:#6b4423; --wood-2:#4a2e16;
+    --gold:#e8c45a; --ink:#1c1c1c; --red:#c52b2b; --card-bg:#fbf8f0; --shadow:rgba(0,0,0,.35);
+    --team-d:#e8c45a; --team-o:#6fa8ff;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif; color:#f3f3f3; background:#0a1f14; overflow:hidden; }
+
+  /* ---- Join / Lobby screens ---- */
+  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:50;
+    background:radial-gradient(ellipse at 50% 30%, #15321f, #07150d); }
+  .screen.show { display:flex; }
+  .screen h1 { margin:0; font-size:40px; letter-spacing:10px; color:var(--gold); text-shadow:0 2px 6px #000; }
+  .screen h1 .suits { letter-spacing:0; font-size:28px; margin-left:8px; }
+  .panel { background:linear-gradient(180deg,#15321f,#0b2014); border:2px solid var(--gold); border-radius:16px; padding:26px 30px; width:min(440px,92vw); box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .panel h2 { margin:0 0 14px; color:var(--gold); letter-spacing:2px; font-size:15px; }
+  .field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
+  .field label { font-size:12px; letter-spacing:1px; opacity:.8; }
+  .field input { font:inherit; font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.25); background:#0c2417; color:#fff; text-transform:none; }
+  #join-code { text-transform:uppercase; letter-spacing:3px; }
+  .btn { font:inherit; font-size:15px; letter-spacing:1px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:10px; padding:11px 18px; font-weight:800; transition:transform .08s,filter .15s; }
+  .btn:hover { filter:brightness(1.08); } .btn:active { transform:translateY(1px); }
+  .btn.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:10px; }
+  .muted { font-size:12.5px; opacity:.7; line-height:1.5; }
+  .err { color:#ff8080; font-size:13px; min-height:16px; }
+
+  .seatlist { display:flex; flex-direction:column; gap:8px; margin:6px 0 16px; }
+  .seatrow { display:flex; align-items:center; gap:10px; background:rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:9px 12px; font-size:14px; }
+  .seatrow .tag { font-size:10px; letter-spacing:1px; opacity:.6; min-width:46px; }
+  .seatrow .who { font-weight:700; }
+  .seatrow.you { border-color:var(--gold); }
+  .seatrow .pill { margin-left:auto; font-size:10px; letter-spacing:1px; padding:2px 8px; border-radius:10px; }
+  .pill.open { background:rgba(255,255,255,.12); } .pill.ai { background:#6fa8ff; color:#07150d; } .pill.on { background:#7fd6a0; color:#07150d; } .pill.off { background:#c97; color:#07150d; }
+  .code-big { font-size:34px; letter-spacing:8px; color:var(--gold); font-weight:800; text-align:center; padding:6px 0; }
+
+  /* ---- Game ---- */
+  #game { height:100vh; display:none; grid-template-columns:1fr 290px; grid-template-rows:auto 1fr; }
+  header { grid-column:1/3; display:flex; align-items:center; gap:16px; padding:9px 18px; background:linear-gradient(180deg,#15321f,#0b2014); border-bottom:2px solid var(--gold); }
+  header h1 { margin:0; font-size:22px; letter-spacing:4px; color:var(--gold); text-shadow:0 2px 4px #000; }
+  header .tagline { font-size:11px; opacity:.7; letter-spacing:1px; }
+  .contract-badge { margin-left:auto; display:flex; align-items:center; gap:12px; background:rgba(0,0,0,.35); border:1px solid var(--gold); border-radius:10px; padding:5px 14px; }
+  .contract-badge .lbl { font-size:10px; letter-spacing:2px; opacity:.8; } .contract-badge .sym { font-size:26px; line-height:1; font-weight:bold; }
+  .contract-badge .sym.red { color:#ff6b6b; } .contract-badge .sym.black { color:#f3f3f3; } .contract-badge .deal { font-size:12px; opacity:.9; max-width:230px; }
+  header button { font:inherit; font-size:13px; letter-spacing:1px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:8px; padding:8px 14px; font-weight:700; }
+  header button.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
+
+  #table-wrap { position:relative; padding:16px; display:flex; align-items:center; justify-content:center; }
+  #table { position:relative; width:100%; height:100%; max-width:1000px; border-radius:50%/42%;
+    background:radial-gradient(ellipse at 50% 42%, var(--felt-1), var(--felt-2) 72%);
+    box-shadow:0 0 0 14px var(--wood-1),0 0 0 20px var(--wood-2),0 24px 60px rgba(0,0,0,.55),inset 0 0 120px rgba(0,0,0,.45); }
+  .seat { position:absolute; display:flex; flex-direction:column; align-items:center; gap:5px; }
+  .seat .nameplate { display:flex; align-items:center; gap:8px; background:rgba(0,0,0,.4); border:1px solid rgba(255,255,255,.12); border-radius:20px; padding:4px 12px; font-size:13px; font-weight:600; white-space:nowrap; }
+  .seat.active .nameplate { border-color:var(--gold); box-shadow:0 0 14px rgba(232,196,90,.7); background:rgba(232,196,90,.15); }
+  .seat.dealer .nameplate::after { content:"D"; display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#fff; color:var(--ink); font-size:11px; font-weight:800; }
+  .seat.team-d .nameplate { border-color:var(--team-d); box-shadow:0 0 0 1px var(--team-d) inset; }
+  .seat.team-o .nameplate { border-color:var(--team-o); box-shadow:0 0 0 1px var(--team-o) inset; }
+  .seat .off { opacity:.45; }
+  .role { font-size:10px; letter-spacing:1px; padding:1px 7px; border-radius:10px; font-weight:700; }
+  .role.bidder { background:var(--team-d); color:var(--ink); } .role.partner { background:#b9942f; color:#fff; }
+  .role.def { background:var(--team-o); color:var(--ink); } .role.bidding { background:rgba(255,255,255,.15); color:#fff; }
+  .seat .meta { font-size:11px; opacity:.85; text-align:center; } .seat .meta b { color:var(--gold); }
+  .seat.south { bottom:8px; left:50%; transform:translateX(-50%); }
+  .seat.west { left:18px; top:50%; transform:translateY(-50%); }
+  .seat.north { top:12px; left:50%; transform:translateX(-50%); }
+  .seat.east { right:18px; top:50%; transform:translateY(-50%); }
+  .hand-backs { display:flex; } .hand-backs.vertical { flex-direction:column; }
+  .card-back { width:28px; height:40px; border-radius:5px; background:repeating-linear-gradient(45deg,#8d2b2b 0 6px,#6e1f1f 6px 12px); border:1.5px solid #f3eede; box-shadow:0 2px 4px var(--shadow); }
+  .hand-backs .card-back:not(:first-child) { margin-left:-19px; } .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-31px; }
+
+  #trick { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:220px; height:200px; }
+  .trick-card { position:absolute; top:50%; left:50%; transition:all .25s ease-out; animation:dealIn .25s ease-out; }
+  @keyframes dealIn { from { opacity:0; transform:translate(-50%,-50%) scale(.6); } }
+  .trick-card.winner { filter:drop-shadow(0 0 12px var(--gold)); z-index:5; }
+  .trick-card.pos-0 { transform:translate(-50%,18px); } .trick-card.pos-1 { transform:translate(-118px,-50%); }
+  .trick-card.pos-2 { transform:translate(-50%,-118px); } .trick-card.pos-3 { transform:translate(18px,-50%); }
+  #trick .trick-card { position:absolute; } /* beat the later, equal-specificity .card{position:relative} so cards form the N/E/S/W cross instead of stacking */
+
+  .card { width:62px; height:88px; border-radius:7px; background:var(--card-bg); color:var(--ink); position:relative; box-shadow:0 3px 6px var(--shadow); user-select:none; font-family:"Georgia",serif; }
+  .card.red { color:var(--red); }
+  .card .corner { position:absolute; font-weight:700; line-height:.9; text-align:center; }
+  .card .corner .r { font-size:15px; display:block; } .card .corner .s { font-size:13px; display:block; }
+  .card .corner.tl { top:5px; left:6px; } .card .corner.br { bottom:5px; right:6px; transform:rotate(180deg); }
+  .card .pip { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:32px; opacity:.9; }
+
+  #bottom { grid-column:1/2; position:relative; display:flex; flex-direction:column; justify-content:flex-end; }
+  #action-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:6px 14px; text-align:center; }
+  #action-bar .prompt { font-size:14px; color:var(--gold); width:100%; } #action-bar .status { font-size:13px; opacity:.85; width:100%; }
+  #action-bar .banner { font-size:13px; width:100%; padding:4px 0; } #action-bar .banner .d { color:var(--team-d); font-weight:700; } #action-bar .banner .o { color:var(--team-o); font-weight:700; }
+  .act-btn { font:inherit; font-size:14px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:8px; padding:7px 14px; font-weight:700; }
+  .act-btn.pass { background:#caa; } .act-btn.suit { font-size:22px; width:50px; padding:6px 0; } .act-btn.suit.red { color:var(--red); }
+  .bidval { font-size:22px; color:var(--gold); min-width:56px; text-align:center; }
+  .call-grid { display:flex; flex-direction:column; gap:4px; width:100%; align-items:center; max-height:150px; overflow-y:auto; }
+  .call-row { display:flex; gap:4px; justify-content:center; flex-wrap:wrap; }
+  .mini-card { width:34px; height:46px; border-radius:5px; background:var(--card-bg); color:var(--ink); position:relative; cursor:pointer; box-shadow:0 2px 4px var(--shadow); font-family:"Georgia",serif; display:flex; align-items:center; justify-content:center; flex-direction:column; line-height:1; }
+  .mini-card.red { color:var(--red); } .mini-card .mr { font-size:13px; font-weight:700; } .mini-card .ms { font-size:14px; }
+  .mini-card.ace { outline:2px solid var(--gold); } .mini-card.bonus { outline:2px solid #ff5e9c; }
+
+  #my-hand { display:flex; justify-content:center; height:120px; align-items:flex-end; padding-bottom:8px; }
+  #my-hand .card { width:72px; height:102px; margin-left:-22px; transition:transform .14s,box-shadow .14s; cursor:default; }
+  #my-hand .card:first-child { margin-left:0; }
+  #my-hand .card .corner .r { font-size:18px; } #my-hand .card .corner .s { font-size:15px; } #my-hand .card .pip { font-size:38px; }
+  #my-hand .card.trumpcard { box-shadow:0 0 0 2px var(--gold),0 3px 6px var(--shadow); }
+  #my-hand .card.bonuscard { box-shadow:0 0 0 2px #ff5e9c,0 3px 6px var(--shadow); }
+  #my-hand .card.trumpcard.bonuscard { box-shadow:0 0 0 2px var(--gold),0 0 0 4px #ff5e9c,0 3px 6px var(--shadow); }
+  #my-hand .card.playable { cursor:pointer; } #my-hand .card.playable:hover { transform:translateY(-22px); box-shadow:0 10px 18px var(--shadow); z-index:10; }
+  #my-hand .card.illegal { filter:grayscale(.7) brightness(.78); }
+
+  aside { grid-row:2/3; grid-column:2/3; background:linear-gradient(180deg,#102a1b,#0a1d12); border-left:1px solid rgba(232,196,90,.3); display:flex; flex-direction:column; min-height:0; }
+  .panel-section { padding:11px 14px; border-bottom:1px solid rgba(255,255,255,.07); }
+  .panel-section h2 { margin:0 0 8px; font-size:12px; letter-spacing:2px; color:var(--gold); opacity:.9; }
+  table.score { width:100%; border-collapse:collapse; font-size:13px; } table.score th,table.score td { text-align:center; padding:4px 2px; }
+  table.score th { font-size:10px; letter-spacing:1px; opacity:.65; font-weight:600; } table.score td.name { text-align:left; font-weight:600; }
+  table.score tr.you td.name { color:var(--gold); } table.score td .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:5px; vertical-align:middle; } table.score td b { color:var(--gold); }
+  .contract-line { font-size:12px; margin-top:8px; opacity:.9; }
+  #log { flex:1; overflow-y:auto; font-size:12.5px; line-height:1.5; padding:10px 14px; }
+  #log .entry { opacity:.9; margin-bottom:3px; } #log .entry.win { color:var(--gold); font-weight:600; } #log .entry.bid { color:#9fd; }
+  #log .entry.round { color:#7fd6a0; font-weight:700; border-top:1px dashed rgba(255,255,255,.15); padding-top:6px; margin-top:4px; }
+
+  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.72); display:none; align-items:center; justify-content:center; z-index:100; }
+  #overlay.show { display:flex; } .modal { background:linear-gradient(180deg,#15321f,#0b2014); border:2px solid var(--gold); border-radius:16px; padding:26px 32px; max-width:480px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.6); }
+  .modal h2 { margin:0 0 10px; color:var(--gold); letter-spacing:2px; } .modal p { margin:8px 0; line-height:1.5; font-size:14px; } .modal .big { font-size:22px; font-weight:800; }
+  .modal .standings { margin:14px 0; font-size:14px; } .modal .standings div { padding:3px 0; }
+  .modal button { margin-top:16px; font:inherit; font-size:15px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:10px; padding:12px 28px; font-weight:800; }
+  .modal .how { text-align:left; font-size:13px; opacity:.92; } .modal .how li { margin:4px 0; }
+
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#7a1f1f; color:#fff; padding:8px 16px; border-radius:8px; font-size:13px; z-index:200; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  #conn { position:fixed; top:0; left:0; right:0; background:#7a1f1f; color:#fff; text-align:center; font-size:13px; padding:6px; z-index:300; display:none; }
+  #conn.show { display:block; }
+  @media (max-width:900px) { #game { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; } aside { display:none; } header h1 { font-size:18px; } }
+</style>
+</head>
+<body>
+<div id="conn">Disconnected — reconnecting…</div>
+
+<!-- Join screen -->
+<div id="join-screen" class="screen show">
+  <h1>TRUMP<span class="suits">♠♥♦♣</span></h1>
+  <div class="muted" style="letter-spacing:1px;">Online 250-point bid &amp; capture · 2–4 players + AI</div>
+  <div class="panel">
+    <div class="field"><label>Your name</label><input id="join-name" maxlength="16" placeholder="e.g. Alex" /></div>
+    <div class="err" id="join-err"></div>
+
+    <h2 style="margin-top:6px;">🤖 PLAY SOLO</h2>
+    <p class="muted" style="margin:0 0 8px;">No friends around? Jump straight into a game against 3 AI bots.</p>
+    <button class="btn" id="btn-solo" style="width:100%;">Play vs 3 Bots</button>
+
+    <div style="height:1px;background:rgba(255,255,255,.12);margin:20px 0;"></div>
+
+    <h2>👥 PLAY WITH FRIENDS</h2>
+    <p class="muted" style="margin:0 0 8px;">Start a room and share the code — friends join from any device. Empty seats are filled by AI, so a partial table still works.</p>
+    <button class="btn" id="btn-create" style="width:100%;margin-bottom:10px;">Create Room</button>
+    <div class="row">
+      <input id="join-code" maxlength="6" placeholder="ROOM CODE" style="flex:1;" />
+      <button class="btn ghost" id="btn-join">Join</button>
+    </div>
+  </div>
+</div>
+
+<!-- Lobby screen -->
+<div id="lobby-screen" class="screen">
+  <h1>TRUMP<span class="suits">♠♥♦♣</span></h1>
+  <div class="panel">
+    <h2>ROOM</h2>
+    <div class="code-big" id="lobby-code">----</div>
+    <p class="muted" style="text-align:center;margin-top:0;">Share this code with friends to join.</p>
+    <div class="seatlist" id="lobby-seats"></div>
+    <div id="lobby-controls"></div>
+    <p class="muted" id="lobby-note"></p>
+  </div>
+</div>
+
+<!-- Game -->
+<div id="game">
+  <header>
+    <div>
+      <h1>TRUMP</h1>
+      <div class="tagline">250-point bid &amp; capture</div>
+    </div>
+    <div class="contract-badge">
+      <div><div class="lbl">TRUMP</div><div id="trump-sym" class="sym">—</div></div>
+      <div class="deal" id="contract-text">—</div>
+    </div>
+    <button class="ghost" id="btn-help">How to Play</button>
+    <button class="ghost" id="btn-leave">Leave</button>
+  </header>
+  <div id="table-wrap">
+    <div id="table">
+      <div class="seat south" id="seat-south"><div class="nameplate"><span></span></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat west" id="seat-west"><div class="nameplate"><span></span></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div class="seat north" id="seat-north"><div class="nameplate"><span></span></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat east" id="seat-east"><div class="nameplate"><span></span></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div id="trick"></div>
+    </div>
+  </div>
+  <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
+  <aside>
+    <div class="panel-section"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div></div>
+    <div class="panel-section" style="flex:1;display:flex;flex-direction:column;min-height:0;"><h2>TABLE LOG</h2><div id="log"></div></div>
+  </aside>
+</div>
+
+<div id="overlay"><div class="modal" id="modal"></div></div>
+<div id="toast"></div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const SUITS = ["♠","♥","♦","♣"], RED = new Set(["♥","♦"]);
+const POS_CLASS = ["south","west","north","east"]; // pos 0..3 relative to viewer
+const rankLabel = r => ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r);
+const cardStr = c => rankLabel(c.rank) + c.suit;
+
+let ws = null, view = null, myPid = null, mySeat = null, roomCode = null;
+let humanBidValue = null, bidCtxKey = null, reconnectTimer = null, wantConnected = false;
+let autoStartSolo = false, startingSolo = false; // one-click "Play vs 3 Bots"
+
+// ---------- networking ----------
+function connect(name, code) {
+  wantConnected = true;
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${proto}://${location.host}`);
+  ws.onopen = () => {
+    $("conn").classList.remove("show");
+    let pid = null; // only auto-resume a recent session token (avoids hijacking a stale one on a shared device)
+    if (code) { const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code); }
+    ws.send(JSON.stringify({ type: "join", room: code || "", name, playerId: pid || null }));
+  };
+  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
+  ws.onclose = () => { if (wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
+  ws.onerror = () => {};
+}
+function scheduleReconnect(name) {
+  if (reconnectTimer) return;
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; if (wantConnected) connect(name, roomCode); }, 1500);
+}
+function onMsg(m) {
+  if (m.type === "joined") {
+    myPid = m.playerId; roomCode = m.room;
+    localStorage.setItem("trump_pid_" + m.room, m.playerId);
+    localStorage.setItem("trump_pid_" + m.room + "_t", String(Date.now()));
+    localStorage.setItem("trump_name", $("join-name").value.trim());
+    history.replaceState(null, "", "?room=" + m.room);
+  } else if (m.type === "state") {
+    view = m.view; mySeat = view.you.seat;
+    if (autoStartSolo && !view.room.started && view.room.isHost) { autoStartSolo = false; send({ type: "start" }); }
+    render();
+  } else if (m.type === "error") {
+    toast(m.message);
+  }
+}
+const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+// ---------- join UI ----------
+function doJoin(create) {
+  const name = $("join-name").value.trim();
+  if (!name) { $("join-err").textContent = "Enter a name."; return; }
+  const code = create ? "" : $("join-code").value.trim().toUpperCase();
+  if (!create && !code) { $("join-err").textContent = "Enter a room code, or use Create New Room."; return; }
+  roomCode = code || null;
+  connect(name, code);
+}
+function doSolo() {
+  const name = $("join-name").value.trim();
+  if (!name) { $("join-err").textContent = "Enter a name."; return; }
+  autoStartSolo = true; startingSolo = true; roomCode = null;
+  connect(name, ""); // create a fresh room, then auto-start with 3 bots
+}
+$("btn-solo").onclick = doSolo;
+$("btn-join").onclick = () => doJoin(false);
+$("btn-create").onclick = () => doJoin(true);
+$("join-name").value = localStorage.getItem("trump_name") || "";
+{ const p = new URLSearchParams(location.search).get("room"); if (p) $("join-code").value = p.toUpperCase(); }
+$("btn-leave").onclick = () => { wantConnected = false; try { if (roomCode) { localStorage.removeItem("trump_pid_" + roomCode); localStorage.removeItem("trump_pid_" + roomCode + "_t"); } } catch {} if (ws) ws.close(); location.href = location.pathname; };
+$("btn-help").onclick = showHelp;
+
+// ---------- orientation ----------
+const orient = () => (mySeat == null ? 0 : mySeat);
+const seatAtPos = pos => (orient() + pos) % 4;
+const posOfSeat = seat => (seat - orient() + 4) % 4;
+
+// ---------- top-level render ----------
+function render() {
+  if (!view) return;
+  if (!view.room.started && startingSolo) { $("join-err").textContent = "Dealing…"; return; } // skip the lobby for solo
+  if (view.room.started) startingSolo = false;
+  if (!view.room.started) { $("join-screen").classList.remove("show"); $("lobby-screen").classList.add("show"); $("game").style.display = "none"; renderLobby(); }
+  else { $("join-screen").classList.remove("show"); $("lobby-screen").classList.remove("show"); $("game").style.display = "grid"; renderGame(); }
+  const ok = $("overlay").dataset.kind;
+  if (view.phase === "matchOver") { if (ok !== "help" && ok !== "match") showMatchOver(); }
+  else if (ok !== "help") hideOverlay();
+}
+
+// ---------- lobby ----------
+function renderLobby() {
+  $("lobby-code").textContent = view.room.code;
+  const list = $("lobby-seats"); list.innerHTML = "";
+  view.seats.forEach(s => {
+    const row = document.createElement("div");
+    row.className = "seatrow" + (s.you ? " you" : "");
+    let pill = s.isHuman ? `<span class="pill on">${s.you ? "YOU" : "READY"}</span>` : `<span class="pill open">OPEN → AI</span>`;
+    row.innerHTML = `<span class="tag">${s.label}</span><span class="who">${s.name ? esc(s.name) : "—"}</span>${pill}`;
+    list.appendChild(row);
+  });
+  const ctrl = $("lobby-controls"); ctrl.innerHTML = "";
+  if (view.you.spectator) { ctrl.innerHTML = `<p class="muted">All four seats are taken — you'll spectate this match.</p>`; }
+  else if (view.room.isHost) {
+    const b = document.createElement("button"); b.className = "btn"; b.style.width = "100%"; b.textContent = "Start Game (fill empty seats with AI)";
+    b.onclick = () => send({ type: "start" }); ctrl.appendChild(b);
+  } else {
+    ctrl.innerHTML = `<p class="muted" style="text-align:center;">Waiting for <b>${esc(view.room.hostName || "host")}</b> to start…</p>`;
+  }
+  $("lobby-note").textContent = `${view.room.humans} player${view.room.humans === 1 ? "" : "s"} here. Empty seats become AI when the game starts.`;
+}
+
+// ---------- card elements ----------
+function cardEl(card) {
+  const el = document.createElement("div");
+  el.className = "card" + (RED.has(card.suit) ? " red" : "");
+  const r = rankLabel(card.rank);
+  el.innerHTML = `<div class="corner tl"><span class="r">${r}</span><span class="s">${card.suit}</span></div><div class="pip">${card.suit}</div><div class="corner br"><span class="r">${r}</span><span class="s">${card.suit}</span></div>`;
+  return el;
+}
+
+// ---------- game board ----------
+function sideOf(seat) { return (seat === view.declarer || seat === view.partner) ? "D" : "O"; }
+function activeSeat() {
+  if (view.phase === "playing") return view.turn;
+  if (view.phase === "bidding") return view.bidTurn;
+  if (view.phase === "trumpSelect" || view.phase === "partnerSelect") return view.declarer;
+  return -1;
+}
+function roleOf(seat) {
+  if (!view.teamsRevealed) {
+    if (view.phase === "bidding" && view.bidActive.includes(seat)) return seat === view.highBidder ? { c:"bidding", t:"high bid" } : { c:"bidding", t:"bidding" };
+    if (seat === view.highBidder) return { c:"bidding", t:"high bid" };
+    return null;
+  }
+  if (seat === view.declarer) return { c:"bidder", t:"BIDDER" };
+  if (seat === view.partner) return { c:"partner", t:"PARTNER" };
+  return { c:"def", t:"DEFENDER" };
+}
+function renderGame() {
+  const c = view.consts;
+  // contract badge
+  const ts = $("trump-sym");
+  if (view.trump) { ts.textContent = view.trump; ts.className = "sym " + (RED.has(view.trump) ? "red" : "black"); } else { ts.textContent = "—"; ts.className = "sym"; }
+  const bonus = view.bonusSuit ? ` · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })}=30` : "";
+  let ct;
+  if (view.phase === "bidding") ct = (view.highBid ? `High bid <b>${view.highBid}</b> · ${esc(view.names[view.highBidder])}` : "Bidding for points…") + bonus;
+  else if (view.declarer != null) ct = `Bid <b>${view.bid}</b> pts · ${esc(view.names[view.declarer])}` + (view.trump ? "" : "") + bonus;
+  else ct = "—" + bonus;
+  $("contract-text").innerHTML = ct;
+
+  const act = activeSeat();
+  // seats by position
+  for (let pos = 0; pos < 4; pos++) {
+    const seat = seatAtPos(pos);
+    const el = $("seat-" + POS_CLASS[pos]);
+    const info = view.seats[seat];
+    el.classList.toggle("active", seat === act);
+    el.classList.toggle("dealer", view.dealer === seat);
+    el.classList.toggle("team-d", view.teamsRevealed && sideOf(seat) === "D");
+    el.classList.toggle("team-o", view.teamsRevealed && sideOf(seat) === "O");
+    const np = el.querySelector(".nameplate");
+    np.querySelector("span").textContent = info.name || info.label;
+    np.querySelector(".role")?.remove();
+    const role = roleOf(seat);
+    if (role) { const r = document.createElement("span"); r.className = "role " + role.c; r.textContent = role.t; np.appendChild(r); }
+    np.classList.toggle("off", info.isHuman && !info.connected);
+    el.querySelector(".meta").innerHTML = `<b>${view.capturedPoints[seat]}</b> pts · ${view.scores[seat]} ${view.scores[seat] === 1 ? "deal" : "deals"}`;
+    // card backs for everyone except your own seat
+    const backs = el.querySelector("[data-backs]"); backs.innerHTML = "";
+    const isMe = (mySeat != null && seat === mySeat);
+    if (!isMe) { for (let i = 0; i < view.handCounts[seat]; i++) { const d = document.createElement("div"); d.className = "card-back"; backs.appendChild(d); } }
+  }
+
+  // trick — reuse existing nodes so only a newly played card animates in (no full-trick flash)
+  const tw = $("trick");
+  const keyOf = pl => pl.player + ":" + pl.card.suit + pl.card.rank;
+  const want = view.trick;
+  const existing = Array.from(tw.children);
+  const prefixOk = existing.length <= want.length && existing.every((el, i) => el.dataset.k === keyOf(want[i]));
+  if (!prefixOk) tw.innerHTML = "";
+  want.forEach((play, i) => {
+    let el = tw.children[i];
+    if (!el) {
+      el = cardEl(play.card);
+      el.dataset.k = keyOf(play);
+      el.classList.add("trick-card", "pos-" + posOfSeat(play.player));
+      tw.appendChild(el);
+    }
+    el.classList.toggle("winner", view.phase === "trickEnd" && i === view.lastWinnerSlot);
+  });
+
+  renderHand();
+  renderActionBar();
+  renderScoreboard();
+  renderLog();
+}
+function renderHand() {
+  const wrap = $("my-hand"); wrap.innerHTML = "";
+  const hand = (view.you && view.you.hand) || [];
+  const canPlay = view.you.toAct && view.you.actKind === "play";
+  const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
+  hand.forEach(card => {
+    const el = cardEl(card);
+    if (view.trump && card.suit === view.trump) el.classList.add("trumpcard");
+    if (view.bonusSuit && card.suit === view.bonusSuit && card.rank === 3) el.classList.add("bonuscard");
+    if (canPlay) {
+      if (legalKey.has(card.suit + card.rank)) { el.classList.add("playable"); el.onclick = () => send({ type: "play", card }); }
+      else { el.classList.add("illegal"); el.title = "Must follow suit (" + view.leadSuit + ")"; }
+    }
+    wrap.appendChild(el);
+  });
+}
+function renderScoreboard() {
+  const c = view.consts;
+  $("score-title").textContent = `SCOREBOARD · FIRST TO ${c.TARGET_GAMES} DEALS`;
+  let html = "<tr><th>Player</th><th>Points</th><th>Deals</th></tr>";
+  for (let s = 0; s < 4; s++) {
+    let dot = "";
+    if (view.teamsRevealed) dot = `<span class="dot" style="background:${sideOf(s) === "D" ? "var(--team-d)" : "var(--team-o)"}"></span>`;
+    const you = mySeat != null && s === mySeat;
+    html += `<tr class="${you ? "you" : ""}"><td class="name">${dot}${esc(view.names[s] || view.seats[s].label)}${view.dealer === s ? " (D)" : ""}</td><td><b>${view.capturedPoints[s]}</b></td><td>${view.scores[s]}</td></tr>`;
+  }
+  $("scoreboard").innerHTML = html;
+  const cl = $("contract-line");
+  if (view.teamsRevealed && view.declarer != null) {
+    const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
+    cl.innerHTML = `Contract: <b>${view.bid}</b> pts ${suitSpan(view.trump)} · ${esc(view.names[view.declarer])} & ${esc(view.names[view.partner])} have <b>${dPts}</b>/${view.bid}`;
+  } else cl.textContent = "";
+}
+function renderLog() {
+  const el = $("log"); el.innerHTML = "";
+  (view.log || []).forEach(e => { const d = document.createElement("div"); d.className = "entry " + (e.cls || ""); d.innerHTML = textWithCards(e.text); el.appendChild(d); });
+  el.scrollTop = el.scrollHeight;
+}
+function renderActionBar() {
+  const bar = $("action-bar"); bar.innerHTML = "";
+  const c = view.consts;
+  const text = (cls, html) => { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; bar.appendChild(d); };
+  const button = (label, cls, fn) => { const b = document.createElement("button"); b.className = "act-btn " + (cls || ""); b.innerHTML = label; b.onclick = fn; bar.appendChild(b); return b; };
+
+  if (view.you.spectator) { text("status", `Spectating ${esc(view.room.hostName || "")}'s table — ${phaseLabel()}`); return; }
+
+  if (view.you.toAct) {
+    if (view.you.actKind === "bid") {
+      const ctxKey = view.roundNumber + "|" + (view.highBid || 0);
+      if (bidCtxKey !== ctxKey) { bidCtxKey = ctxKey; humanBidValue = null; } // fresh bid context → start at the minimum
+      const lo = view.you.minBid;
+      text("prompt", `Your bid — high: ${view.highBid ? "<b>" + view.highBid + "</b> (" + esc(view.names[view.highBidder]) + ")" : "none"} · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })}=30`);
+      button("Pass", "pass", () => { humanBidValue = null; send({ type: "bid", value: null }); });
+      if (lo > c.MAX_BID) { text("status", "Bidding is maxed — you can only pass."); return; }
+      let v = humanBidValue; if (v == null || v < lo || v > c.MAX_BID) { v = lo; humanBidValue = v; }
+      button("−" + c.BID_STEP, "", () => { humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
+      const val = document.createElement("span"); val.className = "bidval"; val.innerHTML = `<b>${v}</b>`; bar.appendChild(val);
+      button("+" + c.BID_STEP, "", () => { humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
+      button("Bid " + v, "", () => { humanBidValue = null; send({ type: "bid", value: v }); });
+      return;
+    }
+    if (view.you.actKind === "trump") {
+      text("prompt", `You won the bid at ${view.bid} — choose the trump suit:`);
+      SUITS.forEach(s => button(s, "suit" + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s })));
+      return;
+    }
+    if (view.you.actKind === "call") {
+      text("prompt", `Trump is ${view.trump}. Call a card you DON'T hold — its holder is your partner:`);
+      const grid = document.createElement("div"); grid.className = "call-grid";
+      const byS = {}; SUITS.forEach(s => byS[s] = []);
+      (view.you.callable || []).forEach(cd => byS[cd.suit].push(cd));
+      SUITS.forEach(s => {
+        const row = document.createElement("div"); row.className = "call-row";
+        byS[s].sort((a, b) => b.rank - a.rank).forEach(cd => {
+          const m = document.createElement("div");
+          m.className = "mini-card" + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === view.bonusSuit && cd.rank === 3 ? " bonus" : "");
+          m.innerHTML = `<span class="mr">${rankLabel(cd.rank)}</span><span class="ms">${cd.suit}</span>`;
+          m.onclick = () => send({ type: "call", card: { suit: cd.suit, rank: cd.rank } });
+          row.appendChild(m);
+        });
+        grid.appendChild(row);
+      });
+      bar.appendChild(grid);
+      return;
+    }
+    if (view.you.actKind === "play") { bannerForPlay(true); return; }
+  }
+  // not my turn / transitions
+  if (view.phase === "playing" || view.phase === "trickEnd") { bannerForPlay(false); return; }
+  if (view.phase === "roundEnd" && view.lastResult) {
+    const r = view.lastResult;
+    text("banner", `${esc(view.names[r.declarer])} & ${esc(view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(view.names[p])).join(" & ")} win the deal — next deal soon…`);
+    return;
+  }
+  text("status", `${phaseLabel()} — waiting for <b>${esc(view.names[activeSeat()] || "")}</b>`);
+}
+function bannerForPlay(myTurn) {
+  if (mySeat == null) { return $("action-bar").appendChild(divStatus(`${phaseLabel()} — ${esc(view.names[view.turn])} to play`)); }
+  const c = view.consts;
+  const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
+  const mySide = sideOf(mySeat);
+  const mate = mySide === "D" ? (mySeat === view.declarer ? view.partner : view.declarer) : [0,1,2,3].filter(p => p !== view.declarer && p !== view.partner && p !== mySeat)[0];
+  const turnTxt = myTurn ? " <b>Your turn.</b>" : ` — ${esc(view.names[view.turn])} to play`;
+  if (mySide === "D")
+    addBanner(`<span class="d">You + ${esc(view.names[mate])}</span> are the bidding side — need <b>${view.bid}</b> pts, captured <b>${dPts}</b>.${turnTxt}`);
+  else
+    addBanner(`<span class="o">You + ${esc(view.names[mate])}</span> defend — keep them under <b>${view.bid}</b> pts (they have <b>${dPts}</b>).${turnTxt}`);
+}
+function addBanner(html) { const d = document.createElement("div"); d.className = "banner"; d.innerHTML = html; $("action-bar").appendChild(d); }
+function divStatus(html) { const d = document.createElement("div"); d.className = "status"; d.innerHTML = html; return d; }
+function phaseLabel() { return ({ bidding:"Bidding", trumpSelect:"Choosing trump", partnerSelect:"Calling partner", playing:"Playing", trickEnd:"Trick won", roundEnd:"Deal over", matchOver:"Match over" })[view.phase] || ""; }
+
+// ---------- modals ----------
+function showMatchOver() {
+  const max = Math.max(...view.scores);
+  const champs = [0,1,2,3].filter(p => view.scores[p] === max);
+  const youWon = mySeat != null && champs.includes(mySeat);
+  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p => `<div>${(mySeat!=null&&p===mySeat)?"<b style='color:var(--gold)'>"+esc(view.names[p])+" (you)</b>":esc(view.names[p])} — ${view.scores[p]} deal${view.scores[p]===1?"":"s"} won</div>`).join("");
+  let btn = view.room.isHost ? `<button id="btn-rematch">New Match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
+  setModal("match",
+    `<h2>Match Over</h2><p class="big">${youWon ? "🏆 You win the match!" : (champs.map(p=>esc(view.names[p])).join(" & ") + " win the match")}</p>` +
+    `<p>First to ${view.consts.TARGET_GAMES} deals won.</p><div class="standings">${standings}</div>${btn}`);
+  if (view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
+}
+function showHelp() {
+  const c = (view && view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
+  setModal("help",
+    `<h2>How to Play TRUMP</h2><ul class="how">` +
+    `<li>4 seats; you take an open one and any empty seats are AI. The deck holds <b>${c.TOTAL_POINTS} points</b>: A/K/Q/J/10 = 10 each, every 5 = 5, one random suit's <b>3 = 30</b> (announced before bidding).</li>` +
+    `<li><b>Bid</b> the points your side will capture (min ${c.MIN_BID}, steps of ${c.BID_STEP}) or pass; highest bidder wins.</li>` +
+    `<li>The bid winner picks <b>trump</b> and <b>calls a card they don't hold</b> — its holder is their partner (teams shown at once: gold = bidding side, blue = defenders).</li>` +
+    `<li>The bid winner leads. Follow suit if you can; highest trump wins a trick, else the highest card of the led suit; the winner captures its point-cards and leads next.</li>` +
+    `<li>Make the bid → bidding side wins the deal; fall short → defenders win it. First to <b>${c.TARGET_GAMES} deals</b> wins the match.</li>` +
+    `</ul><button id="btn-close">Got it</button>`);
+  $("btn-close").onclick = () => { hideOverlay(); render(); };
+}
+function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").dataset.kind = kind; $("overlay").classList.add("show"); }
+function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
+
+// ---------- helpers ----------
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[ch])); }
+function suitSpan(s) { return s ? `<span style="color:${RED.has(s) ? "#ff7a7a" : "#f3f3f3"}">${s}</span>` : ""; }
+function cardSpan(c) { return c ? `<span style="color:${RED.has(c.suit) ? "#ff7a7a" : "#f3f3f3"}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }
+function textWithCards(t) { return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span style="color:${RED.has(s) ? "#ff7a7a" : "#f3f3f3"};font-weight:700">${m}</span>`); }
+let toastT = null;
+function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
+</script>
+</body>
+</html>
