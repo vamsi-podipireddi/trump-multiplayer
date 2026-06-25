@@ -1,0 +1,22 @@
+# Cloudflare Worker config — single-Worker deploy:
+# serves the static client (./public) AND the realtime backend (Durable Objects),
+# all on one origin. `npm run deploy`.
+name = "trump-multiplayer"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+# Static client served from the same origin as the /ws WebSocket.
+# Remove this block for the "Pages + separate Worker" split (then set WS_BASE in the client).
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+# One Durable Object instance per room (addressed by room code).
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "RoomDO"
+
+# SQLite-backed DO class (no storage used, but this backing is required for the free plan).
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDO"]

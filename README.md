@@ -15,11 +15,28 @@ Then open **http://localhost:3000** in a browser.
 - **Play over the internet:** run the server on a host reachable by the others (a VPS, or a tunnel such as `ngrok http 3000` / Cloudflare Tunnel) and share that URL.
 - **Solo:** create a room and just click **Start** — the three empty seats become AI.
 
+## Deploy to Cloudflare (online, free)
+
+The realtime backend also runs on **Cloudflare Workers + Durable Objects** — one Durable Object per room holds the authoritative state, so it works globally with no server to manage. The free plan covers it.
+
+```bash
+npm install
+npx wrangler login      # one-time
+npm run deploy          # wrangler deploy
+```
+
+That deploys a single Worker that serves the **static client** (`public/`) *and* the realtime backend on the same origin — open the printed `*.workers.dev` URL and play. Local preview: `npm run dev` (runs the Worker + Durable Object under Miniflare at `127.0.0.1:8787`).
+
+**Pages + separate Worker (optional split):** if you'd rather host the client on Cloudflare **Pages** and run only the backend as a Worker: remove the `[assets]` block from `wrangler.toml`, set `WS_BASE` near the top of `public/index.html` to your Worker's URL (e.g. `wss://trump-multiplayer.<you>.workers.dev`), `npm run deploy` the Worker, and deploy `public/` to Pages.
+
+> Notes: rooms are addressed by their 4‑letter code (`/ws?room=CODE`), which the client mints on **Create**/**Solo** — a code collision across two simultaneous "create" actions is ~1-in-900k and just joins you to the same room. Game state lives in the Durable Object's memory; if **everyone** disconnects mid-match the room is cleaned up (same as restarting the local server). `node server.js` still works unchanged for LAN play.
+
 ## How it works
 
 - **`engine.js`** — the authoritative game logic (deal, auction, trump/partner call, trick play, AI, scoring). Pure functions over a game object; no I/O.
 - **`server.js`** — HTTP (serves the client) + WebSocket. Holds the authoritative state per room, assigns seats, fills empty/disconnected seats with AI, and sends each client a **redacted view that contains only their own hand** (opponents are card counts). Validates every action server-side.
 - **`public/index.html`** — the networked client. A thin view rendered from server state, rotated so you always sit at the bottom. Lobby with room codes; reconnect is automatic (your seat is held and AI-played while you're away).
+- **`src/worker.js`** + **`wrangler.toml`** — the Cloudflare deploy. `worker.js` reuses `engine.js` verbatim and ports `server.js`'s room logic into a `RoomDO` Durable Object (one per room); the Worker routes `/ws?room=CODE` to it and serves the static client. `server.js` remains the equivalent backend for local/LAN play.
 
 The original offline single-player version remains at **`index.html`** in the repo root (double-click to play vs. AI with no server).
 

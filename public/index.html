@@ -225,15 +225,22 @@ let humanBidValue = null, bidCtxKey = null, reconnectTimer = null, wantConnected
 let autoStartSolo = false, startingSolo = false; // one-click "Play vs 3 Bots"
 
 // ---------- networking ----------
+// Production "Pages + separate Worker" split: set WS_BASE to the Worker's URL,
+// e.g. "wss://trump-multiplayer.<your-subdomain>.workers.dev".
+// Leave "" for same-origin (single Worker w/ static assets, or local `node server.js`).
+const WS_BASE = "";
+const mintCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 4; i++) s += A[Math.floor(Math.random() * A.length)]; return s; };
 function connect(name, code) {
   wantConnected = true;
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}`);
+  if (!code) code = mintCode();   // create/solo: mint a room code (the DO is routed by it before the socket opens)
+  roomCode = code;
+  const base = WS_BASE || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
+  ws = new WebSocket(`${base}/ws?room=${encodeURIComponent(code)}`);
   ws.onopen = () => {
     $("conn").classList.remove("show");
     let pid = null; // only auto-resume a recent session token (avoids hijacking a stale one on a shared device)
-    if (code) { const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code); }
-    ws.send(JSON.stringify({ type: "join", room: code || "", name, playerId: pid || null }));
+    const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code);
+    ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null }));
   };
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
   ws.onclose = () => { if (wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
