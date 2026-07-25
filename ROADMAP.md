@@ -75,10 +75,10 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M3.
 
 ### M4 — Engine: difficulty levels + PIMC hard AI + targetDeals
-- [ ] D3 + D7 implemented in `engine.js` (determinize with void/called-card constraints, rollout, argmax).
-- [ ] `test/ai.test.js`: hard AI returns legal moves under budget; determinizer respects voids/known cards;
+- [x] D3 + D7 implemented in `engine.js` (determinize with void/called-card constraints, rollout, argmax).
+- [x] `test/ai.test.js`: hard AI returns legal moves under budget; determinizer respects voids/known cards;
       hard beats easy in ≥60% of 40 head-to-head matches (seeded by Math.random, tolerance-checked).
-- [ ] Commit M4.
+- [x] Commit M4.
 
 ### M5 — Protocol features (turn timer, ready flow, chat, seats, kick, settings)
 - [ ] D4, D5, D6 in room.js + both adapters; tests for: timer fires -> AI move + away; ready gate; chat ring;

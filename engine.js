@@ -44,7 +44,7 @@ function legalCards(G, p) {
 function sideOf(G, p) { return (p === G.declarer || p === G.partner) ? "D" : "O"; }
 function defenders(G) { return [0,1,2,3].filter(p => p !== G.declarer && p !== G.partner); }
 function name(G, p) { return (G.names && G.names[p]) || ["South","West","North","East"][p]; }
-function logG(G, text, cls) { G.log.push({ text, cls: cls || "" }); if (G.log.length > 80) G.log.shift(); }
+function logG(G, text, cls) { if (G._silent) return; G.log.push({ text, cls: cls || "" }); if (G.log.length > 80) G.log.shift(); }
 
 // ============================================================
 //  Lifecycle
@@ -60,7 +60,7 @@ function createMatch(names, opts) {
     teamsRevealed: false, bonusSuit: null,
     trick: [], leadSuit: null, turn: 0, leader: 0, trickNumber: 0,
     tricksWon: [0,0,0,0], capturedPoints: [0,0,0,0], lastWinner: -1, lastWinnerSlot: -1,
-    lastResult: null, log: [],
+    lastResult: null, log: [], playedCards: [], voids: [{}, {}, {}, {}],
   };
 }
 function startMatch(G) {
@@ -88,6 +88,7 @@ function deal(G) {
   G.bonusSuit = SUITS[Math.floor(Math.random() * SUITS.length)];
   G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
   G.lastWinner = -1; G.lastWinnerSlot = -1;
+  G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
   G.hands.forEach(h => sortHand(h, null));
   G.bidActive = [0,1,2,3]; G.highBid = null; G.highBidder = null;
   G.bidTurn = (G.dealer + 1) % NUM_PLAYERS; G.phase = "bidding";
@@ -180,10 +181,12 @@ function applyPlay(G, p, card) {
   const idx = hand.findIndex(c => sameCard(c, card));
   if (idx === -1) return;
   hand.splice(idx, 1);
+  if (G.trick.length > 0 && card.suit !== G.leadSuit && G.voids) G.voids[p][G.leadSuit] = true; // public: p is out of the led suit
+  if (G.playedCards) G.playedCards.push(card);
   if (G.trick.length === 0) G.leadSuit = card.suit;
   G.trick.push({ player: p, card });
   G.turn = (p + 1) % NUM_PLAYERS;
-  logG(G, `${name(G, p)} plays ${cardStr(card)}${sameCard(card, G.calledCard) ? " (the called card!)" : ""}`);
+  if (!G._silent) logG(G, `${name(G, p)} plays ${cardStr(card)}${sameCard(card, G.calledCard) ? " (the called card!)" : ""}`);
   if (G.trick.length === NUM_PLAYERS) resolveTrick(G);
 }
 function resolveTrick(G) {
@@ -192,7 +195,7 @@ function resolveTrick(G) {
   const tp = trickPoints(G, G.trick);
   G.tricksWon[winner]++; G.capturedPoints[winner] += tp;
   G.lastWinnerSlot = wIdx; G.lastWinner = winner;
-  logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
+  if (!G._silent) logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
   G.phase = "trickEnd";
 }
 function advanceTrick(G) {
@@ -208,7 +211,7 @@ function endRound(G) {
   const made = dPts >= G.bid;
   const winners = made ? [G.declarer, G.partner] : defenders(G);
   winners.forEach(p => G.scores[p]++);
-  logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
+  if (!G._silent) logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
   G.lastResult = { made, dPts, bid: G.bid, winners: winners.slice(), declarer: G.declarer, partner: G.partner };
   G.phase = G.scores.some(s => s >= (G.targetGames || TARGET_GAMES)) ? "matchOver" : "roundEnd";
 }
@@ -346,8 +349,109 @@ function aiActionFor(G, seat, difficulty) {
   if (ra.kind === "play") return { type: "play", card: hard ? choosePIMCCard(G, seat) : chooseAICard(G, seat, easy) };
   return null;
 }
-/* Placeholder until the PIMC search lands (M4): hard falls back to the heuristic. */
-function choosePIMCCard(G, seat) { return chooseAICard(G, seat, false); }
+// ============================================================
+//  Hard AI — PIMC (Perfect Information Monte Carlo)
+//  Sample determinizations of the unseen cards consistent with the
+//  public facts (played cards, revealed voids, the called card's
+//  holder), roll every legal move out with the heuristic AI, and
+//  pick the move with the best mean outcome for our side.
+// ============================================================
+const cardKey = c => c.suit + c.rank;
+
+/* Deal the unseen cards to the other three seats, honoring hand counts,
+   observed voids, and the called card's known holder. Falls back to
+   ignoring voids if constrained sampling keeps failing (rare). */
+function determinize(G, me) {
+  const seen = new Set(G.hands[me].map(cardKey));
+  for (const c of (G.playedCards || [])) seen.add(cardKey(c));
+  const unseen = buildDeck().filter(c => !seen.has(cardKey(c)));
+  const others = [0, 1, 2, 3].filter(p => p !== me);
+  const voids = G.voids || [{}, {}, {}, {}];
+
+  let forcedTo = null;
+  if (G.calledCard && G.partner != null && G.partner !== me &&
+      unseen.some(c => sameCard(c, G.calledCard))) forcedTo = G.partner;
+
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const useVoids = attempt < 20;
+    const need = {}; others.forEach(p => { need[p] = G.hands[p].length; });
+    const out = {}; others.forEach(p => { out[p] = []; });
+    const pool = shuffle(unseen.slice());
+    let ok = true;
+    if (forcedTo != null && need[forcedTo] > 0) {
+      const i = pool.findIndex(c => sameCard(c, G.calledCard));
+      out[forcedTo].push(pool.splice(i, 1)[0]); need[forcedTo]--;
+    }
+    // most-constrained cards first, then the rest
+    pool.sort((a, b) => allowedCount(a) - allowedCount(b));
+    function allowedCount(c) { return others.reduce((n, p) => n + (useVoids && voids[p][c.suit] ? 0 : 1), 0); }
+    for (const c of pool) {
+      const cand = others.filter(p => need[p] > 0 && !(useVoids && voids[p][c.suit]));
+      if (!cand.length) { ok = false; break; }
+      const p = cand[Math.floor(Math.random() * cand.length)];
+      out[p].push(c); need[p]--;
+    }
+    if (ok && others.every(p => need[p] === 0)) return out;
+  }
+  return null; // pathological; caller falls back to the heuristic
+}
+
+function rolloutClone(G) {
+  return {
+    _silent: true,
+    phase: G.phase, trump: G.trump, bonusSuit: G.bonusSuit,
+    declarer: G.declarer, partner: G.partner, teamsRevealed: true, bid: G.bid,
+    calledCard: G.calledCard, dealer: G.dealer, roundNumber: G.roundNumber,
+    hands: G.hands.map(h => h.slice()),
+    trick: G.trick.map(t => ({ player: t.player, card: t.card })),
+    leadSuit: G.leadSuit, turn: G.turn, leader: G.leader, trickNumber: G.trickNumber,
+    tricksWon: G.tricksWon.slice(), capturedPoints: G.capturedPoints.slice(),
+    scores: G.scores.slice(), names: G.names, log: [],
+    lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot, lastResult: null,
+    targetGames: G.targetGames,
+  };
+}
+function playOutRound(sim) {
+  for (let guard = 0; guard < 300; guard++) {
+    if (sim.phase === "trickEnd") { advanceTrick(sim); continue; }
+    if (sim.phase !== "playing") return;
+    applyPlay(sim, sim.turn, chooseAICard(sim, sim.turn, false));
+  }
+}
+
+function choosePIMCCard(G, me, opts) {
+  const legal = legalCards(G, me);
+  if (legal.length <= 1) return legal[0];
+  const timeMs = (opts && opts.timeMs) || 25;
+  const maxDet = (opts && opts.determinizations) || 24;
+  const started = Date.now();
+  const iAmDeclaring = sideOf(G, me) === "D";
+  const totals = legal.map(() => 0), counts = legal.map(() => 0);
+
+  for (let d = 0; d < maxDet; d++) {
+    if (d >= 4 && Date.now() - started > timeMs) break;
+    const world = determinize(G, me);
+    if (!world) return chooseAICard(G, me, false);
+    for (let i = 0; i < legal.length; i++) {
+      const sim = rolloutClone(G);
+      for (const p of [0, 1, 2, 3]) if (p !== me) sim.hands[p] = world[p].slice();
+      applyPlay(sim, me, legal[i]);
+      playOutRound(sim);
+      const dPts = sim.capturedPoints[sim.declarer] + sim.capturedPoints[sim.partner];
+      const made = dPts >= sim.bid;
+      const win = (iAmDeclaring === made) ? 1 : 0;
+      const margin = iAmDeclaring ? dPts : TOTAL_POINTS - dPts;
+      totals[i] += win * 1000 + margin; counts[i]++;
+    }
+  }
+  let best = 0, bestAvg = -Infinity;
+  for (let i = 0; i < legal.length; i++) {
+    if (!counts[i]) continue;
+    const avg = totals[i] / counts[i];
+    if (avg > bestAvg) { bestAvg = avg; best = i; }
+  }
+  return legal[best];
+}
 
 /* Public, hand-free snapshot safe to send to anyone. */
 function publicView(G) {
@@ -374,4 +478,5 @@ module.exports = {
   applyPlay, playIsLegal, advanceTrick, legalCards,
   aiActionFor, requiredActor, publicView,
   cardPoints, sameCard, sideOf, defenders, cardStr, rankLabel,
+  choosePIMCCard, _determinize: determinize,
 };
