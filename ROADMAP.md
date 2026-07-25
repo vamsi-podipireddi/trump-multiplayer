@@ -69,10 +69,10 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M2.
 
 ### M3 — Durable Object: hibernation + persistence + alarms
-- [ ] `src/worker.js` rewritten per D2 on room.js. Rate-limit via in-memory WeakMap (resets on wake — fine).
-- [ ] Newest-socket-wins via attachment pid scan.
-- [ ] Manual check: `npx wrangler dev` boots, ws round-trip works (curl upgrade smoke or unit-level).
-- [ ] Commit M3.
+- [x] `src/worker.js` rewritten per D2 on room.js. Rate-limit via in-memory WeakMap (resets on wake — fine).
+- [x] Newest-socket-wins via attachment pid scan.
+- [x] Manual check: `npx wrangler dev` boots, ws round-trip works (curl upgrade smoke or unit-level).
+- [x] Commit M3.
 
 ### M4 — Engine: difficulty levels + PIMC hard AI + targetDeals
 - [ ] D3 + D7 implemented in `engine.js` (determinize with void/called-card constraints, rollout, argmax).
