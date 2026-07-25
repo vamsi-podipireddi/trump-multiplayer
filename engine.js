@@ -49,8 +49,9 @@ function logG(G, text, cls) { G.log.push({ text, cls: cls || "" }); if (G.log.le
 // ============================================================
 //  Lifecycle
 // ============================================================
-function createMatch(names) {
+function createMatch(names, opts) {
   return {
+    targetGames: opts && [3, 5, 7].includes(opts.targetDeals) ? opts.targetDeals : TARGET_GAMES,
     phase: "lobby", dealer: 0, roundNumber: 0, scores: [0,0,0,0],
     names: names ? names.slice() : ["South","West","North","East"],
     hands: [[],[],[],[]],
@@ -209,7 +210,7 @@ function endRound(G) {
   winners.forEach(p => G.scores[p]++);
   logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
   G.lastResult = { made, dPts, bid: G.bid, winners: winners.slice(), declarer: G.declarer, partner: G.partner };
-  G.phase = G.scores.some(s => s >= TARGET_GAMES) ? "matchOver" : "roundEnd";
+  G.phase = G.scores.some(s => s >= (G.targetGames || TARGET_GAMES)) ? "matchOver" : "roundEnd";
 }
 
 // ============================================================
@@ -332,16 +333,21 @@ function requiredActor(G) {
     default: return null;
   }
 }
-/* The action an AI would take for the seat that currently must act. */
-function aiActionFor(G, seat, easy) {
+/* The action an AI would take for the seat that currently must act.
+   difficulty: "easy" | "normal" | "hard" (legacy boolean easy also accepted). */
+function aiActionFor(G, seat, difficulty) {
+  const easy = difficulty === true || difficulty === "easy";
+  const hard = difficulty === "hard";
   const ra = requiredActor(G);
   if (!ra || ra.seat !== seat) return null;
   if (ra.kind === "bid") return { type: "bid", value: aiBidDecision(G, seat, easy) };
   if (ra.kind === "trump") return { type: "trump", suit: aiPickTrump(G, seat) };
   if (ra.kind === "call") return { type: "call", card: aiPickPartner(G, seat) };
-  if (ra.kind === "play") return { type: "play", card: chooseAICard(G, seat, easy) };
+  if (ra.kind === "play") return { type: "play", card: hard ? choosePIMCCard(G, seat) : chooseAICard(G, seat, easy) };
   return null;
 }
+/* Placeholder until the PIMC search lands (M4): hard falls back to the heuristic. */
+function choosePIMCCard(G, seat) { return chooseAICard(G, seat, false); }
 
 /* Public, hand-free snapshot safe to send to anyone. */
 function publicView(G) {
@@ -356,7 +362,7 @@ function publicView(G) {
     lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot,
     handCounts: G.hands.map(h => h.length), names: G.names.slice(),
     log: G.log.slice(-40), lastResult: G.lastResult || null,
-    consts: { MIN_BID, MAX_BID, BID_STEP, TOTAL_POINTS, TARGET_GAMES, NUM_PLAYERS },
+    consts: { MIN_BID, MAX_BID, BID_STEP, TOTAL_POINTS, TARGET_GAMES: G.targetGames || TARGET_GAMES, NUM_PLAYERS },
   };
 }
 

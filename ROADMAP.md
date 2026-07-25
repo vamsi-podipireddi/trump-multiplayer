@@ -58,15 +58,15 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M1.
 
 ### M2 — room.js extraction (node backend on shared core)
-- [ ] `room.js` per D1 with: createRoom, join, disconnect, handleMessage (all existing + new types stubbed),
+- [x] `room.js` per D1 with: createRoom, join, disconnect, handleMessage (all existing + new types stubbed),
       buildView, nextTimer/fireTimers (ai/trick/round/lobbyDrop/turnLimit/roundReady kinds), host reassign,
       spectator promotion, seat release.
-- [ ] `server.js` rewritten as adapter (ws + setTimeout + rooms Map + per-IP cap + Origin check + static
+- [x] `server.js` rewritten as adapter (ws + setTimeout + rooms Map + per-IP cap + Origin check + static
       serving of `public/*` incl. manifest/sw).
-- [ ] `test/room.test.js`: redaction property over full simulated games with 4 fake clients; fuzz
+- [x] `test/room.test.js`: redaction property over full simulated games with 4 fake clients; fuzz
       handleMessage with 5k garbage messages (no throw, no foreign-hand leak); host reassign; reconnect
       newest-socket-wins; kick; sit/stand.
-- [ ] Commit M2.
+- [x] Commit M2.
 
 ### M3 — Durable Object: hibernation + persistence + alarms
 - [ ] `src/worker.js` rewritten per D2 on room.js. Rate-limit via in-memory WeakMap (resets on wake — fine).
