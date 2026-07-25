@@ -38,9 +38,25 @@
   .seatrow .tag { font-size:10px; letter-spacing:1px; opacity:.6; min-width:46px; }
   .seatrow .who { font-weight:700; }
   .seatrow.you { border-color:var(--gold); }
-  .seatrow .pill { margin-left:auto; font-size:10px; letter-spacing:1px; padding:2px 8px; border-radius:10px; }
+  .seatrow .pill { font-size:10px; letter-spacing:1px; padding:2px 8px; border-radius:10px; }
+  .seatrow .spacer { margin-left:auto; }
   .pill.open { background:rgba(255,255,255,.12); } .pill.ai { background:#6fa8ff; color:#07150d; } .pill.on { background:#7fd6a0; color:#07150d; } .pill.off { background:#c97; color:#07150d; }
   .code-big { font-size:34px; letter-spacing:8px; color:var(--gold); font-weight:800; text-align:center; padding:6px 0; }
+  .mini-btn { font:inherit; font-size:11px; letter-spacing:1px; cursor:pointer; border-radius:7px; padding:5px 10px; min-height:30px; font-weight:700;
+    background:transparent; color:var(--gold); border:1px solid var(--gold); }
+  .mini-btn:hover { background:rgba(232,196,90,.15); }
+  .mini-btn.danger { color:#ff9a9a; border-color:#ff9a9a; } .mini-btn.danger:hover { background:rgba(255,154,154,.15); }
+  .mini-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+  /* ---- lobby settings ---- */
+  .settings { display:flex; flex-direction:column; gap:10px; margin:2px 0 16px; }
+  .setrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .setrow > .lbl { font-size:11px; letter-spacing:1px; opacity:.75; min-width:88px; }
+  .segbtn { font:inherit; font-size:12px; cursor:pointer; border-radius:7px; padding:5px 10px; min-height:30px; font-weight:700;
+    background:rgba(255,255,255,.06); color:#f3f3f3; border:1px solid rgba(255,255,255,.18); }
+  .segbtn[aria-pressed="true"] { background:var(--gold); color:var(--ink); border-color:var(--gold); }
+  .segbtn:disabled { cursor:default; } .segbtn:disabled:not([aria-pressed="true"]) { opacity:.45; }
+  .setval { font-size:13px; font-weight:700; color:var(--gold); }
 
   /* ---- Game ---- */
   #game { height:100vh; display:none; grid-template-columns:1fr 290px; grid-template-rows:auto 1fr; }
@@ -125,6 +141,38 @@
   #log .entry { opacity:.9; margin-bottom:3px; } #log .entry.win { color:var(--gold); font-weight:600; } #log .entry.bid { color:#9fd; }
   #log .entry.round { color:#7fd6a0; font-weight:700; border-top:1px dashed rgba(255,255,255,.15); padding-top:6px; margin-top:4px; }
 
+  /* ---- chat + emotes ---- */
+  #chat-section { display:flex; flex-direction:column; min-height:0; flex:1; border-top:1px solid rgba(255,255,255,.07); }
+  #chat-log { flex:1; overflow-y:auto; font-size:12.5px; line-height:1.45; padding:8px 14px; min-height:60px; }
+  #chat-log .msg { margin-bottom:4px; word-break:break-word; }
+  #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:#7fd6a0; }
+  #chat-log .empty { opacity:.5; font-style:italic; }
+  #emote-bar { display:flex; gap:4px; padding:4px 10px 0; flex-wrap:wrap; }
+  .emote-btn { font-size:17px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    border-radius:8px; min-width:40px; min-height:34px; padding:4px; }
+  .emote-btn:hover { background:rgba(232,196,90,.2); }
+  #chat-form { display:flex; gap:6px; padding:8px 10px 10px; }
+  #chat-input { flex:1; min-width:0; font:inherit; font-size:13px; padding:8px 10px; min-height:36px; border-radius:8px;
+    border:1px solid rgba(255,255,255,.2); background:#0c2417; color:#fff; }
+  #chat-send { font:inherit; font-size:13px; font-weight:700; cursor:pointer; border:none; border-radius:8px; padding:0 12px; min-height:36px; background:var(--gold); color:var(--ink); }
+  .float-emote { position:absolute; bottom:100%; left:50%; font-size:30px; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; }
+  @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
+    100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }
+
+  /* ---- away / autopilot ---- */
+  #awaybar { position:fixed; top:0; left:0; right:0; z-index:290; display:none; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
+    background:#8a5a12; color:#fff; font-size:13.5px; padding:8px 14px; text-align:center; }
+  #awaybar.show { display:flex; }
+  #awaybar button { font:inherit; font-size:13px; font-weight:800; cursor:pointer; border:none; border-radius:8px; padding:8px 16px; min-height:36px; background:#fff; color:var(--ink); }
+  .seat.away-seat .nameplate { opacity:.6; } .seat .zzz { font-size:11px; opacity:.8; }
+
+  /* ---- turn timer ring ---- */
+  .ring { width:20px; height:20px; border-radius:50%; flex:none;
+    background:conic-gradient(var(--gold) calc(var(--p,1) * 360deg), rgba(255,255,255,.18) 0); position:relative; }
+  .ring::after { content:""; position:absolute; inset:3px; border-radius:50%; background:#123; }
+  .ring.urgent { background:conic-gradient(#ff6b6b calc(var(--p,1) * 360deg), rgba(255,255,255,.18) 0); }
+  .act-btn.ready { background:#7fd6a0; } .act-btn.ready:disabled { opacity:.55; cursor:default; }
+
   #overlay { position:fixed; inset:0; background:rgba(0,0,0,.72); display:none; align-items:center; justify-content:center; z-index:100; }
   #overlay.show { display:flex; } .modal { background:linear-gradient(180deg,#15321f,#0b2014); border:2px solid var(--gold); border-radius:16px; padding:26px 32px; max-width:480px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.6); }
   .modal h2 { margin:0 0 10px; color:var(--gold); letter-spacing:2px; } .modal p { margin:8px 0; line-height:1.5; font-size:14px; } .modal .big { font-size:22px; font-weight:800; }
@@ -174,6 +222,8 @@
     <div class="code-big" id="lobby-code">----</div>
     <p class="muted" style="text-align:center;margin-top:0;">Share this code with friends to join.</p>
     <div class="seatlist" id="lobby-seats"></div>
+    <h2>TABLE SETTINGS</h2>
+    <div class="settings" id="lobby-settings"></div>
     <div id="lobby-controls"></div>
     <p class="muted" id="lobby-note"></p>
   </div>
@@ -191,6 +241,7 @@
       <div class="deal" id="contract-text">—</div>
     </div>
     <button class="ghost" id="btn-help">How to Play</button>
+    <button class="ghost" id="btn-stand" title="Give up your seat — an AI takes over">Stand Up</button>
     <button class="ghost" id="btn-leave">Leave</button>
   </header>
   <div id="table-wrap">
@@ -204,11 +255,24 @@
   </div>
   <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
   <aside>
-    <div class="panel-section"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div></div>
+    <div class="panel-section"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
     <div class="panel-section" style="flex:1;display:flex;flex-direction:column;min-height:0;"><h2>TABLE LOG</h2><div id="log"></div></div>
+    <div id="chat-section" class="panel-section" style="padding:11px 0 0;">
+      <h2 style="padding:0 14px;">CHAT</h2>
+      <div id="chat-log" aria-live="polite"></div>
+      <div id="emote-bar"></div>
+      <form id="chat-form" autocomplete="off">
+        <input id="chat-input" maxlength="200" placeholder="Say something…" aria-label="Chat message" />
+        <button id="chat-send" type="submit">Send</button>
+      </form>
+    </div>
   </aside>
 </div>
 
+<div id="awaybar">
+  <span>💤 You're away — an AI is playing your seat.</span>
+  <button id="btn-back">I'm back</button>
+</div>
 <div id="overlay"><div class="modal" id="modal"></div></div>
 <div id="toast"></div>
 
@@ -219,10 +283,15 @@ const SUITS = ["♠","♥","♦","♣"], RED = new Set(["♥","♦"]);
 const POS_CLASS = ["south","west","north","east"]; // pos 0..3 relative to viewer
 const rankLabel = r => ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r);
 const cardStr = c => rankLabel(c.rank) + c.suit;
+const EMOTES = ["👏","😂","😱","🔥","🤝","💀"];                      // must match room.js EMOTES
+const DIFF_OPTS = [["easy","Easy"],["normal","Normal"],["hard","Hard"]];
+const DEAL_OPTS = [3,5,7];
+const TIMER_OPTS = [0,15,30,45,60,90];
 
 let ws = null, view = null, myPid = null, mySeat = null, roomCode = null;
 let humanBidValue = null, bidCtxKey = null, reconnectTimer = null, wantConnected = false;
 let autoStartSolo = false, startingSolo = false; // one-click "Play vs 3 Bots"
+let serverSkew = 0;   // Date.now() - server now; keeps deadlines honest across clock drift
 
 // ---------- networking ----------
 // Production "Pages + separate Worker" split: set WS_BASE to the Worker's URL,
@@ -259,12 +328,16 @@ function onMsg(m) {
     history.replaceState(null, "", "?room=" + m.room);
   } else if (m.type === "state") {
     view = m.view; mySeat = view.you.seat;
+    if (typeof view.now === "number") serverSkew = Date.now() - view.now;
     if (autoStartSolo && !view.room.started && view.room.isHost) { autoStartSolo = false; send({ type: "start" }); }
     render();
+  } else if (m.type === "emote") {
+    showEmote(m.seat, m.e);
   } else if (m.type === "error") {
     toast(m.message);
   }
 }
+const serverNow = () => Date.now() - serverSkew;
 const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 
 // ---------- join UI ----------
@@ -302,8 +375,11 @@ function render() {
   if (view.room.started) startingSolo = false;
   if (!view.room.started) { $("join-screen").classList.remove("show"); $("lobby-screen").classList.add("show"); $("game").style.display = "none"; renderLobby(); }
   else { $("join-screen").classList.remove("show"); $("lobby-screen").classList.remove("show"); $("game").style.display = "grid"; renderGame(); }
+  $("awaybar").classList.toggle("show", !!(view.room.started && view.you.away));
+  $("btn-stand").style.display = view.room.started && !view.you.spectator ? "" : "none";
   const ok = $("overlay").dataset.kind;
-  if (view.phase === "matchOver") { if (ok !== "help" && ok !== "match") showMatchOver(); }
+  if (ok === "settings" && $("modal-settings")) renderSettings($("modal-settings"), !!view.room.isHost); // keep open, refresh pressed states
+  else if (view.phase === "matchOver") { if (ok !== "help" && ok !== "match") showMatchOver(); }
   else if (ok !== "help") hideOverlay();
 }
 
@@ -311,22 +387,64 @@ function render() {
 function renderLobby() {
   $("lobby-code").textContent = view.room.code;
   const list = $("lobby-seats"); list.innerHTML = "";
+  const isHost = view.room.isHost;
   view.seats.forEach(s => {
     const row = document.createElement("div");
     row.className = "seatrow" + (s.you ? " you" : "");
-    let pill = s.isHuman ? `<span class="pill on">${s.you ? "YOU" : "READY"}</span>` : `<span class="pill open">OPEN → AI</span>`;
-    row.innerHTML = `<span class="tag">${s.label}</span><span class="who">${s.name ? esc(s.name) : "—"}</span>${pill}`;
+    const host = view.room.hostSeat === s.seat ? ` <span class="pill on">HOST</span>` : "";
+    const pill = s.isHuman
+      ? `<span class="pill ${s.connected ? "on" : "off"}">${s.you ? "YOU" : (s.connected ? "HERE" : "AWAY")}</span>`
+      : `<span class="pill open">OPEN → AI</span>`;
+    row.innerHTML = `<span class="tag">${s.label}</span><span class="who">${s.name ? esc(s.name) : "—"}</span>${host}<span class="spacer"></span>${pill}`;
+    if (s.you) row.appendChild(miniBtn("Stand", "", () => send({ type: "stand" })));
+    else if (!s.isHuman) row.appendChild(miniBtn("Sit here", "", () => send({ type: "sit", seat: s.seat })));
+    else if (isHost) row.appendChild(miniBtn("Kick", "danger", () => { if (confirm(`Remove ${s.name} from the table?`)) send({ type: "kick", seat: s.seat }); }));
     list.appendChild(row);
   });
+  renderSettings($("lobby-settings"), isHost);
+
   const ctrl = $("lobby-controls"); ctrl.innerHTML = "";
-  if (view.you.spectator) { ctrl.innerHTML = `<p class="muted">All four seats are taken — you'll spectate this match.</p>`; }
-  else if (view.room.isHost) {
+  if (view.you.spectator) {
+    const p = document.createElement("p"); p.className = "muted";
+    p.textContent = "You're spectating — take any open seat above to play.";
+    ctrl.appendChild(p);
+  }
+  if (isHost) {
     const b = document.createElement("button"); b.className = "btn"; b.style.width = "100%"; b.textContent = "Start Game (fill empty seats with AI)";
     b.onclick = () => send({ type: "start" }); ctrl.appendChild(b);
   } else {
-    ctrl.innerHTML = `<p class="muted" style="text-align:center;">Waiting for <b>${esc(view.room.hostName || "host")}</b> to start…</p>`;
+    const p = document.createElement("p"); p.className = "muted"; p.style.textAlign = "center";
+    p.innerHTML = `Waiting for <b>${esc(view.room.hostName || "host")}</b> to start…`;
+    ctrl.appendChild(p);
   }
-  $("lobby-note").textContent = `${view.room.humans} player${view.room.humans === 1 ? "" : "s"} here. Empty seats become AI when the game starts.`;
+  const spec = view.room.spectators;
+  $("lobby-note").textContent = `${view.room.humans} seated${spec ? `, ${spec} spectating` : ""}. Empty seats become AI when the game starts.`;
+}
+function miniBtn(label, cls, fn) {
+  const b = document.createElement("button");
+  b.className = "mini-btn " + (cls || ""); b.textContent = label; b.onclick = fn;
+  return b;
+}
+/* Settings are host-driven; everyone else sees the same rows, read-only. */
+function renderSettings(host_el, isHost) {
+  const st = view.settings || {}; host_el.innerHTML = "";
+  const seg = (label, opts, cur, key, live) => {
+    const row = document.createElement("div"); row.className = "setrow";
+    const l = document.createElement("span"); l.className = "lbl"; l.textContent = label; row.appendChild(l);
+    const editable = isHost && (live || !view.room.started);
+    opts.forEach(([val, text]) => {
+      const b = document.createElement("button");
+      b.className = "segbtn"; b.type = "button"; b.textContent = text;
+      b.setAttribute("aria-pressed", String(val === cur));
+      if (editable) b.onclick = () => send({ type: "settings", [key]: val });
+      else b.disabled = true;
+      row.appendChild(b);
+    });
+    host_el.appendChild(row);
+  };
+  seg("AI SKILL", DIFF_OPTS, st.difficulty, "difficulty", true); // difficulty may change mid-match
+  seg("DEALS TO WIN", DEAL_OPTS.map(n => [n, String(n)]), st.targetDeals, "targetDeals", false);
+  seg("TURN TIMER", TIMER_OPTS.map(n => [n, n === 0 ? "Off" : n + "s"]), st.turnTimerSec, "turnTimerSec", true);
 }
 
 // ---------- card elements ----------
@@ -358,6 +476,7 @@ function roleOf(seat) {
 }
 function renderGame() {
   const c = view.consts;
+  ringEl = null; // rebuilt below if the active seat is on the clock
   // contract badge
   const ts = $("trump-sym");
   if (view.trump) { ts.textContent = view.trump; ts.className = "sym " + (RED.has(view.trump) ? "red" : "black"); } else { ts.textContent = "—"; ts.className = "sym"; }
@@ -381,10 +500,17 @@ function renderGame() {
     const np = el.querySelector(".nameplate");
     np.querySelector("span").textContent = info.name || info.label;
     np.querySelector(".role")?.remove();
+    np.querySelector(".ring")?.remove();
     const role = roleOf(seat);
     if (role) { const r = document.createElement("span"); r.className = "role " + role.c; r.textContent = role.t; np.appendChild(r); }
+    if (seat === act && view.turnDeadline != null && info.isHuman && info.connected && !info.away) {
+      const ring = document.createElement("span"); ring.className = "ring"; ring.title = "Turn timer";
+      np.appendChild(ring); ringEl = ring;
+    }
     np.classList.toggle("off", info.isHuman && !info.connected);
-    el.querySelector(".meta").innerHTML = `<b>${view.capturedPoints[seat]}</b> pts · ${view.scores[seat]} ${view.scores[seat] === 1 ? "deal" : "deals"}`;
+    el.classList.toggle("away-seat", !!info.away);
+    const zzz = info.away ? ` · <span class="zzz">💤 autopilot</span>` : (info.isHuman && !info.connected ? ` · <span class="zzz">offline</span>` : "");
+    el.querySelector(".meta").innerHTML = `<b>${view.capturedPoints[seat]}</b> pts · ${view.scores[seat]} ${view.scores[seat] === 1 ? "deal" : "deals"}${zzz}`;
     // card backs for everyone except your own seat
     const backs = el.querySelector("[data-backs]"); backs.innerHTML = "";
     const isMe = (mySeat != null && seat === mySeat);
@@ -413,6 +539,8 @@ function renderGame() {
   renderActionBar();
   renderScoreboard();
   renderLog();
+  renderChat();
+  tickTimers();
 }
 function renderHand() {
   const wrap = $("my-hand"); wrap.innerHTML = "";
@@ -446,6 +574,80 @@ function renderScoreboard() {
     const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
     cl.innerHTML = `Contract: <b>${view.bid}</b> pts ${suitSpan(view.trump)} · ${esc(view.names[view.declarer])} & ${esc(view.names[view.partner])} have <b>${dPts}</b>/${view.bid}`;
   } else cl.textContent = "";
+
+  const st = view.settings || {}, sl = $("settings-line");
+  const diffName = (DIFF_OPTS.find(d => d[0] === st.difficulty) || ["", "?"])[1];
+  sl.innerHTML = `AI <b>${diffName}</b> · timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b> · first to <b>${st.targetDeals}</b> `;
+  if (view.room.isHost) sl.appendChild(miniBtn("⚙ Change", "", showSettingsModal));
+}
+
+// ---------- chat + emotes ----------
+function renderChat() {
+  const box = $("chat-log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const msgs = view.chat || [];
+  box.innerHTML = msgs.length ? "" : `<div class="empty">No messages yet — say hi 👋</div>`;
+  msgs.forEach(m => {
+    const d = document.createElement("div");
+    d.className = "msg" + (m.seat != null && m.seat === mySeat ? " you" : "");
+    d.innerHTML = `<span class="from">${esc(m.from)}:</span> ${esc(m.text)}`;
+    box.appendChild(d);
+  });
+  if (atBottom) box.scrollTop = box.scrollHeight;
+  if (!$("emote-bar").children.length) {
+    EMOTES.forEach(e => {
+      const b = document.createElement("button");
+      b.className = "emote-btn"; b.type = "button"; b.textContent = e;
+      b.setAttribute("aria-label", "Send " + e + " reaction");
+      b.onclick = () => send({ type: "emote", e });
+      $("emote-bar").appendChild(b);
+    });
+  }
+  $("emote-bar").style.display = view.you.spectator ? "none" : ""; // seats only, per the server rule
+}
+/* Floating reaction over the sender's seat (transient — never part of state). */
+function showEmote(seat, e) {
+  if (typeof seat !== "number" || !view || !view.room.started) return;
+  const host = $("seat-" + POS_CLASS[posOfSeat(seat)]);
+  if (!host) return;
+  const d = document.createElement("div");
+  d.className = "float-emote"; d.textContent = e;
+  host.appendChild(d);
+  setTimeout(() => d.remove(), 2000);
+}
+$("chat-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const input = $("chat-input"), text = input.value.trim();
+  if (!text) return;
+  send({ type: "chat", text });
+  input.value = "";
+});
+$("btn-back").onclick = () => send({ type: "back" });
+$("btn-stand").onclick = () => {
+  if (confirm("Give up your seat? An AI will finish the match for you.")) send({ type: "stand" });
+};
+
+// ---------- live countdowns (deadlines are absolute server ms) ----------
+let ringEl = null, tickHandle = null;
+function tickTimers() {
+  if (!view || !view.room.started) return;
+  const now = serverNow();
+  if (ringEl && view.turnDeadline != null) {
+    const total = (view.settings.turnTimerSec || 45) * 1000;
+    const left = Math.max(0, view.turnDeadline - now);
+    ringEl.style.setProperty("--p", String(Math.max(0, Math.min(1, left / total))));
+    ringEl.classList.toggle("urgent", left <= 10000);
+    ringEl.title = `${Math.ceil(left / 1000)}s left`;
+  }
+  const rc = $("ready-count");
+  if (rc && view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((view.roundDeadline - now) / 1000))}s`;
+}
+tickHandle = setInterval(tickTimers, 250);
+
+function showSettingsModal() {
+  setModal("settings", `<h2>Table Settings</h2><div id="modal-settings" style="text-align:left;"></div><button id="btn-close-set">Done</button>`);
+  renderSettings($("modal-settings"), !!view.room.isHost);
+  $("btn-close-set").onclick = () => { hideOverlay(); render(); };
 }
 function renderLog() {
   const el = $("log"); el.innerHTML = "";
@@ -503,9 +705,19 @@ function renderActionBar() {
   }
   // not my turn / transitions
   if (view.phase === "playing" || view.phase === "trickEnd") { bannerForPlay(false); return; }
-  if (view.phase === "roundEnd" && view.lastResult) {
-    const r = view.lastResult;
-    text("banner", `${esc(view.names[r.declarer])} & ${esc(view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(view.names[p])).join(" & ")} win the deal — next deal soon…`);
+  if (view.phase === "roundEnd") {
+    if (view.lastResult) {
+      const r = view.lastResult;
+      text("banner", `${esc(view.names[r.declarer])} & ${esc(view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(view.names[p])).join(" & ")} win the deal.`);
+    }
+    const live = view.seats.filter(s => s.isHuman && s.connected && !s.away);
+    const ready = live.filter(s => s.ready).length;
+    if (!view.you.spectator) {
+      const b = button(view.you.ready ? `Ready ✓ — waiting ${ready}/${live.length}` : `Next deal — I'm ready (${ready}/${live.length})`,
+        "ready", () => send({ type: "ready" }));
+      b.disabled = !!view.you.ready;
+    }
+    text("status", `Next deal starts when everyone is ready — auto in <span id="ready-count">…</span>`);
     return;
   }
   text("status", `${phaseLabel()} — waiting for <b>${esc(view.names[activeSeat()] || "")}</b>`);

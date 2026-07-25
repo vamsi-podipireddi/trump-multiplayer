@@ -81,7 +81,8 @@ function applyFx(entry, fx, ws) {
   }
   if (fx.emote) for (const [, sock] of entry.socks) send(sock, { type: "emote", seat: fx.emote.seat, e: fx.emote.e });
   if (fx.broadcast) {
-    for (const [pid, sock] of entry.socks) send(sock, { type: "state", view: R.buildView(entry.state, pid) });
+    const now = Date.now();
+    for (const [pid, sock] of entry.socks) send(sock, { type: "state", view: R.buildView(entry.state, pid, now) });
   }
   if (fx.deleteRoom) deleteRoom(entry);
 }

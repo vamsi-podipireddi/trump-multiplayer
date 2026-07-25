@@ -144,10 +144,11 @@ export class RoomDO {
       for (const sock of this.ctx.getWebSockets()) { try { sock.send(msg); } catch {} }
     }
     if (fx.broadcast && this.room) {
+      const now = Date.now();
       for (const sock of this.ctx.getWebSockets()) {
         const att = this.att(sock);
         if (att && att.pid && this.room.players[att.pid])
-          this.send(sock, { type: "state", view: R.buildView(this.room, att.pid) });
+          this.send(sock, { type: "state", view: R.buildView(this.room, att.pid, now) });
       }
     }
     if (fx.deleteRoom) {

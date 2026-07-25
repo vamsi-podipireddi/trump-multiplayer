@@ -29,7 +29,8 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   turns instantly-ish with normal AI_DELAY). Any message from that player clears `away`.
 - **D5. Round flow**: `roundEnd` advances when ALL connected seated non-away humans sent `{type:"ready"}`,
   or 30s fallback timer, whichever first. `trickEnd` stays fixed short delay (1.6s).
-- **D6. Protocol additions** (client->server): `sit {seat}`, `stand {}`, `kick {pid}` (host),
+- **D6. Protocol additions** (client->server): `sit {seat}`, `stand {}`, `kick {seat}` (host; addressed by
+  seat, not pid — the client never learns other players' pids),
   `settings {difficulty?, targetDeals?, turnTimerSec?}` (host, lobby only; difficulty also allowed mid-match),
   `ready {}`, `chat {text ≤200}`, `emote {e}` (allowed set: 👏 😂 😱 🔥 🤝 💀), `back {}` (clear away).
   Server->client: `chat` entries ride in view (`v.chat`), `{type:"emote", seat, e}` transient,
@@ -86,10 +87,12 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M5.
 
 ### M6 — Client: lobby settings, chat, ready, seats, away
-- [ ] Lobby: settings panel (host), sit/stand on seat rows, kick buttons, difficulty/target/timer display for all.
-- [ ] Game: chat panel + emote bar + floating emotes, "Next deal — ready ✓/n" button, away banner ("I'm back"),
+- [x] Lobby: settings panel (host), sit/stand on seat rows, kick buttons, difficulty/target/timer display for all.
+- [x] Game: chat panel + emote bar + floating emotes, "Next deal — ready ✓/n" button, away banner ("I'm back"),
       turn-timer countdown ring on active nameplate, stand-up in menu.
-- [ ] Commit M6.
+- [x] `view.now` added so the client can de-skew `turnDeadline`/`roundDeadline`; `test/client.test.js` pins the
+      client↔core protocol vocabulary (message types, emote set, option lists, view fields) against drift.
+- [x] Commit M6.
 
 ### M7 — Client: mobile + PWA + a11y + share polish
 - [ ] Mobile ≤900px: scoreboard/log/chat as bottom-sheet tabs (no lost info), touch targets ≥40px.

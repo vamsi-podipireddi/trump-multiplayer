@@ -399,7 +399,9 @@ function handleGameAction(room, pid, msg, now, fx) {
 }
 
 // ---- per-viewer redacted view (the security boundary: no foreign hands) ----
-function buildView(room, pid) {
+/* `now` is echoed as v.now so the client can measure clock skew and render
+   the turn/round deadlines (absolute server ms) as honest countdowns. */
+function buildView(room, pid, now) {
   const G = room.G;
   const player = room.players[pid];
   const seat = player ? player.seat : null;
@@ -428,6 +430,7 @@ function buildView(room, pid) {
   };
   v.settings = Object.assign({}, room.settings);
   v.chat = room.chat.slice(-CHAT_RING);
+  v.now = typeof now === "number" ? now : null;
   const turnT = room.timers.find(t => t.kind === "turn");
   v.turnDeadline = turnT ? turnT.due : null;
   const roundT = room.timers.find(t => t.kind === "round");
