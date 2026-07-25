@@ -81,9 +81,9 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M4.
 
 ### M5 — Protocol features (turn timer, ready flow, chat, seats, kick, settings)
-- [ ] D4, D5, D6 in room.js + both adapters; tests for: timer fires -> AI move + away; ready gate; chat ring;
+- [x] D4, D5, D6 in room.js + both adapters; tests for: timer fires -> AI move + away; ready gate; chat ring;
       emote broadcast; settings validation (host-only, ranges); kick closes socket + frees seat.
-- [ ] Commit M5.
+- [x] Commit M5.
 
 ### M6 — Client: lobby settings, chat, ready, seats, away
 - [ ] Lobby: settings panel (host), sit/stand on seat rows, kick buttons, difficulty/target/timer display for all.
