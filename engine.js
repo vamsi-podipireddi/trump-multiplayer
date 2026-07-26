@@ -13,9 +13,28 @@ const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14];
 const NUM_PLAYERS = 4;
 const MIN_BID = 130, MAX_BID = 250, BID_STEP = 5, TOTAL_POINTS = 250, TARGET_GAMES = 5, MAX_REDEALS = 4;
 
+/* ---- randomness ----
+   The deal must not come off the same stream as anything an opponent can
+   observe. V8's Math.random is xorshift128+, and its state is recoverable from
+   a handful of outputs — i.e. from the cards a player is dealt — which would
+   leak both future deals and room.js's session tokens. Dealing therefore uses
+   the platform CSPRNG (present in node >=19 and in Workers), with rejection
+   sampling so the modulo is unbiased. AI-internal randomness has nothing to
+   protect and stays on the cheap generator. */
+function randomInt(n) {
+  const c = globalThis.crypto;
+  if (!c || typeof c.getRandomValues !== "function") return Math.floor(Math.random() * n);
+  const limit = Math.floor(0x100000000 / n) * n; // drop the biased tail of the 32-bit range
+  const buf = new Uint32Array(1);
+  let v;
+  do { c.getRandomValues(buf); v = buf[0]; } while (v >= limit);
+  return v % n;
+}
+
 // ---- card helpers ----
 function buildDeck() { const d = []; for (const s of SUITS) for (const r of RANKS) d.push({ suit: s, rank: r }); return d; }
-function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function shuffleFast(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function sameCard(a, b) { return !!a && !!b && a.suit === b.suit && a.rank === b.rank; }
 function rankLabel(r) { return ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r); }
 function cardStr(c) { return rankLabel(c.rank) + c.suit; }
@@ -64,7 +83,7 @@ function createMatch(names, opts) {
   };
 }
 function startMatch(G) {
-  G.scores = [0,0,0,0]; G.dealer = Math.floor(Math.random() * NUM_PLAYERS);
+  G.scores = [0,0,0,0]; G.dealer = randomInt(NUM_PLAYERS);
   G.roundNumber = 0; G.redealCount = 0; G.log = []; G.lastResult = null;
   nextDeal(G);
 }
@@ -85,7 +104,7 @@ function deal(G) {
   for (let i = 0; i < 52; i++) G.hands[(G.dealer + 1 + i) % NUM_PLAYERS].push(deck[i]);
   G.trump = null; G.calledCard = null; G.partner = null; G.declarer = null;
   G.bid = null; G.teamsRevealed = false; G.lastResult = null;
-  G.bonusSuit = SUITS[Math.floor(Math.random() * SUITS.length)];
+  G.bonusSuit = SUITS[randomInt(SUITS.length)];
   G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
   G.lastWinner = -1; G.lastWinnerSlot = -1;
   G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
@@ -374,17 +393,16 @@ function determinize(G, me) {
 
   for (let attempt = 0; attempt < 24; attempt++) {
     const useVoids = attempt < 20;
+    const allowedCount = (c) => others.reduce((n, p) => n + (useVoids && voids[p][c.suit] ? 0 : 1), 0);
     const need = {}; others.forEach(p => { need[p] = G.hands[p].length; });
     const out = {}; others.forEach(p => { out[p] = []; });
-    const pool = shuffle(unseen.slice());
+    const pool = shuffleFast(unseen.slice()); // AI-internal sampling: no need for the CSPRNG
     let ok = true;
     if (forcedTo != null && need[forcedTo] > 0) {
       const i = pool.findIndex(c => sameCard(c, G.calledCard));
       out[forcedTo].push(pool.splice(i, 1)[0]); need[forcedTo]--;
     }
-    // most-constrained cards first, then the rest
-    pool.sort((a, b) => allowedCount(a) - allowedCount(b));
-    function allowedCount(c) { return others.reduce((n, p) => n + (useVoids && voids[p][c.suit] ? 0 : 1), 0); }
+    pool.sort((a, b) => allowedCount(a) - allowedCount(b)); // most-constrained cards first
     for (const c of pool) {
       const cand = others.filter(p => need[p] > 0 && !(useVoids && voids[p][c.suit]));
       if (!cand.length) { ok = false; break; }
@@ -419,17 +437,28 @@ function playOutRound(sim) {
   }
 }
 
+/* Work budget in *simulated card plays*, not milliseconds. Cloudflare freezes
+   Date.now() between I/O operations, so a wall-clock cutoff never trips inside a
+   Durable Object and the search would always run its full width — the widest
+   position (13 legal moves, 52 cards live) is also the most expensive one. This
+   bound is deterministic, so node and Workers spend the same effort, and it
+   spends it where PIMC actually pays: the endgame. */
+const PIMC_PLAY_BUDGET = 8000;
+
 function choosePIMCCard(G, me, opts) {
   const legal = legalCards(G, me);
   if (legal.length <= 1) return legal[0];
   const timeMs = (opts && opts.timeMs) || 25;
-  const maxDet = (opts && opts.determinizations) || 24;
+  const budget = (opts && opts.playBudget) || PIMC_PLAY_BUDGET;
+  const cardsLeft = G.hands.reduce((n, h) => n + h.length, 0) || 1;
+  const affordable = Math.max(1, Math.floor(budget / (legal.length * cardsLeft)));
+  const maxDet = Math.min((opts && opts.determinizations) || 24, affordable);
   const started = Date.now();
   const iAmDeclaring = sideOf(G, me) === "D";
   const totals = legal.map(() => 0), counts = legal.map(() => 0);
 
   for (let d = 0; d < maxDet; d++) {
-    if (d >= 4 && Date.now() - started > timeMs) break;
+    if (d >= 4 && Date.now() - started > timeMs) break; // secondary guard; a no-op on Workers
     const world = determinize(G, me);
     if (!world) return chooseAICard(G, me, false);
     for (let i = 0; i < legal.length; i++) {
@@ -478,5 +507,5 @@ module.exports = {
   applyPlay, playIsLegal, advanceTrick, legalCards,
   aiActionFor, requiredActor, publicView,
   cardPoints, sameCard, sideOf, defenders, cardStr, rankLabel,
-  choosePIMCCard, _determinize: determinize,
+  choosePIMCCard, randomInt, _determinize: determinize,
 };

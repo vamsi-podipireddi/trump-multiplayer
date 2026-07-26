@@ -31,7 +31,7 @@ const DIFFICULTIES = ["easy", "normal", "hard"];
 const TARGET_DEAL_CHOICES = [3, 5, 7];
 const TURN_TIMER_CHOICES = [0, 15, 30, 45, 60, 90];
 const MAX_PLAYERS_PER_ROOM = 12;
-const CHAT_MAX_LEN = 200, CHAT_RING = 50, NAME_MAX = 16;
+const CHAT_MAX_LEN = 200, CHAT_RING = 50, NAME_MAX = 16, MAX_KICKED = 64;
 
 const DEFAULT_DELAYS = {
   ai: 800,          // AI "thinking" pause
@@ -45,10 +45,13 @@ const DEFAULT_DELAYS = {
 function codePoints(s, n) { return [...String(s)].slice(0, n).join(""); } // don't split emoji
 function cleanName(s) { return codePoints(String(s || "").trim(), NAME_MAX) || "Player"; }
 function normCode(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8); }
+/* playerId is a bearer token and a private room code is a secret, so both come
+   off the CSPRNG (E.randomInt) rather than Math.random — see the note there.
+   `rng` stays available for tests that need a reproducible sequence. */
 function randId(n, alpha, rng) {
   const chars = alpha ? "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" : "abcdefghijklmnopqrstuvwxyz0123456789";
-  const r = rng || Math.random;
-  let out = ""; for (let i = 0; i < n; i++) out += chars[Math.floor(r() * chars.length)];
+  const pick = rng ? () => Math.floor(rng() * chars.length) : () => E.randomInt(chars.length);
+  let out = ""; for (let i = 0; i < n; i++) out += chars[pick()];
   return out;
 }
 
@@ -59,9 +62,10 @@ function createRoom(code, opts) {
     started: false,
     settings: { difficulty: "normal", targetDeals: 5, turnTimerSec: 45 },
     seatOwner: [null, null, null, null],   // pid per seat (null = AI / open)
-    players: {},                            // pid -> {name, uid, seat|null, connected, away, ready}
+    players: {},                            // pid -> {name, uid, seat|null, wantSeat|null, connected, away, ready}
     host: null,
     chat: [],                               // ring buffer of {from, seat, text, ts}
+    kicked: {},                             // pid / "uid:…" of players the host removed
     timers: [],                             // [{kind, due, data?}]
     delays: Object.assign({}, DEFAULT_DELAYS, (opts && opts.delays) || {}),
   };
@@ -103,6 +107,42 @@ function releaseSeat(room, pid) {
 }
 function resetReady(room) { for (const [, p] of playerList(room)) p.ready = false; }
 
+/* ---- deferred seating (the hand-secrecy boundary) ----
+   Sitting down reveals that seat's hand. Mid-match that has to wait for a deal
+   boundary: otherwise one player can stand, sit somewhere else, and read a
+   second hand — repeat and they see the whole table. Joiners and sitters are
+   parked in `wantSeat` and dealt in by applyPendingSeats() on the next deal. */
+function freeSeatFor(room) {
+  const wanted = new Set(playerList(room).map(([, p]) => p.wantSeat).filter(s => s != null));
+  for (let s = 0; s < 4; s++) if (room.seatOwner[s] == null && !wanted.has(s)) return s;
+  return null;
+}
+function applyPendingSeats(room) {
+  for (const [pid, p] of playerList(room)) {
+    if (p.wantSeat == null) continue;
+    const seat = p.wantSeat;
+    p.wantSeat = null;
+    if (p.seat != null || !p.connected || room.seatOwner[seat] != null) continue; // lost the race
+    room.seatOwner[seat] = pid; p.seat = seat; p.ready = false;
+    if (room.started) room.G.names[seat] = p.name;
+  }
+}
+/* Everything that starts a new deal must hand out the parked seats with it. */
+function dealNext(room) { E.nextDeal(room.G); resetReady(room); applyPendingSeats(room); }
+
+// tolerant of a room restored from storage written before `kicked` existed
+function isKicked(room, pid, uid) {
+  const k = room.kicked;
+  return !!(k && ((pid && k[pid]) || (uid && k["uid:" + uid])));
+}
+function recordKick(room, pid, uid) {
+  if (!room.kicked) room.kicked = {};
+  const keys = Object.keys(room.kicked);
+  if (keys.length > MAX_KICKED) delete room.kicked[keys[0]]; // bounded; a party game, not a ban list
+  room.kicked[pid] = true;
+  if (uid) room.kicked["uid:" + uid] = true;
+}
+
 // ---- timers ----
 function setTimer(room, kind, delayMs, now, data) {
   room.timers = room.timers.filter(t => !(t.kind === kind && sameData(t.data, data)));
@@ -125,15 +165,19 @@ function drive(room, now, fx) {
   if (!room.started) { clearTimersOfKind(room, GAME_TIMER_KINDS); return; }
   const G = room.G;
 
-  // ready-gate: advance the round as soon as every live seated human is ready
+  // nobody home: freeze the match exactly where it is until someone comes back
+  if (connectedCount(room) === 0) { clearTimersOfKind(room, GAME_TIMER_KINDS); return; }
+
+  /* Ready gate: advance as soon as every live seated human has readied up.
+     "No live humans" is NOT unanimous consent — with everyone away or gone the
+     deal has to be paced by the round timer, or the result flashes past the
+     spectators (and past the players, when a shared blip disconnects them all). */
   let guard = 0;
   while (G.phase === "roundEnd" && guard++ < 4) {
     const live = seatedHumans(room).filter(([, p]) => p.connected && !p.away);
-    if (live.length && !live.every(([, p]) => p.ready)) break;
-    E.nextDeal(G); resetReady(room);
+    if (!live.length || !live.every(([, p]) => p.ready)) break;
+    dealNext(room);
   }
-
-  if (connectedCount(room) === 0) { clearTimersOfKind(room, GAME_TIMER_KINDS); return; } // paused
 
   let desired = null; // {kind, delay, data}
   if (G.phase === "trickEnd") desired = { kind: "trick", delay: room.delays.trick };
@@ -190,7 +234,7 @@ function fireTimers(room, now) {
   const g = due.find(t => GAME_TIMER_KINDS.includes(t.kind));
   if (g && room.started) {
     if (g.kind === "trick" && G.phase === "trickEnd") E.advanceTrick(G);
-    else if (g.kind === "round" && G.phase === "roundEnd") { E.nextDeal(G); resetReady(room); }
+    else if (g.kind === "round" && G.phase === "roundEnd") dealNext(room);
     else if (g.kind === "ai") {
       const ra = E.requiredActor(G);
       if (ra && !seatIsLiveHuman(room, ra.seat)) aiAct(room, ra.seat);
@@ -226,6 +270,10 @@ function join(room, msg, now) {
     return { pid: null, resumed: false, fx: { sends: [{ pid: null,
       obj: { type: "error", code: "code-taken", message: "that room code is already in use" } }] } };
   }
+  if (isKicked(room, pid, uid)) {
+    return { pid: null, resumed: false, fx: { sends: [{ pid: null,
+      obj: { type: "error", code: "kicked", message: "the host removed you from this table" } }] } };
+  }
   if (player) {
     resumed = player.connected; // an old live socket exists — adapter must close it
     room.timers = room.timers.filter(t => !(t.kind === "drop" && t.data && t.data.pid === pid));
@@ -237,14 +285,16 @@ function join(room, msg, now) {
       return { pid: null, resumed: false, fx: { sends: [{ pid: null, obj: { type: "error", message: "room is full" } }] } };
     }
     pid = randId(16, false);
-    let seat = null;
-    for (let s = 0; s < 4; s++) if (room.seatOwner[s] == null) { seat = s; break; }
-    if (seat != null) {
-      room.seatOwner[seat] = pid;
-      if (room.started) room.G.names[seat] = name; // human takes over an AI seat mid-match
-    }
-    player = { name, uid, seat, connected: true, away: false, ready: false };
+    player = { name, uid, seat: null, wantSeat: null, connected: true, away: false, ready: false };
     room.players[pid] = player;
+    const seat = freeSeatFor(room);
+    if (seat != null) {
+      /* Mid-match a newcomer waits for the next deal before taking over an AI
+         seat — being dealt in mid-hand would show them a hand they could then
+         trade away by leaving and rejoining into the next open seat. */
+      if (room.started) player.wantSeat = seat;
+      else { room.seatOwner[seat] = pid; player.seat = seat; }
+    }
   }
   clearTimersOfKind(room, ["expire"]);
   if (room.host == null) room.host = pid; else reassignHost(room);
@@ -253,7 +303,12 @@ function join(room, msg, now) {
   return { pid, resumed, fx };
 }
 
-function disconnect(room, pid, now) {
+/* `opts.immediate` = the socket abandoned this identity on purpose (it sent a
+   second `join`), rather than dropping off the network. There is nothing to
+   reconnect to, so skip the grace period entirely — otherwise one socket can
+   re-join in a loop and pin every seat and player slot in a room behind
+   15-second holds it renews forever. */
+function disconnect(room, pid, now, opts) {
   const fx = {};
   const player = room.players[pid];
   if (!player) return fx;
@@ -261,6 +316,10 @@ function disconnect(room, pid, now) {
 
   if (player.seat == null) {
     delete room.players[pid]; // spectators carry no reconnect value
+  } else if (opts && opts.immediate) {
+    releaseSeat(room, pid);
+    delete room.players[pid];
+    promoteSpectators(room);
   } else if (!room.started) {
     setTimer(room, "drop", room.delays.drop, now, { pid }); // hold lobby seat briefly
   }
@@ -271,8 +330,24 @@ function disconnect(room, pid, now) {
   return fx;
 }
 
+/* Adapter-facing: after a wake-from-hibernation (or a crash) the live sockets
+   are the truth about who is connected — the stored snapshot may predate it.
+   Doing this in the core, not the adapter, is what keeps the empty-room expiry
+   armed for a room whose players all vanished while it was asleep. */
+function reconcile(room, livePids, now) {
+  const live = new Set(livePids || []);
+  for (const [pid, p] of playerList(room)) {
+    p.connected = live.has(pid);
+    if (!p.connected && p.seat == null) delete room.players[pid]; // orphaned spectators
+  }
+  reassignHost(room);
+  if (connectedCount(room) === 0) setTimer(room, "expire", room.delays.expire, now);
+  else clearTimersOfKind(room, ["expire"]);
+}
+
 // ---- match lifecycle ----
 function startMatch(room, now, fx) {
+  applyPendingSeats(room); // anyone who asked for a seat during the last match gets it now
   room.G = E.createMatch(
     [0, 1, 2, 3].map(s => {
       const owner = room.seatOwner[s];
@@ -338,11 +413,10 @@ function handleSettings(room, pid, msg, now, fx) {
   if (room.host !== pid) return fx;
   const s = room.settings;
   if (DIFFICULTIES.includes(msg.difficulty)) s.difficulty = msg.difficulty; // allowed anytime
-  if (!room.started) {
-    if (TARGET_DEAL_CHOICES.includes(msg.targetDeals)) s.targetDeals = msg.targetDeals;
-    if (TURN_TIMER_CHOICES.includes(msg.turnTimerSec)) s.turnTimerSec = msg.turnTimerSec;
-  } else if (TURN_TIMER_CHOICES.includes(msg.turnTimerSec)) {
-    s.turnTimerSec = msg.turnTimerSec; // timer tweaks mid-match are harmless
+  if (!room.started && TARGET_DEAL_CHOICES.includes(msg.targetDeals)) s.targetDeals = msg.targetDeals;
+  if (TURN_TIMER_CHOICES.includes(msg.turnTimerSec) && msg.turnTimerSec !== s.turnTimerSec) {
+    s.turnTimerSec = msg.turnTimerSec;   // timer tweaks mid-match are harmless…
+    clearTimersOfKind(room, ["turn"]);   // …but must re-arm, or the turn in flight keeps the old length
   }
   drive(room, now, fx);
   return fx;
@@ -353,10 +427,14 @@ function handleSit(room, pid, msg, now, fx) {
   const seat = Number(msg.seat);
   if (!Number.isInteger(seat) || seat < 0 || seat > 3) return fx;
   if (room.seatOwner[seat] != null) return fx;                  // taken
-  if (room.started && player.seat != null) return fx;           // no mid-match seat hopping
+  if (room.started) {
+    if (player.seat != null) return fx;                         // no mid-match seat hopping
+    player.wantSeat = seat;                                     // dealt in at the next deal
+    drive(room, now, fx);
+    return fx;
+  }
   if (player.seat != null) { room.seatOwner[player.seat] = null; } // lobby move
   room.seatOwner[seat] = pid; player.seat = seat; player.ready = false;
-  if (room.started) room.G.names[seat] = player.name;
   reassignHost(room);
   drive(room, now, fx);
   return fx;
@@ -368,6 +446,7 @@ function handleKick(room, pid, msg, now, fx) {
   if (!Number.isInteger(seat) || seat < 0 || seat > 3) return fx;
   const target = room.seatOwner[seat];
   if (target == null || target === pid) return fx;
+  recordKick(room, target, room.players[target] && room.players[target].uid); // and stays out
   releaseSeat(room, target);
   delete room.players[target];
   fx.closes = [target];
@@ -414,6 +493,7 @@ function buildView(room, pid, now) {
   const player = room.players[pid];
   const seat = player ? player.seat : null;
   const v = E.publicView(G);
+  const claimed = new Set(playerList(room).map(([, p]) => p.wantSeat).filter(s => s != null));
   v.seats = [0, 1, 2, 3].map(s => {
     const owner = room.seatOwner[s];
     const op = owner != null ? room.players[owner] : null;
@@ -425,6 +505,7 @@ function buildView(room, pid, now) {
       connected: op ? op.connected : false,
       away: op ? !!op.away : false,
       ready: op ? !!op.ready : false,
+      claimed: owner == null && claimed.has(s), // someone is waiting to be dealt in here
       you: s === seat,
     };
   });
@@ -443,7 +524,11 @@ function buildView(room, pid, now) {
   v.turnDeadline = turnT ? turnT.due : null;
   const roundT = room.timers.find(t => t.kind === "round");
   v.roundDeadline = roundT ? roundT.due : null;
-  v.you = { seat, playerId: pid, spectator: seat == null, away: player ? !!player.away : false, ready: player ? !!player.ready : false };
+  v.you = {
+    seat, playerId: pid, spectator: seat == null,
+    away: player ? !!player.away : false, ready: player ? !!player.ready : false,
+    pendingSeat: player && player.wantSeat != null ? player.wantSeat : null,
+  };
   if (room.started && seat != null) {
     v.you.hand = G.hands[seat].slice(); // ONLY this viewer's hand
     const ra = E.requiredActor(G);
@@ -458,7 +543,7 @@ function buildView(room, pid, now) {
 }
 
 module.exports = {
-  createRoom, join, disconnect, message, fireTimers, nextTimerDue, buildView,
+  createRoom, join, disconnect, message, fireTimers, nextTimerDue, buildView, reconcile,
   normCode, randId, cleanName,
   SEAT_LABEL, EMOTES, DIFFICULTIES, TARGET_DEAL_CHOICES, TURN_TIMER_CHOICES,
   MAX_PLAYERS_PER_ROOM, DEFAULT_DELAYS,

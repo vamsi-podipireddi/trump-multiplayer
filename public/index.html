@@ -188,7 +188,8 @@
   #chat-log { flex:1; overflow-y:auto; font-size:12.5px; line-height:1.45; padding:8px 14px; min-height:60px; }
   #chat-log .msg { margin-bottom:4px; word-break:break-word; }
   #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:#7fd6a0; }
-  #chat-log .empty { opacity:.5; font-style:italic; }
+  /* the placeholder lives outside #chat-log so the live region only ever holds real messages */
+  #chat-empty { opacity:.5; font-style:italic; padding:6px 14px; font-size:13px; }
   #emote-bar { display:flex; gap:4px; padding:4px 10px 0; flex-wrap:wrap; }
   .emote-btn { font-size:18px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
     border-radius:8px; min-width:40px; min-height:40px; padding:4px; }
@@ -358,6 +359,7 @@
     <div class="panel-section" id="sec-log"><h2>TABLE LOG</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
     <div id="chat-section" class="panel-section">
       <h2 style="padding:0 14px;">CHAT</h2>
+      <div id="chat-empty" class="empty">No messages yet — say hi 👋</div>
       <div id="chat-log" aria-live="polite" aria-label="Chat messages"></div>
       <div id="emote-bar" aria-label="Reactions"></div>
       <form id="chat-form" autocomplete="off">
@@ -423,6 +425,7 @@ function connect(name, code) {
   ws = new WebSocket(`${base}/ws?room=${encodeURIComponent(code)}`);
   ws.onopen = () => {
     $("conn").classList.remove("show");
+    reconnectDelay = RECONNECT_MIN; // a good connection resets the backoff
     let pid = null; // only auto-resume a recent session token (avoids hijacking a stale one on a shared device)
     const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code);
     ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null, uid: myUid(), create: creating, private: createPrivate }));
@@ -431,9 +434,15 @@ function connect(name, code) {
   ws.onclose = () => { if (wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
   ws.onerror = () => {};
 }
+/* Exponential backoff with jitter: a server that is down (or restarting, and
+   about to get every client back at once) shouldn't be hammered every 1.5s. */
+const RECONNECT_MIN = 800, RECONNECT_MAX = 20000;
+let reconnectDelay = RECONNECT_MIN;
 function scheduleReconnect(name) {
   if (reconnectTimer) return;
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; if (wantConnected) connect(name, roomCode); }, 1500);
+  const wait = Math.round(reconnectDelay * (0.7 + Math.random() * 0.6));
+  reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; if (wantConnected) connect(name, roomCode); }, wait);
 }
 function onMsg(m) {
   if (m.type === "joined") {
@@ -460,6 +469,8 @@ function onMsg(m) {
       connect(myName, "");
       return;
     }
+    // the host removed us: stop reconnecting, drop the session, back to the join screen
+    if (m.code === "kicked") { leaveRoom(m.message); return; }
     toast(m.message);
   }
 }
@@ -502,7 +513,20 @@ $("join-name").value = localStorage.getItem("trump_name") || "";
   } catch {}
 })();
 { const p = new URLSearchParams(location.search).get("room"); if (p) $("join-code").value = p.toUpperCase(); }
-$("btn-leave").onclick = () => { wantConnected = false; try { if (roomCode) { localStorage.removeItem("trump_pid_" + roomCode); localStorage.removeItem("trump_pid_" + roomCode + "_t"); } } catch {} if (ws) ws.close(); location.href = location.pathname; };
+// a notice left by leaveRoom() survives the reload it triggers (e.g. "the host removed you")
+try { const n = sessionStorage.getItem("trump_notice"); if (n) { $("join-err").textContent = n; sessionStorage.removeItem("trump_notice"); } } catch {}
+/* Hard reset back to the join screen: forget this room's session token and
+   reload, so no state from the old table survives. */
+function leaveRoom(reason) {
+  wantConnected = false;
+  try {
+    if (roomCode) { localStorage.removeItem("trump_pid_" + roomCode); localStorage.removeItem("trump_pid_" + roomCode + "_t"); }
+    if (reason) sessionStorage.setItem("trump_notice", reason);
+  } catch {}
+  if (ws) { ws.onclose = null; try { ws.close(); } catch {} }
+  location.href = location.pathname;
+}
+$("btn-leave").onclick = () => leaveRoom("");
 $("btn-help").onclick = showHelp;
 
 // ---------- orientation ----------
@@ -626,7 +650,6 @@ function roleOf(seat) {
   return { c:"def", t:"DEFENDER" };
 }
 function renderGame() {
-  const c = view.consts;
   ringEl = null; // rebuilt below if the active seat is on the clock
   // contract badge
   const ts = $("trump-sym");
@@ -694,10 +717,26 @@ function renderGame() {
   tickTimers();
 }
 function renderHand() {
-  const wrap = $("my-hand"); wrap.innerHTML = "";
+  const wrap = $("my-hand");
   const hand = (view.you && view.you.hand) || [];
   const canPlay = view.you.toAct && view.you.actKind === "play";
   const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
+
+  /* Rebuilding the hand blows away keyboard focus, and a state message arrives
+     for every action at the table — including other people's chat. Skip the
+     rebuild when nothing about the hand changed, and when it does change put
+     focus back on the same card (or its position) instead of dropping the user
+     out to <body> mid-turn. */
+  const sig = JSON.stringify([hand.map(c => c.suit + c.rank), canPlay, [...legalKey].sort(),
+                              view.trump, view.bonusSuit, view.leadSuit]);
+  if (wrap._sig === sig) return;
+  wrap._sig = sig;
+  const active = document.activeElement;
+  const hadFocus = active && wrap.contains(active);
+  const focusKey = hadFocus ? active.dataset.k : null;
+  const focusIdx = hadFocus ? Array.prototype.indexOf.call(wrap.children, active) : -1;
+  wrap.innerHTML = "";
+
   hand.forEach(card => {
     const el = cardEl(card, true);              // real <button>: Tab to reach it, Enter/Space to play
     const notes = [];
@@ -718,8 +757,16 @@ function renderHand() {
       el.setAttribute("aria-disabled", "true");
     }
     el.setAttribute("aria-label", label);
+    el.dataset.k = card.suit + card.rank;
     wrap.appendChild(el);
   });
+
+  if (hadFocus && wrap.children.length) {
+    let target = null;
+    for (const el of wrap.children) if (el.dataset.k === focusKey) { target = el; break; }
+    if (!target) target = wrap.children[Math.min(Math.max(focusIdx, 0), wrap.children.length - 1)];
+    target.focus();
+  }
 }
 function renderScoreboard() {
   const c = view.consts;
@@ -744,19 +791,43 @@ function renderScoreboard() {
   if (view.room.isHost) sl.appendChild(miniBtn("⚙ Change", "", showSettingsModal));
 }
 
+/* ---------- sliding-window lists (the table log and the chat) ----------
+   Both arrive as "the last N entries", and the server re-sends them with every
+   state message — on every card played, every timer tick, every chat line. A
+   naive redraw re-inserts every row, which in an aria-live region means a
+   screen reader re-reads the entire backlog each time. Diff the incoming window
+   against what is already on screen, drop what scrolled off the top, and append
+   only what is genuinely new; an unchanged window touches no DOM at all.
+   Pure apart from the four node operations, so test/client.test.js can run it. */
+function syncWindow(box, keys, build) {
+  const prev = box._winKeys || [];
+  let keep = 0; // longest suffix of `prev` that is also a prefix of `keys`
+  for (let n = Math.min(prev.length, keys.length); n > 0; n--) {
+    let same = true;
+    for (let i = 0; i < n; i++) if (prev[prev.length - n + i] !== keys[i]) { same = false; break; }
+    if (same) { keep = n; break; }
+  }
+  if (keep === 0) box.textContent = "";
+  else for (let drop = prev.length - keep; drop > 0 && box.firstChild; drop--) box.removeChild(box.firstChild);
+  for (let i = keep; i < keys.length; i++) box.appendChild(build(i));
+  box._winKeys = keys;
+  return keys.length - keep; // rows actually added
+}
+
 // ---------- chat + emotes ----------
 function renderChat() {
   const box = $("chat-log");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
   const msgs = view.chat || [];
-  box.innerHTML = msgs.length ? "" : `<div class="empty">No messages yet — say hi 👋</div>`;
-  msgs.forEach(m => {
+  $("chat-empty").style.display = msgs.length ? "none" : "";
+  const added = syncWindow(box, msgs.map(m => `${m.ts} ${m.from} ${m.text}`), i => {
+    const m = msgs[i];
     const d = document.createElement("div");
     d.className = "msg" + (m.seat != null && m.seat === mySeat ? " you" : "");
     d.innerHTML = `<span class="from">${esc(m.from)}:</span> ${esc(m.text)}`;
-    box.appendChild(d);
+    return d;
   });
-  if (atBottom) box.scrollTop = box.scrollHeight;
+  if (atBottom && added) box.scrollTop = box.scrollHeight;
   noteChatActivity();
   if (!$("emote-bar").children.length) {
     EMOTES.forEach(e => {
@@ -814,9 +885,15 @@ function showSettingsModal() {
   $("btn-close-set").onclick = () => { hideOverlay(); render(); };
 }
 function renderLog() {
-  const el = $("log"); el.innerHTML = "";
-  (view.log || []).forEach(e => { const d = document.createElement("div"); d.className = "entry " + (e.cls || ""); d.innerHTML = textWithCards(e.text); el.appendChild(d); });
-  el.scrollTop = el.scrollHeight;
+  const el = $("log");
+  const entries = view.log || [];
+  const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
+    const d = document.createElement("div");
+    d.className = "entry " + (entries[i].cls || "");
+    d.innerHTML = textWithCards(entries[i].text);
+    return d;
+  });
+  if (added) el.scrollTop = el.scrollHeight;
 }
 function renderActionBar() {
   const bar = $("action-bar"); bar.innerHTML = "";
@@ -824,7 +901,14 @@ function renderActionBar() {
   const text = (cls, html) => { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; bar.appendChild(d); };
   const button = (label, cls, fn) => { const b = document.createElement("button"); b.className = "act-btn " + (cls || ""); b.innerHTML = label; b.onclick = fn; bar.appendChild(b); return b; };
 
-  if (view.you.spectator) { text("status", `Spectating ${esc(view.room.hostName || "")}'s table — ${phaseLabel()}`); return; }
+  if (view.you.spectator) {
+    // seats are handed out at deal boundaries mid-match, so say when you're in
+    const q = view.you.pendingSeat != null
+      ? ` · you take ${view.seats[view.you.pendingSeat].label} on the next deal`
+      : "";
+    text("status", `Spectating ${esc(view.room.hostName || "")}'s table — ${phaseLabel()}${q}`);
+    return;
+  }
 
   if (view.you.toAct) {
     if (view.you.actKind === "bid") {
@@ -935,7 +1019,9 @@ function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").datase
 function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
 
 // ---------- helpers ----------
-function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[ch])); }
+// escapes ' as well as " — everything here is interpolated into innerHTML, and
+// a name landing in a single-quoted attribute must not be able to break out
+function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[ch])); }
 // suit colours come from CSS classes (not inline styles) so the 4-colour deck can override them
 function suitSpan(s) { return s ? `<span class="sc s-${SUIT_KEY[s]}">${s}</span>` : ""; }
 function cardSpan(c) { return c ? `<span class="sc s-${SUIT_KEY[c.suit]}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }

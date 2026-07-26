@@ -92,6 +92,53 @@ function playMatch(chooser, maxSteps = 200000) {
   assert.fail("match did not terminate within step budget");
 }
 
+/* The deal must not come off Math.random. V8's generator is xorshift128+ and its
+   state is recoverable from a handful of outputs — and a player observes plenty
+   of them, since the cards they are dealt *are* the output. Sharing that stream
+   would leak future deals and (via room.js) other players' session tokens.
+   Pinning Math.random to a constant is the sharpest test available: anything
+   still drawing from it degenerates, anything on the CSPRNG is unaffected. */
+test("dealing and token minting never draw on Math.random", () => {
+  const real = Math.random;
+  Math.random = () => 0.42;
+  try {
+    const deals = new Set(), dealers = new Set(), bonuses = new Set();
+    for (let i = 0; i < 40; i++) {
+      const G = E.createMatch();
+      E.startMatch(G);
+      deals.add(G.hands.map(h => h.map(c => c.suit + c.rank).join(",")).join("|"));
+      dealers.add(G.dealer);
+      bonuses.add(G.bonusSuit);
+    }
+    assert.equal(deals.size, 40, "every shuffle must be distinct with Math.random pinned");
+    assert.ok(dealers.size > 1, "the opening dealer must not be predictable either");
+    assert.ok(bonuses.size > 1, "nor the bonus suit");
+
+    const R = require("../room");
+    const ids = new Set();
+    for (let i = 0; i < 200; i++) ids.add(R.randId(16, false));
+    assert.equal(ids.size, 200, "playerId is a bearer token — it must come off the CSPRNG");
+    const codes = new Set();
+    for (let i = 0; i < 200; i++) codes.add(R.randId(8, true));
+    assert.equal(codes.size, 200, "private room codes are secrets too");
+
+    // the explicit-rng escape hatch is still honoured, for reproducible tests
+    assert.equal(R.randId(6, true, () => 0), "AAAAAA");
+  } finally { Math.random = real; }
+});
+
+test("randomInt is uniform over its range and never out of bounds", () => {
+  for (const n of [2, 3, 4, 13, 52]) {
+    const seen = new Array(n).fill(0);
+    for (let i = 0; i < n * 200; i++) {
+      const v = E.randomInt(n);
+      assert.ok(Number.isInteger(v) && v >= 0 && v < n, `randomInt(${n}) returned ${v}`);
+      seen[v]++;
+    }
+    assert.ok(seen.every(c => c > 0), `randomInt(${n}) never produced every value`);
+  }
+});
+
 test("deck totals 250 points for every bonus suit", () => {
   for (const s of E.SUITS) {
     const G = { bonusSuit: s };

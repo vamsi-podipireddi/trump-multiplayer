@@ -80,22 +80,20 @@ export class RoomDO {
     this.rl = new WeakMap(); // per-socket rate limiter; resets on wake (fine)
     ctx.blockConcurrencyWhile(async () => {
       this.room = (await ctx.storage.get("room")) || null;
-      if (this.room) this.reconcile();
+      if (!this.room) return;
+      /* The live sockets are the source of truth for who is connected; the
+         stored state may predate a crash. R.reconcile also re-arms the empty-room
+         expiry, so a room whose players all vanished mid-hibernation still gets
+         collected instead of sitting in storage forever. */
+      const live = [];
+      for (const ws of ctx.getWebSockets()) {
+        const att = this.att(ws);
+        if (att && att.pid) live.push(att.pid);
+      }
+      R.reconcile(this.room, live, Date.now());
+      await this.persist();
+      await this.armAlarm();
     });
-  }
-
-  /* After a wake-from-hibernation the live sockets are the source of truth
-     for who is connected; the stored state may predate a crash. */
-  reconcile() {
-    const live = new Set();
-    for (const ws of this.ctx.getWebSockets()) {
-      const att = this.att(ws);
-      if (att && att.pid) live.add(att.pid);
-    }
-    for (const [pid, p] of Object.entries(this.room.players)) {
-      p.connected = live.has(pid);
-      if (!p.connected && p.seat == null) delete this.room.players[pid]; // orphaned spectators
-    }
   }
 
   att(ws) { try { return ws.deserializeAttachment(); } catch { return null; } }
@@ -159,8 +157,13 @@ export class RoomDO {
     }
   }
 
-  async afterEvent(fx, ws) {
+  /* `phaseBefore` opts this event into the end-of-match stats write. It has to
+     happen before persist(), because recordStats() stamps its own idempotency
+     flag onto G — written afterwards it would never reach storage. */
+  async afterEvent(fx, ws, phaseBefore) {
     await this.applyFx(fx, ws);
+    if (phaseBefore !== undefined && this.room && this.room.started &&
+        this.room.G.phase === "matchOver" && phaseBefore !== "matchOver") await this.recordStats();
     if (this.room) { await this.persist(); await this.armAlarm(); }
   }
 
@@ -176,6 +179,15 @@ export class RoomDO {
 
     try {
       if (msg.type === "join") {
+        /* A socket that joins again is switching identity, not reconnecting.
+           Retire the old pid first: nothing would map to it afterwards, yet the
+           room would still count it connected — holding its seat and blocking
+           the empty-room expiry forever. */
+        const prev = this.att(ws);
+        if (prev && prev.pid && this.room.players[prev.pid]) {
+          ws.serializeAttachment({ pid: null });
+          await this.applyFx(R.disconnect(this.room, prev.pid, wall, { immediate: true }), null);
+        }
         const { pid, resumed, fx } = R.join(this.room, msg, wall);
         if (pid == null) { await this.applyFx(fx, ws); return; }
         if (resumed) {
@@ -194,9 +206,7 @@ export class RoomDO {
       if (!att || !att.pid) return;
       const before = this.room.started ? this.room.G.phase : null;
       const fx = R.message(this.room, att.pid, msg, wall);
-      await this.afterEvent(fx, ws);
-      if (this.room && this.room.started && this.room.G.phase === "matchOver" && before !== "matchOver")
-        await this.recordStats();
+      await this.afterEvent(fx, ws, before);
     } catch {
       this.send(ws, { type: "error", message: "server error" });
     }
@@ -219,9 +229,7 @@ export class RoomDO {
     if (!this.room) { await this.ctx.storage.deleteAlarm(); return; }
     const before = this.room.started ? this.room.G.phase : null;
     const fx = R.fireTimers(this.room, Date.now());
-    await this.afterEvent(fx, null);
-    if (this.room && this.room.started && this.room.G.phase === "matchOver" && before !== "matchOver")
-      await this.recordStats();
+    await this.afterEvent(fx, null, before);
   }
 
   /* One row per human seat at matchOver, when a D1 binding exists (M8/D10). */

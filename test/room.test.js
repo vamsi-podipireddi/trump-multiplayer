@@ -198,8 +198,176 @@ test("sit and stand", () => {
   R.message(room, p1, { type: "stand" }, now);
   assert.equal(room.players[p1].seat, null);
   assert.equal(room.seatOwner[3], null);
-  // mid-match: a spectator may take an AI seat, seated players may not hop
-  R.message(room, p2, { type: "start" }, now); // p2 is a seated player; host may have moved
+});
+
+/* Drive a started room until the human at `pid` is holding a hand mid-deal. */
+function toPlayingDeal(room, pid, now) {
+  for (let i = 0; i < 400 && room.G.phase !== "playing"; i++) {
+    const v = R.buildView(room, pid, now);
+    if (v.you && v.you.toAct) { R.message(room, pid, E.aiActionFor(room.G, v.you.seat, "normal"), now); continue; }
+    const due = R.nextTimerDue(room);
+    if (due == null) break;
+    now = due; R.fireTimers(room, now);
+  }
+  assert.equal(room.G.phase, "playing");
+  return now;
+}
+
+/* THE secrecy property. buildView redacting one snapshot is not enough: what
+   matters is that no player can *collect* hands across a deal. Taking a seat is
+   what reveals one, so every route to a second seat mid-deal is a leak. */
+test("hand secrecy: nobody is shown two hands in the same deal", () => {
+  let now = 1_000_000;
+  const room = mkRoom();
+  const [pid] = joinN(room, 1, now);           // 1 human, 3 AI seats to hop between
+  R.message(room, pid, { type: "start" }, now);
+  now = toPlayingDeal(room, pid, now);
+
+  const deal = room.G.roundNumber;
+  const shown = new Set();
+  const peek = () => { const v = R.buildView(room, pid, now); if (v.you.hand) shown.add(v.you.seat); };
+  peek();
+  assert.equal(shown.size, 1, "starts holding exactly one hand");
+
+  // stand up and try to sit somewhere else — the classic hop
+  for (const seat of [1, 2, 3]) {
+    R.message(room, pid, { type: "stand" }, now);
+    R.message(room, pid, { type: "sit", seat }, now);
+    peek();
+  }
+  assert.equal(room.G.roundNumber, deal, "still the same deal");
+  assert.equal(shown.size, 1, `saw ${shown.size} hands in one deal via stand+sit`);
+  assert.equal(room.players[pid].seat, null, "standing mid-deal really does give up the seat");
+  assert.equal(R.buildView(room, pid, now).you.pendingSeat, 3, "the request is parked for the next deal");
+});
+
+test("hand secrecy: a newcomer is dealt in at the next deal, not mid-hand", () => {
+  let now = 1_000_000;
+  const room = mkRoom();
+  const [host] = joinN(room, 1, now);
+  R.message(room, host, { type: "start" }, now);
+  now = toPlayingDeal(room, host, now);
+
+  const spy = R.join(room, { name: "Spy" }, now).pid;
+  const mid = R.buildView(room, spy, now);
+  assert.equal(mid.you.seat, null, "no seat mid-deal");
+  assert.equal(mid.you.hand, undefined, "and therefore no hand");
+  assert.equal(mid.you.pendingSeat, 1, "queued for the next open seat");
+
+  // ...and a second identity cannot grab a *different* hand either
+  const spy2 = R.join(room, { name: "Spy2" }, now).pid;
+  assert.equal(R.buildView(room, spy2, now).you.hand, undefined);
+  assert.notEqual(R.buildView(room, spy2, now).you.pendingSeat, 1, "two waiters do not claim one seat");
+
+  // roll the deal over: now they are properly seated with a fresh hand
+  const deal = room.G.roundNumber;
+  for (let i = 0; i < 4000 && room.G.roundNumber === deal; i++) {
+    const v = R.buildView(room, host, now);
+    if (v.you.toAct) { R.message(room, host, E.aiActionFor(room.G, v.you.seat, "normal"), now); continue; }
+    const due = R.nextTimerDue(room);
+    if (due == null) break;
+    now = due; R.fireTimers(room, now);
+  }
+  const after = R.buildView(room, spy, now);
+  assert.equal(after.you.seat, 1, "dealt in on the next deal");
+  assert.equal(after.you.hand.length, 13, "with a full fresh hand");
+  assert.equal(after.you.pendingSeat, null);
+});
+
+test("a deal never advances past players who are not there to see it", () => {
+  let now = 1_000_000;
+  const room = mkRoom();
+  const pids = joinN(room, 2, now);
+  R.message(room, pids[0], { type: "start" }, now);
+  // play to the end of a deal
+  for (let i = 0; i < 8000 && room.G.phase !== "roundEnd" && room.G.phase !== "matchOver"; i++) {
+    let acted = false;
+    for (const pid of pids) {
+      const v = R.buildView(room, pid, now);
+      if (v.you.toAct) { R.message(room, pid, E.aiActionFor(room.G, v.you.seat, "normal"), now); acted = true; break; }
+    }
+    if (!acted) { const due = R.nextTimerDue(room); if (due == null) break; now = due; R.fireTimers(room, now); }
+  }
+  if (room.G.phase !== "roundEnd") return; // the deal ended the match this run
+  const deal = room.G.roundNumber;
+
+  // everyone drops at once (a shared blip). "No live humans" must not read as
+  // "everyone is ready" — the result screen would vanish unseen.
+  for (const pid of pids) R.disconnect(room, pid, now);
+  assert.equal(room.G.roundNumber, deal, "deal must not advance with nobody watching");
+  assert.equal(room.G.phase, "roundEnd");
+
+  // and the match resumes where it left off when someone comes back
+  R.join(room, { name: "P0", playerId: pids[0] }, now + 5000);
+  assert.equal(room.G.roundNumber, deal);
+  assert.equal(room.G.phase, "roundEnd");
+});
+
+test("a kicked player stays kicked", () => {
+  const now = 1_000_000;
+  const room = mkRoom();
+  const host = R.join(room, { name: "Host", uid: "host-uid" }, now).pid;
+  const rude = R.join(room, { name: "Rude", uid: "rude-uid" }, now).pid;
+  R.message(room, host, { type: "kick", seat: room.players[rude].seat }, now);
+
+  const sameToken = R.join(room, { name: "Rude", playerId: rude, uid: "rude-uid" }, now);
+  assert.equal(sameToken.pid, null, "the old session token cannot walk back in");
+  assert.equal(sameToken.fx.sends[0].obj.code, "kicked");
+
+  const freshToken = R.join(room, { name: "Rude Again", uid: "rude-uid" }, now);
+  assert.equal(freshToken.pid, null, "nor a new token from the same browser");
+
+  assert.ok(R.join(room, { name: "Innocent", uid: "other-uid" }, now).pid, "everyone else is unaffected");
+});
+
+test("re-joining on one connection retires the old identity instead of stranding it", () => {
+  const now = 1_000_000;
+  const room = mkRoom();
+  const first = R.join(room, { name: "A" }, now).pid;
+  assert.equal(room.players[first].seat, 0);
+  // the adapter's re-join path: no grace period, the seat and slot come straight back
+  R.disconnect(room, first, now, { immediate: true });
+  assert.equal(room.players[first], undefined, "no ghost left behind");
+  assert.equal(room.seatOwner[0], null, "and no seat held by nobody");
+  assert.equal(R.nextTimerDue(room) != null, true, "the empty room is scheduled to expire");
+  // a genuine drop still gets its reconnect grace
+  const second = R.join(room, { name: "B" }, now).pid;
+  R.disconnect(room, second, now);
+  assert.ok(room.players[second], "a real disconnect keeps the record");
+  assert.equal(room.seatOwner[0], second, "and holds the seat");
+});
+
+test("reconcile: a room whose sockets vanished while asleep still expires", () => {
+  const now = 1_000_000;
+  const room = mkRoom();
+  const [a, b] = joinN(room, 2, now);
+  R.reconcile(room, [a], now);                       // b's socket did not survive the wake
+  assert.equal(room.players[a].connected, true);
+  assert.equal(room.players[b].connected, false);
+  assert.equal(R.nextTimerDue(room), null, "someone is still here — nothing to expire");
+
+  R.reconcile(room, [], now);                        // nobody came back
+  const due = R.nextTimerDue(room);
+  assert.ok(due != null && due >= now + R.DEFAULT_DELAYS.expire - 1, "expiry re-armed on wake");
+  let fx = null;
+  for (let g = 0; g < 10 && !(fx && fx.deleteRoom); g++) fx = R.fireTimers(room, R.nextTimerDue(room));
+  assert.equal(fx.deleteRoom, true);
+});
+
+test("changing the turn timer re-arms the turn in flight", () => {
+  let now = 1_000_000;
+  const room = mkRoom();
+  const [pid] = joinN(room, 1, now);
+  R.message(room, pid, { type: "settings", turnTimerSec: 90 }, now);
+  R.message(room, pid, { type: "start" }, now);
+  for (let i = 0; i < 50 && !(R.buildView(room, pid, now).you || {}).toAct; i++) {
+    const due = R.nextTimerDue(room); assert.ok(due != null); now = due; R.fireTimers(room, now);
+  }
+  const long = R.buildView(room, pid, now).turnDeadline;
+  assert.ok(long > now + 60_000, "90s timer armed");
+  R.message(room, pid, { type: "settings", turnTimerSec: 15 }, now);
+  const short = R.buildView(room, pid, now).turnDeadline;
+  assert.ok(short <= now + 15_000, `shortening the timer must apply now, got ${short - now}ms`);
 });
 
 test("settings: host-only, validated, difficulty switchable any time", () => {

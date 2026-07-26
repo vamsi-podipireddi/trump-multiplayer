@@ -77,6 +77,37 @@ test("PIMC respects its time budget", () => {
   assert.ok(Date.now() - t0 < 400, "budget cutoff works (first-trick worst case)");
 });
 
+/* Cloudflare freezes Date.now() between I/O operations, so inside a Durable
+   Object a wall-clock cutoff never fires. The search has to bound itself on
+   work done, or the widest position runs at full width and burns the CPU
+   budget. Simulate the frozen clock and check the bound still holds. */
+test("PIMC bounds its work with a clock that never advances (Workers)", () => {
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    const G = gameAtPlay();                 // first trick: 13 legal moves, 52 cards live
+    const t0 = realNow();
+    const card = E.choosePIMCCard(G, G.turn, { determinizations: 1000, timeMs: 30 });
+    const spent = realNow() - t0;
+    assert.equal(E.playIsLegal(G, G.turn, card), true, "still returns a legal card");
+    assert.ok(spent < 150, `frozen clock must not uncap the search (took ${spent}ms)`);
+
+    // and the budget must scale: the endgame is cheap, so it may search deeper
+    let guard = 0;
+    while (G.trickNumber < 10 && guard++ < 200) {
+      if (G.phase === "trickEnd") { E.advanceTrick(G); continue; }
+      if (G.phase !== "playing") break;
+      E.applyPlay(G, G.turn, E.aiActionFor(G, G.turn, "normal").card);
+    }
+    if (G.phase === "trickEnd") E.advanceTrick(G);
+    if (G.phase === "playing") {
+      const late = realNow();
+      E.choosePIMCCard(G, G.turn, { determinizations: 24, timeMs: 30 });
+      assert.ok(realNow() - late < 150, "late-trick search stays bounded too");
+    }
+  } finally { Date.now = realNow; }
+});
+
 test("hard AI is not weaker than the heuristic (paired-deal comparison)", () => {
   // Same dealt round played twice from the identical position: once all-heuristic,
   // once with the declaring side on PIMC. Paired deals kill most variance; assert

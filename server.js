@@ -14,12 +14,25 @@ const { WebSocketServer } = require("ws");
 const R = require("./room");
 
 const PORT = process.env.PORT || 3000;
-const MAX_ROOMS = 500, MSG_RATE = 100, MAX_SOCKETS_PER_IP = 20, JOIN_GRACE_MS = 30000;
+const MAX_ROOMS = +process.env.MAX_ROOMS || 500;
+const MSG_RATE = 100, MAX_SOCKETS_PER_IP = 20, JOIN_GRACE_MS = 30000;
 const DELAYS = {};
 if (+process.env.AI_DELAY) DELAYS.ai = +process.env.AI_DELAY;
 if (+process.env.TRICK_DELAY) DELAYS.trick = +process.env.TRICK_DELAY;
 if (+process.env.ROUND_DELAY) DELAYS.round = +process.env.ROUND_DELAY;
 const ALLOW_ORIGIN = (process.env.ALLOW_ORIGIN || "").split(",").map(s => s.trim()).filter(Boolean);
+/* Off by default: X-Forwarded-For is caller-controlled, so trusting it without a
+   proxy in front lets anyone forge their way past the per-IP cap. Set TRUST_PROXY=1
+   when something upstream (nginx, Cloudflare, a tunnel) actually sets the header —
+   otherwise every player behind it shares one socket budget. */
+const TRUST_PROXY = process.env.TRUST_PROXY === "1";
+function clientIp(req) {
+  if (TRUST_PROXY) {
+    const xff = req.headers["x-forwarded-for"];
+    if (xff) return String(xff).split(",")[0].trim();
+  }
+  return req.socket.remoteAddress || "?";
+}
 
 // ---- HTTP: serve the static client from public/ ----
 const PUB = path.join(__dirname, "public");
@@ -54,13 +67,26 @@ const httpServer = http.createServer((req, res) => {
 const rooms = new Map();
 
 function newRoomCode(len) { let c; do { c = R.randId(len || 4, true); } while (rooms.has(c)); return c; }
+/* Rooms sit empty for `expire` (30m) so people can come back to them. That is a
+   generous thing to hand an abuser, so at the room cap we recycle the room that
+   has been empty longest instead of turning real players away. A room with a
+   live socket is never touched. */
+function reclaimEmptyRoom() {
+  let victim = null;
+  for (const [, e] of rooms) {
+    if (e.socks.size > 0) continue;
+    if (!victim || (e.emptiedAt || 0) < (victim.emptiedAt || 0)) victim = e;
+  }
+  if (victim) deleteRoom(victim);
+  return !!victim;
+}
 function getOrCreateRoom(codeRaw, priv) {
   let code = R.normCode(codeRaw);
   if (!code) code = newRoomCode(priv ? 8 : 4);
   let entry = rooms.get(code);
   if (!entry) {
-    if (rooms.size >= MAX_ROOMS) return null;
-    entry = { state: R.createRoom(code, { delays: DELAYS }), socks: new Map(), timer: null };
+    if (rooms.size >= MAX_ROOMS && !reclaimEmptyRoom()) return null;
+    entry = { state: R.createRoom(code, { delays: DELAYS }), socks: new Map(), timer: null, emptiedAt: Date.now() };
     rooms.set(code, entry);
   }
   return entry;
@@ -96,12 +122,15 @@ function armTimer(entry) {
   if (!rooms.has(entry.state.code)) return;
   const due = R.nextTimerDue(entry.state);
   if (due == null) return;
+  // unref'd: the listening server is what keeps the process alive, not a room
+  // waiting 30 minutes to expire — otherwise shutdown blocks on the last timer
   entry.timer = setTimeout(() => {
     entry.timer = null;
     const fx = R.fireTimers(entry.state, Date.now());
     applyFx(entry, fx);
     if (!fx.deleteRoom) armTimer(entry);
   }, Math.max(0, due - Date.now()));
+  if (entry.timer.unref) entry.timer.unref();
 }
 
 // ============================================================
@@ -119,7 +148,7 @@ wss.on("connection", (ws, req) => {
       ws.close(1008, "bad origin"); return;
     }
   }
-  const ip = req.socket.remoteAddress || "?";
+  const ip = clientIp(req);
   const n = (ipCount.get(ip) || 0) + 1;
   if (n > MAX_SOCKETS_PER_IP) { ws.close(1008, "too many connections"); return; }
   ipCount.set(ip, n);
@@ -140,10 +169,28 @@ wss.on("connection", (ws, req) => {
   ws.on("close", () => handleClose(ws));
 });
 
+/* Release whatever room/player this socket is currently bound to. A socket that
+   joins twice would otherwise strand its previous identity: nothing maps to that
+   pid any more, but the room still counts it as connected — so the seat stays
+   claimed and the empty-room expiry never arms. One socket could then hold every
+   seat in a room, or pin MAX_ROOMS rooms open until restart. */
+function detach(ws, immediate) {
+  const entry = ws._code != null ? rooms.get(ws._code) : null;
+  const pid = ws._pid;
+  ws._pid = null; ws._code = null;
+  if (!entry || !pid) return;
+  if (entry.socks.get(pid) !== ws) return; // a newer socket owns this player
+  entry.socks.delete(pid);
+  if (entry.socks.size === 0) entry.emptiedAt = Date.now(); // reclaim order at the room cap
+  applyFx(entry, R.disconnect(entry.state, pid, Date.now(), { immediate }));
+  armTimer(entry);
+}
+
 function handleMessage(ws, msg) {
   if (!msg || typeof msg.type !== "string") return;
   const now = Date.now();
   if (msg.type === "join") {
+    if (ws._pid) detach(ws, true); // this socket is switching identity, not reconnecting
     const entry = getOrCreateRoom(msg.room, !!msg.private);
     if (!entry) { send(ws, { type: "error", message: "server is busy (too many rooms)" }); return; }
     const { pid, resumed, fx } = R.join(entry.state, msg, now);
@@ -172,27 +219,25 @@ function handleClose(ws) {
     const n = (ipCount.get(ws._ip) || 1) - 1;
     if (n <= 0) ipCount.delete(ws._ip); else ipCount.set(ws._ip, n);
   }
-  const entry = ws._code != null ? rooms.get(ws._code) : null;
-  if (!entry || !ws._pid) return;
-  if (entry.socks.get(ws._pid) !== ws) return; // a newer socket owns this player
-  const pid = ws._pid;
-  entry.socks.delete(pid);
-  const fx = R.disconnect(entry.state, pid, Date.now());
-  applyFx(entry, fx);
-  armTimer(entry);
+  detach(ws, false); // a real drop: seats keep their reconnect grace
 }
 
-// keep-alive ping (drop dead sockets)
+// keep-alive ping (drop dead sockets); unref'd so it never holds a test process open
 setInterval(() => {
   wss.clients.forEach((ws) => {
     if (ws.isAlive === false) return ws.terminate();
     ws.isAlive = false; try { ws.ping(); } catch {}
   });
-}, 30000);
+}, 30000).unref();
 
-httpServer.listen(PORT, () => {
-  console.log(`\n  TRUMP multiplayer server running.`);
-  console.log(`  Local:   http://localhost:${PORT}`);
-  console.log(`  Friends on your network join via your machine's LAN IP, e.g. http://<your-ip>:${PORT}`);
-  console.log(`  Create or share a room code on the join screen.\n`);
-});
+// Importable so test/server.test.js can drive the real adapter in-process.
+module.exports = { httpServer, wss, rooms };
+
+if (require.main === module) {
+  httpServer.listen(PORT, () => {
+    console.log(`\n  TRUMP multiplayer server running.`);
+    console.log(`  Local:   http://localhost:${PORT}`);
+    console.log(`  Friends on your network join via your machine's LAN IP, e.g. http://<your-ip>:${PORT}`);
+    console.log(`  Create or share a room code on the join screen.\n`);
+  });
+}

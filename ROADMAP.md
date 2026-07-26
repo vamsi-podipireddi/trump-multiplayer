@@ -127,3 +127,45 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
       `wrangler dev` smoke (assets + MIME, 403 on cross-origin upgrade, DO alarms driving play,
       persistence across reconnect).
 - [x] Commit M8. Loop complete → stop.
+
+### M9 — full-project review fixes
+
+Findings from a review of the finished branch. Three of them contradicted claims the README made, so
+they amend the decisions above rather than extending them.
+
+**Amendments to the fixed decisions**
+
+- **D6 (protocol) amended — deferred seating.** `sit` mid-match no longer seats immediately; it parks the
+  request in `player.wantSeat`, applied by `applyPendingSeats()` at the next deal (and at match start).
+  A new joiner mid-match is queued the same way instead of taking over an AI seat mid-hand. Reason: taking
+  a seat is what reveals a hand, and the old `room.started && player.seat != null` guard only blocked
+  hopping *while seated* — standing up first walked straight past it, and one player could read all four
+  hands in a deal. View gains `you.pendingSeat` and `seats[].claimed`.
+- **D9 (security) amended.** (a) The deal and every id/token now come off the platform CSPRNG, not
+  `Math.random` — V8's `xorshift128+` state is recoverable from the cards a player sees, which shared a
+  stream with `playerId` minting and private room codes. (b) A kicked player stays out (by pid and uid)
+  for the life of the room. (c) `TRUST_PROXY=1` gates reading `X-Forwarded-For` for the per-IP cap.
+- **D12 amended.** `public/solo.html` is still byte-identical to the root game, but is now *generated* by
+  `scripts/build-assets.js` instead of copied by hand, alongside the service worker's cache `VERSION`
+  (a hash of the shell — it was a hard-coded constant that no deploy ever bumped). `npm test` fails stale.
+
+**Fixes**
+
+- [x] Adapters: a socket that sends a second `join` retires its previous identity
+      (`R.disconnect(..., {immediate:true})`) instead of stranding it. Without this, one socket left a
+      "connected" player in every room it touched — seats stayed claimed, the empty-room expiry never
+      armed, and `MAX_ROOMS` could be pinned until restart. Node reclaims an empty room at the cap rather
+      than refusing; the DO reconciles + re-arms expiry on wake via the new `R.reconcile`.
+- [x] `drive()`: the ready gate no longer reads "no live humans" as unanimous consent, and the
+      nobody-connected check moved above it — a deal used to advance unseen when everyone dropped at once.
+- [x] PIMC bounds itself on simulated card plays, not wall clock: Workers freeze `Date.now()` between I/O,
+      so the cutoff never fired inside a DO. Worst case ~2–3 ms warm (was ~10 ms+ and unbounded in principle).
+- [x] Client a11y: the table log and chat diff their sliding window (`syncWindow`) instead of being cleared
+      and refilled — an `aria-live` region rebuilt wholesale re-announces the entire backlog on every state
+      message. The hand skips no-op rebuilds and restores keyboard focus when it does rebuild.
+- [x] `esc()` escapes `'`; turn-timer changes re-arm the turn in flight; the DO writes stats before
+      persisting (its idempotency flag never reached storage); reconnect backs off exponentially with jitter.
+- [x] Tests: 46 → 67. New `test/server.test.js` covers the adapter-level socket bookkeeping the core cannot
+      see; hand secrecy is now asserted across a *sequence* of views; the PWA/mobile assertions read parsed
+      CSS declarations per context instead of matching the stylesheet's exact bytes; `syncWindow` and `esc`
+      are lifted out of the HTML and executed for real. Regression-checked by reverting each fix.
