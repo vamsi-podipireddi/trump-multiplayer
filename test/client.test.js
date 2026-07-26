@@ -168,6 +168,10 @@ test("client only reads view fields the core actually publishes", () => {
     assert.ok(f in v.seats[0], `view.seats[0] is missing ${f}`);
   for (const f of ["seat", "playerId", "spectator", "away", "ready", "pendingSeat"])
     assert.ok(f in v.you, `view.you is missing ${f}`);
+  // the table renders these directly; they used to ship unused (tricksWon) or not at all (bids)
+  for (const f of ["tricksWon", "bids", "bidActive", "highBidder", "capturedPoints"])
+    assert.ok(f in v, `view is missing ${f}`);
+  assert.equal(v.bids.length, 4, "one bid slot per seat");
   assert.strictEqual(v.now, 1000, "view.now must echo the caller's clock for skew correction");
 });
 
