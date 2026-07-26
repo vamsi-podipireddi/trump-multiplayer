@@ -1,42 +1,36 @@
 "use strict";
 /* ============================================================
-   TRUMP — Cloudflare Worker + Durable Object backend.
+   TRUMP — Cloudflare Worker + Durable Object adapter.
 
-   One Durable Object instance per room (addressed by its room code
-   via idFromName). The Worker serves the static client (env.ASSETS)
-   and forwards WebSocket upgrades on /ws?room=CODE to that room's DO.
+   One Durable Object per room (addressed by room code via idFromName).
+   Room/game logic lives in room.js (shared with server.js); this file
+   owns the platform bits:
 
-   Game logic lives in engine.js (pure, reused verbatim). We use the
-   NON-hibernation WebSocket API (server.accept()), so the DO stays
-   resident while a game is live — which means the original
-   setTimeout-driven game loop from server.js ports almost unchanged.
-
-   Deploy topologies (same code works for both):
-     A) Single Worker + static assets  → set [assets] in wrangler.toml,
-        client connects same-origin (WS_BASE = "").  [recommended]
-     B) Pages (static) + this Worker    → drop [assets]; client sets
-        WS_BASE to this Worker's wss:// URL.
+   - WebSocket HIBERNATION API (ctx.acceptWebSocket + webSocketMessage/
+     Close/Error handlers): the DO is evicted between events instead of
+     burning duration for a whole match. Each socket carries its pid in
+     a serialized attachment, so identity survives hibernation.
+   - PERSISTENCE: the whole room state (pure JSON) is written to
+     ctx.storage after every event and restored on wake — matches
+     survive deploys, evictions, and restarts.
+   - ALARMS: room.js models timers as data; we arm one storage alarm
+     for the earliest due timer. Alarms fire even while hibernated.
    ============================================================ */
 
-import E from "../engine.js";
+import R from "../room.js";
 
-const AI_DELAY = 800;              // ms an AI "thinks" before acting
-const TRICK_DELAY = 1600;          // pause showing a completed trick
-const ROUND_DELAY = 6000;          // pause showing round results
-const LOBBY_GRACE_MS = 15 * 1000;  // hold a lobby seat through a brief disconnect
-const MAX_PLAYERS_PER_ROOM = 12, MSG_RATE = 100; // basic abuse caps
-const SEAT_LABEL = ["South", "West", "North", "East"];
+const MSG_RATE = 100; // msgs/sec per socket
 
-function randId(n, alpha) {
-  const chars = alpha ? "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" : "abcdefghijklmnopqrstuvwxyz0123456789";
-  let s = ""; for (let i = 0; i < n; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
+function okOrigin(request, url, env) {
+  const origin = request.headers.get("Origin");
+  if (!origin) return true; // non-browser client
+  try { if (new URL(origin).host === url.host) return true; } catch {}
+  const allow = (env && env.ALLOW_ORIGIN ? String(env.ALLOW_ORIGIN) : "").split(",").map(s => s.trim()).filter(Boolean);
+  return allow.includes(origin);
 }
-function normCode(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6); }
-function codePoints(s, n) { return [...s].slice(0, n).join(""); } // truncate by code point (don't split emoji)
 
 // ============================================================
-//  Worker entry: static assets + WebSocket routing
+//  Worker entry: static assets + WebSocket routing (+ /stats in M8)
 // ============================================================
 export default {
   async fetch(request, env) {
@@ -44,257 +38,220 @@ export default {
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket")
         return new Response("expected websocket", { status: 426 });
-      const code = normCode(url.searchParams.get("room"));
+      if (!okOrigin(request, url, env))
+        return new Response("forbidden origin", { status: 403 });
+      const code = R.normCode(url.searchParams.get("room"));
       if (!code) return new Response("missing room code", { status: 400 });
-      const id = env.ROOMS.idFromName(code);     // code -> one DO, globally
-      return env.ROOMS.get(id).fetch(request);   // hand the upgrade to the room
+      const id = env.ROOMS.idFromName(code);
+      return env.ROOMS.get(id).fetch(request);
     }
     if (url.pathname === "/health")
       return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
+    if (url.pathname === "/stats") return statsResponse(url, env);
     if (env.ASSETS) return env.ASSETS.fetch(request); // single-Worker deploy serves the client
-    return new Response("not found", { status: 404 }); // Pages deploy serves the client itself
+    return new Response("not found", { status: 404 });
   },
 };
 
+/* Optional player stats, backed by D1 when a DB binding exists (see schema.sql). */
+async function statsResponse(url, env) {
+  const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { "content-type": "application/json" } });
+  if (!env.DB) return json({ available: false });
+  const uid = String(url.searchParams.get("uid") || "").slice(0, 32);
+  if (!uid) return json({ error: "missing uid" }, 400);
+  try {
+    const row = await env.DB.prepare(
+      "SELECT COUNT(*) AS games, SUM(won) AS wins, SUM(was_declarer) AS bidsWon, SUM(bid_made) AS bidsMade FROM matches WHERE uid = ?"
+    ).bind(uid).first();
+    return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0 });
+  } catch {
+    return json({ available: false });
+  }
+}
+
 // ============================================================
-//  RoomDO — one room (authoritative game state + realtime)
+//  RoomDO — hibernating, persistent room
 // ============================================================
 export class RoomDO {
-  constructor(state, env) {
-    this.state = state;
+  constructor(ctx, env) {
+    this.ctx = ctx;
     this.env = env;
-    this.code = null;
-    this.G = E.createMatch();
-    this.started = false;
-    this.difficulty = "normal";
-    this.seatOwner = [null, null, null, null]; // playerId per seat
-    this.players = new Map();                   // playerId -> {name, seat|null, connected, ws, _dropTimer}
-    this.host = null;
-    this.timers = [];
+    this.room = null;
+    this.rl = new WeakMap(); // per-socket rate limiter; resets on wake (fine)
+    ctx.blockConcurrencyWhile(async () => {
+      this.room = (await ctx.storage.get("room")) || null;
+      if (!this.room) return;
+      /* The live sockets are the source of truth for who is connected; the
+         stored state may predate a crash. R.reconcile also re-arms the empty-room
+         expiry, so a room whose players all vanished mid-hibernation still gets
+         collected instead of sitting in storage forever. */
+      const live = [];
+      for (const ws of ctx.getWebSockets()) {
+        const att = this.att(ws);
+        if (att && att.pid) live.push(att.pid);
+      }
+      R.reconcile(this.room, live, Date.now());
+      await this.persist();
+      await this.armAlarm();
+    });
   }
+
+  att(ws) { try { return ws.deserializeAttachment(); } catch { return null; } }
+  sockFor(pid) {
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = this.att(ws);
+      if (att && att.pid === pid) return ws;
+    }
+    return null;
+  }
+  send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch {} }
 
   async fetch(request) {
     const url = new URL(request.url);
-    if (!this.code) this.code = normCode(url.searchParams.get("room")) || "ROOM";
     if (request.headers.get("Upgrade") !== "websocket")
       return new Response("expected websocket", { status: 426 });
+    if (!this.room) this.room = R.createRoom(R.normCode(url.searchParams.get("room")) || "ROOM");
     const pair = new WebSocketPair();
     const client = pair[0], server = pair[1];
-    server.accept(); // non-hibernation: DO stays resident while open, so timers fire
-    this.wire(server);
+    this.ctx.acceptWebSocket(server); // hibernation API — DO may sleep between events
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  // ---- socket plumbing ----
-  wire(ws) {
-    ws._pid = null;
-    ws._rl = null;
-    ws.addEventListener("message", (ev) => {
+  async persist() {
+    if (this.room) await this.ctx.storage.put("room", this.room);
+  }
+  async armAlarm() {
+    if (!this.room) return;
+    const due = R.nextTimerDue(this.room);
+    if (due != null) await this.ctx.storage.setAlarm(due);
+    else await this.ctx.storage.deleteAlarm();
+  }
+
+  async applyFx(fx, ws) {
+    if (!fx) return;
+    if (fx.sends) for (const s of fx.sends) {
+      if (s.pid == null) { if (ws) this.send(ws, s.obj); }
+      else { const t = this.sockFor(s.pid); if (t) this.send(t, s.obj); }
+    }
+    if (fx.closes) for (const pid of fx.closes) {
+      const t = this.sockFor(pid);
+      if (t) { try { t.serializeAttachment({ pid: null }); t.close(1000, "kicked"); } catch {} }
+    }
+    if (fx.emote) {
+      const msg = JSON.stringify({ type: "emote", seat: fx.emote.seat, e: fx.emote.e });
+      for (const sock of this.ctx.getWebSockets()) { try { sock.send(msg); } catch {} }
+    }
+    if (fx.broadcast && this.room) {
       const now = Date.now();
-      if (!ws._rl || now - ws._rl.ts > 1000) ws._rl = { ts: now, n: 0 };
-      if (++ws._rl.n > MSG_RATE) return; // drop floods
-      let msg; try { msg = JSON.parse(typeof ev.data === "string" ? ev.data : "{}"); } catch { return; }
-      try { this.handleMessage(ws, msg); } catch { this.send(ws, { type: "error", message: "server error" }); }
-    });
-    const bye = () => this.handleClose(ws);
-    ws.addEventListener("close", bye);
-    ws.addEventListener("error", bye);
-  }
-  send(ws, obj) { try { ws.send(JSON.stringify(obj)); } catch {} }
-  broadcast() {
-    for (const [pid, p] of this.players)
-      if (p.connected && p.ws) this.send(p.ws, { type: "state", view: this.buildView(pid) });
-  }
-
-  // ---- room helpers ----
-  seatIsHuman(seat) {
-    const owner = this.seatOwner[seat];
-    const p = owner != null ? this.players.get(owner) : null;
-    return !!(p && p.connected);
-  }
-  connectedCount() { let n = 0; for (const p of this.players.values()) if (p.connected) n++; return n; }
-  clearTimers() { this.timers.forEach(clearTimeout); this.timers = []; }
-  schedule(ms, fn) { this.timers.push(setTimeout(fn, ms)); }
-  reassignHost() {
-    const cur = this.host != null ? this.players.get(this.host) : null;
-    if (cur && cur.connected) return;
-    let next = null;
-    for (const [pid, p] of this.players) { if (p.connected && p.seat != null) { next = pid; break; } }
-    if (!next) for (const [pid, p] of this.players) { if (p.connected) { next = pid; break; } }
-    this.host = next;
-  }
-  promoteSpectatorToSeat() {
-    if (this.started) return;
-    for (let s = 0; s < 4; s++) if (this.seatOwner[s] == null) {
-      for (const [pid2, p2] of this.players) if (p2.connected && p2.seat == null) { this.seatOwner[s] = pid2; p2.seat = s; break; }
-    }
-  }
-
-  // ---- per-viewer redacted view (the security boundary: no foreign hands) ----
-  buildView(pid) {
-    const G = this.G;
-    const player = this.players.get(pid);
-    const seat = player ? player.seat : null;
-    const v = E.publicView(G);
-    v.seats = [0, 1, 2, 3].map(s => {
-      const owner = this.seatOwner[s];
-      const op = owner != null ? this.players.get(owner) : null;
-      return {
-        seat: s,
-        label: SEAT_LABEL[s],
-        name: this.started ? G.names[s] : (op ? op.name : null),
-        isHuman: owner != null,
-        connected: op ? op.connected : false,
-        you: s === seat,
-      };
-    });
-    v.room = {
-      code: this.code, started: this.started,
-      isHost: this.host != null && this.host === pid,
-      hostName: this.host != null && this.players.get(this.host) ? this.players.get(this.host).name : null,
-      humans: [...this.players.values()].filter(p => p.seat != null).length,
-    };
-    v.you = { seat, playerId: pid, spectator: seat === null };
-    if (this.started && seat != null) {
-      v.you.hand = G.hands[seat].slice(); // ONLY this viewer's hand
-      const ra = E.requiredActor(G);
-      if (ra && ra.seat === seat && this.seatIsHuman(seat)) {
-        v.you.toAct = true; v.you.actKind = ra.kind;
-        if (ra.kind === "play") v.you.legal = E.legalCards(G, seat);
-        else if (ra.kind === "call") v.you.callable = E.callableCards(G, seat);
-        else if (ra.kind === "bid") v.you.minBid = E.minNextBid(G);
+      for (const sock of this.ctx.getWebSockets()) {
+        const att = this.att(sock);
+        if (att && att.pid && this.room.players[att.pid])
+          this.send(sock, { type: "state", view: R.buildView(this.room, att.pid, now) });
       }
     }
-    return v;
+    if (fx.deleteRoom) {
+      for (const sock of this.ctx.getWebSockets()) { try { sock.close(1000, "room expired"); } catch {} }
+      await this.ctx.storage.deleteAll();
+      await this.ctx.storage.deleteAlarm();
+      this.room = null;
+    }
   }
 
-  // ---- game driver: broadcast, then schedule AI / timed transitions ----
-  drive() {
-    this.clearTimers();
-    this.broadcast();
-    if (!this.started) return;
-    if (this.connectedCount() === 0) return; // pause when nobody is connected
-    const G = this.G;
-    if (G.phase === "trickEnd") { this.schedule(TRICK_DELAY, () => { E.advanceTrick(G); this.drive(); }); return; }
-    if (G.phase === "roundEnd") { this.schedule(ROUND_DELAY, () => { E.nextDeal(G); this.drive(); }); return; }
-    if (G.phase === "matchOver") return; // host starts a new match
-    const ra = E.requiredActor(G);
-    if (!ra) return;
-    if (this.seatIsHuman(ra.seat)) return; // wait for that human's action
-    this.schedule(AI_DELAY, () => {
-      const act = E.aiActionFor(G, ra.seat, this.difficulty === "easy");
-      if (act) this.applyEngineAction(ra.seat, act);
-      this.drive();
-    });
-  }
-  applyEngineAction(seat, act) {
-    const G = this.G;
-    if (act.type === "bid") E.applyBid(G, seat, act.value);
-    else if (act.type === "trump") E.applyTrump(G, act.suit);
-    else if (act.type === "call") E.applyCall(G, act.card);
-    else if (act.type === "play") E.applyPlay(G, seat, act.card);
-  }
-  startMatch() {
-    this.G.names = [0, 1, 2, 3].map(s => {
-      const owner = this.seatOwner[s];
-      const op = owner != null ? this.players.get(owner) : null;
-      return op ? op.name : `Bot-${SEAT_LABEL[s][0]}`;
-    });
-    this.started = true;
-    E.startMatch(this.G);
-    this.drive();
+  /* `phaseBefore` opts this event into the end-of-match stats write. It has to
+     happen before persist(), because recordStats() stamps its own idempotency
+     flag onto G — written afterwards it would never reach storage. */
+  async afterEvent(fx, ws, phaseBefore) {
+    await this.applyFx(fx, ws);
+    if (phaseBefore !== undefined && this.room && this.room.started &&
+        this.room.G.phase === "matchOver" && phaseBefore !== "matchOver") await this.recordStats();
+    if (this.room) { await this.persist(); await this.armAlarm(); }
   }
 
-  // ---- messages ----
-  handleMessage(ws, msg) {
+  // ---- hibernation event handlers ----
+  async webSocketMessage(ws, data) {
+    if (!this.room) return;
+    let rl = this.rl.get(ws);
+    const wall = Date.now();
+    if (!rl || wall - rl.ts > 1000) { rl = { ts: wall, n: 0 }; this.rl.set(ws, rl); }
+    if (++rl.n > MSG_RATE) return; // drop floods
+    let msg; try { msg = JSON.parse(typeof data === "string" ? data : "{}"); } catch { return; }
     if (!msg || typeof msg.type !== "string") return;
-    if (msg.type === "join") return this.handleJoin(ws, msg);
-    const pid = ws._pid;
-    if (!pid) return;
-    const player = this.players.get(pid);
-    if (!player) return;
 
-    if (msg.type === "start") { if (this.host === pid && !this.started) this.startMatch(); return; }
-    if (msg.type === "newMatch") { if (this.host === pid && this.started && this.G.phase === "matchOver") this.startMatch(); return; }
-
-    // gameplay actions — must be the seated player whose turn it is
-    if (!this.started || player.seat == null) return;
-    const G = this.G, seat = player.seat;
-    const ra = E.requiredActor(G);
-    if (!ra || ra.seat !== seat) return; // not your turn
-    if (msg.type === "bid" && ra.kind === "bid") {
-      const value = msg.value === null || msg.value === undefined ? null : Number(msg.value);
-      if (!E.bidIsLegal(G, seat, value)) { this.send(ws, { type: "error", message: "illegal bid" }); return; }
-      E.applyBid(G, seat, value); this.drive();
-    } else if (msg.type === "trump" && ra.kind === "trump") {
-      if (!E.SUITS.includes(msg.suit)) return;
-      E.applyTrump(G, msg.suit); this.drive();
-    } else if (msg.type === "call" && ra.kind === "call") {
-      const card = msg.card && { suit: msg.card.suit, rank: Number(msg.card.rank) };
-      if (!E.callIsLegal(G, card)) { this.send(ws, { type: "error", message: "illegal call" }); return; }
-      E.applyCall(G, card); this.drive();
-    } else if (msg.type === "play" && ra.kind === "play") {
-      const card = msg.card && { suit: msg.card.suit, rank: Number(msg.card.rank) };
-      if (!card || !E.playIsLegal(G, seat, card)) { this.send(ws, { type: "error", message: "illegal play" }); return; }
-      E.applyPlay(G, seat, card); this.drive();
-    }
-  }
-
-  handleJoin(ws, msg) {
-    const name = codePoints(String(msg.name || "").trim(), 16) || "Player";
-    let pid = typeof msg.playerId === "string" ? msg.playerId : null;
-    let player = pid ? this.players.get(pid) : null;
-    if (player) {
-      // reconnect: newest socket wins. Retire any prior socket and detach its
-      // identity so its later 'close' can never clobber this live session.
-      const old = player.ws;
-      if (old && old !== ws) { old._pid = null; try { old.close(1000, "superseded"); } catch {} }
-      if (player._dropTimer) { clearTimeout(player._dropTimer); player._dropTimer = null; }
-      player.connected = true; player.ws = ws; player.name = name;
-      if (this.started && player.seat != null) this.G.names[player.seat] = name;
-    } else {
-      if (this.players.size >= MAX_PLAYERS_PER_ROOM) { this.send(ws, { type: "error", message: "room is full" }); return; }
-      pid = randId(16, false);
-      let seat = null;
-      for (let s = 0; s < 4; s++) if (this.seatOwner[s] == null) { seat = s; break; }
-      if (seat != null) {
-        this.seatOwner[seat] = pid;
-        if (this.started) this.G.names[seat] = name; // a human taking over an AI seat mid-match
+    try {
+      if (msg.type === "join") {
+        /* A socket that joins again is switching identity, not reconnecting.
+           Retire the old pid first: nothing would map to it afterwards, yet the
+           room would still count it connected — holding its seat and blocking
+           the empty-room expiry forever. */
+        const prev = this.att(ws);
+        if (prev && prev.pid && this.room.players[prev.pid]) {
+          ws.serializeAttachment({ pid: null });
+          await this.applyFx(R.disconnect(this.room, prev.pid, wall, { immediate: true }), null);
+        }
+        const { pid, resumed, fx } = R.join(this.room, msg, wall);
+        if (pid == null) { await this.applyFx(fx, ws); return; }
+        if (resumed) {
+          for (const other of this.ctx.getWebSockets()) {
+            const att = this.att(other);
+            if (other !== ws && att && att.pid === pid) {
+              try { other.serializeAttachment({ pid: null }); other.close(1000, "superseded"); } catch {}
+            }
+          }
+        }
+        ws.serializeAttachment({ pid });
+        await this.afterEvent(fx, ws);
+        return;
       }
-      player = { name, seat, connected: true, ws, _dropTimer: null };
-      this.players.set(pid, player);
+      const att = this.att(ws);
+      if (!att || !att.pid) return;
+      const before = this.room.started ? this.room.G.phase : null;
+      const fx = R.message(this.room, att.pid, msg, wall);
+      await this.afterEvent(fx, ws, before);
+    } catch {
+      this.send(ws, { type: "error", message: "server error" });
     }
-    if (this.host == null) this.host = pid; else this.reassignHost();
-
-    ws._pid = pid;
-    this.send(ws, { type: "joined", playerId: pid, room: this.code, seat: player.seat });
-    this.drive(); // broadcast + (re)start the loop if it was paused
   }
 
-  handleClose(ws) {
-    const pid = ws._pid;
-    if (!pid) return;
-    const player = this.players.get(pid);
-    if (!player) return;
-    if (player.ws && player.ws !== ws) return; // a newer socket already owns this player — ignore stale close
-    player.connected = false; player.ws = null;
-
-    if (player.seat == null) {
-      this.players.delete(pid); // spectators carry no reconnect value; drop them
-    } else if (!this.started) {
-      // lobby: hold the seat through a brief blip, then release + promote a waiting spectator
-      if (player._dropTimer) clearTimeout(player._dropTimer);
-      player._dropTimer = setTimeout(() => {
-        player._dropTimer = null;
-        if (player.connected) return;
-        this.seatOwner[player.seat] = null; this.players.delete(pid);
-        this.promoteSpectatorToSeat(); this.reassignHost();
-        if (this.connectedCount() > 0) this.drive();
-      }, LOBBY_GRACE_MS);
+  async webSocketClose(ws) { await this.dropSocket(ws); }
+  async webSocketError(ws) { await this.dropSocket(ws); }
+  async dropSocket(ws) {
+    const att = this.att(ws);
+    if (!att || !att.pid || !this.room) return;
+    // ignore if a newer socket owns this pid
+    for (const other of this.ctx.getWebSockets()) {
+      if (other !== ws && (this.att(other) || {}).pid === att.pid) return;
     }
-    // (started + seated: keep the record so the seat is held and AI plays until they return)
-    this.reassignHost();
-    if (this.connectedCount() === 0) this.clearTimers(); // pause; DO is evicted when fully idle
-    else this.drive();
+    const fx = R.disconnect(this.room, att.pid, Date.now());
+    await this.afterEvent(fx, null);
+  }
+
+  async alarm() {
+    if (!this.room) { await this.ctx.storage.deleteAlarm(); return; }
+    const before = this.room.started ? this.room.G.phase : null;
+    const fx = R.fireTimers(this.room, Date.now());
+    await this.afterEvent(fx, null, before);
+  }
+
+  /* One row per human seat at matchOver, when a D1 binding exists (M8/D10). */
+  async recordStats() {
+    if (!this.env.DB || !this.room || this.room.G.phase !== "matchOver") return;
+    if (this.room.G._statsRecorded) return;
+    this.room.G._statsRecorded = true; // lives on G: a rematch swaps in a fresh G, clearing it
+    const G = this.room.G;
+    const max = Math.max(...G.scores);
+    try {
+      const stmts = [];
+      for (let seat = 0; seat < 4; seat++) {
+        const owner = this.room.seatOwner[seat];
+        const p = owner != null ? this.room.players[owner] : null;
+        if (!p || !p.uid) continue;
+        const r = G.lastResult || {};
+        stmts.push(this.env.DB.prepare(
+          "INSERT INTO matches (uid, name, room, won, was_declarer, bid_made, ts) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        ).bind(p.uid, p.name, this.room.code, G.scores[seat] === max ? 1 : 0,
+               r.declarer === seat ? 1 : 0, r.declarer === seat && r.made ? 1 : 0, Date.now()));
+      }
+      if (stmts.length) await this.env.DB.batch(stmts);
+    } catch { /* stats are best-effort */ }
   }
 }

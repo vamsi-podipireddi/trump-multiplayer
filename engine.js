@@ -13,9 +13,28 @@ const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14];
 const NUM_PLAYERS = 4;
 const MIN_BID = 130, MAX_BID = 250, BID_STEP = 5, TOTAL_POINTS = 250, TARGET_GAMES = 5, MAX_REDEALS = 4;
 
+/* ---- randomness ----
+   The deal must not come off the same stream as anything an opponent can
+   observe. V8's Math.random is xorshift128+, and its state is recoverable from
+   a handful of outputs — i.e. from the cards a player is dealt — which would
+   leak both future deals and room.js's session tokens. Dealing therefore uses
+   the platform CSPRNG (present in node >=19 and in Workers), with rejection
+   sampling so the modulo is unbiased. AI-internal randomness has nothing to
+   protect and stays on the cheap generator. */
+function randomInt(n) {
+  const c = globalThis.crypto;
+  if (!c || typeof c.getRandomValues !== "function") return Math.floor(Math.random() * n);
+  const limit = Math.floor(0x100000000 / n) * n; // drop the biased tail of the 32-bit range
+  const buf = new Uint32Array(1);
+  let v;
+  do { c.getRandomValues(buf); v = buf[0]; } while (v >= limit);
+  return v % n;
+}
+
 // ---- card helpers ----
 function buildDeck() { const d = []; for (const s of SUITS) for (const r of RANKS) d.push({ suit: s, rank: r }); return d; }
-function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function shuffleFast(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 function sameCard(a, b) { return !!a && !!b && a.suit === b.suit && a.rank === b.rank; }
 function rankLabel(r) { return ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r); }
 function cardStr(c) { return rankLabel(c.rank) + c.suit; }
@@ -44,13 +63,14 @@ function legalCards(G, p) {
 function sideOf(G, p) { return (p === G.declarer || p === G.partner) ? "D" : "O"; }
 function defenders(G) { return [0,1,2,3].filter(p => p !== G.declarer && p !== G.partner); }
 function name(G, p) { return (G.names && G.names[p]) || ["South","West","North","East"][p]; }
-function logG(G, text, cls) { G.log.push({ text, cls: cls || "" }); if (G.log.length > 80) G.log.shift(); }
+function logG(G, text, cls) { if (G._silent) return; G.log.push({ text, cls: cls || "" }); if (G.log.length > 80) G.log.shift(); }
 
 // ============================================================
 //  Lifecycle
 // ============================================================
-function createMatch(names) {
+function createMatch(names, opts) {
   return {
+    targetGames: opts && [3, 5, 7].includes(opts.targetDeals) ? opts.targetDeals : TARGET_GAMES,
     phase: "lobby", dealer: 0, roundNumber: 0, scores: [0,0,0,0],
     names: names ? names.slice() : ["South","West","North","East"],
     hands: [[],[],[],[]],
@@ -59,11 +79,11 @@ function createMatch(names) {
     teamsRevealed: false, bonusSuit: null,
     trick: [], leadSuit: null, turn: 0, leader: 0, trickNumber: 0,
     tricksWon: [0,0,0,0], capturedPoints: [0,0,0,0], lastWinner: -1, lastWinnerSlot: -1,
-    lastResult: null, log: [],
+    lastResult: null, log: [], playedCards: [], voids: [{}, {}, {}, {}],
   };
 }
 function startMatch(G) {
-  G.scores = [0,0,0,0]; G.dealer = Math.floor(Math.random() * NUM_PLAYERS);
+  G.scores = [0,0,0,0]; G.dealer = randomInt(NUM_PLAYERS);
   G.roundNumber = 0; G.redealCount = 0; G.log = []; G.lastResult = null;
   nextDeal(G);
 }
@@ -84,9 +104,10 @@ function deal(G) {
   for (let i = 0; i < 52; i++) G.hands[(G.dealer + 1 + i) % NUM_PLAYERS].push(deck[i]);
   G.trump = null; G.calledCard = null; G.partner = null; G.declarer = null;
   G.bid = null; G.teamsRevealed = false; G.lastResult = null;
-  G.bonusSuit = SUITS[Math.floor(Math.random() * SUITS.length)];
+  G.bonusSuit = SUITS[randomInt(SUITS.length)];
   G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
   G.lastWinner = -1; G.lastWinnerSlot = -1;
+  G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
   G.hands.forEach(h => sortHand(h, null));
   G.bidActive = [0,1,2,3]; G.highBid = null; G.highBidder = null;
   G.bidTurn = (G.dealer + 1) % NUM_PLAYERS; G.phase = "bidding";
@@ -179,10 +200,12 @@ function applyPlay(G, p, card) {
   const idx = hand.findIndex(c => sameCard(c, card));
   if (idx === -1) return;
   hand.splice(idx, 1);
+  if (G.trick.length > 0 && card.suit !== G.leadSuit && G.voids) G.voids[p][G.leadSuit] = true; // public: p is out of the led suit
+  if (G.playedCards) G.playedCards.push(card);
   if (G.trick.length === 0) G.leadSuit = card.suit;
   G.trick.push({ player: p, card });
   G.turn = (p + 1) % NUM_PLAYERS;
-  logG(G, `${name(G, p)} plays ${cardStr(card)}${sameCard(card, G.calledCard) ? " (the called card!)" : ""}`);
+  if (!G._silent) logG(G, `${name(G, p)} plays ${cardStr(card)}${sameCard(card, G.calledCard) ? " (the called card!)" : ""}`);
   if (G.trick.length === NUM_PLAYERS) resolveTrick(G);
 }
 function resolveTrick(G) {
@@ -191,7 +214,7 @@ function resolveTrick(G) {
   const tp = trickPoints(G, G.trick);
   G.tricksWon[winner]++; G.capturedPoints[winner] += tp;
   G.lastWinnerSlot = wIdx; G.lastWinner = winner;
-  logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
+  if (!G._silent) logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
   G.phase = "trickEnd";
 }
 function advanceTrick(G) {
@@ -207,9 +230,9 @@ function endRound(G) {
   const made = dPts >= G.bid;
   const winners = made ? [G.declarer, G.partner] : defenders(G);
   winners.forEach(p => G.scores[p]++);
-  logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
+  if (!G._silent) logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
   G.lastResult = { made, dPts, bid: G.bid, winners: winners.slice(), declarer: G.declarer, partner: G.partner };
-  G.phase = G.scores.some(s => s >= TARGET_GAMES) ? "matchOver" : "roundEnd";
+  G.phase = G.scores.some(s => s >= (G.targetGames || TARGET_GAMES)) ? "matchOver" : "roundEnd";
 }
 
 // ============================================================
@@ -332,15 +355,131 @@ function requiredActor(G) {
     default: return null;
   }
 }
-/* The action an AI would take for the seat that currently must act. */
-function aiActionFor(G, seat, easy) {
+/* The action an AI would take for the seat that currently must act.
+   difficulty: "easy" | "normal" | "hard" (legacy boolean easy also accepted). */
+function aiActionFor(G, seat, difficulty) {
+  const easy = difficulty === true || difficulty === "easy";
+  const hard = difficulty === "hard";
   const ra = requiredActor(G);
   if (!ra || ra.seat !== seat) return null;
   if (ra.kind === "bid") return { type: "bid", value: aiBidDecision(G, seat, easy) };
   if (ra.kind === "trump") return { type: "trump", suit: aiPickTrump(G, seat) };
   if (ra.kind === "call") return { type: "call", card: aiPickPartner(G, seat) };
-  if (ra.kind === "play") return { type: "play", card: chooseAICard(G, seat, easy) };
+  if (ra.kind === "play") return { type: "play", card: hard ? choosePIMCCard(G, seat) : chooseAICard(G, seat, easy) };
   return null;
+}
+// ============================================================
+//  Hard AI — PIMC (Perfect Information Monte Carlo)
+//  Sample determinizations of the unseen cards consistent with the
+//  public facts (played cards, revealed voids, the called card's
+//  holder), roll every legal move out with the heuristic AI, and
+//  pick the move with the best mean outcome for our side.
+// ============================================================
+const cardKey = c => c.suit + c.rank;
+
+/* Deal the unseen cards to the other three seats, honoring hand counts,
+   observed voids, and the called card's known holder. Falls back to
+   ignoring voids if constrained sampling keeps failing (rare). */
+function determinize(G, me) {
+  const seen = new Set(G.hands[me].map(cardKey));
+  for (const c of (G.playedCards || [])) seen.add(cardKey(c));
+  const unseen = buildDeck().filter(c => !seen.has(cardKey(c)));
+  const others = [0, 1, 2, 3].filter(p => p !== me);
+  const voids = G.voids || [{}, {}, {}, {}];
+
+  let forcedTo = null;
+  if (G.calledCard && G.partner != null && G.partner !== me &&
+      unseen.some(c => sameCard(c, G.calledCard))) forcedTo = G.partner;
+
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const useVoids = attempt < 20;
+    const allowedCount = (c) => others.reduce((n, p) => n + (useVoids && voids[p][c.suit] ? 0 : 1), 0);
+    const need = {}; others.forEach(p => { need[p] = G.hands[p].length; });
+    const out = {}; others.forEach(p => { out[p] = []; });
+    const pool = shuffleFast(unseen.slice()); // AI-internal sampling: no need for the CSPRNG
+    let ok = true;
+    if (forcedTo != null && need[forcedTo] > 0) {
+      const i = pool.findIndex(c => sameCard(c, G.calledCard));
+      out[forcedTo].push(pool.splice(i, 1)[0]); need[forcedTo]--;
+    }
+    pool.sort((a, b) => allowedCount(a) - allowedCount(b)); // most-constrained cards first
+    for (const c of pool) {
+      const cand = others.filter(p => need[p] > 0 && !(useVoids && voids[p][c.suit]));
+      if (!cand.length) { ok = false; break; }
+      const p = cand[Math.floor(Math.random() * cand.length)];
+      out[p].push(c); need[p]--;
+    }
+    if (ok && others.every(p => need[p] === 0)) return out;
+  }
+  return null; // pathological; caller falls back to the heuristic
+}
+
+function rolloutClone(G) {
+  return {
+    _silent: true,
+    phase: G.phase, trump: G.trump, bonusSuit: G.bonusSuit,
+    declarer: G.declarer, partner: G.partner, teamsRevealed: true, bid: G.bid,
+    calledCard: G.calledCard, dealer: G.dealer, roundNumber: G.roundNumber,
+    hands: G.hands.map(h => h.slice()),
+    trick: G.trick.map(t => ({ player: t.player, card: t.card })),
+    leadSuit: G.leadSuit, turn: G.turn, leader: G.leader, trickNumber: G.trickNumber,
+    tricksWon: G.tricksWon.slice(), capturedPoints: G.capturedPoints.slice(),
+    scores: G.scores.slice(), names: G.names, log: [],
+    lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot, lastResult: null,
+    targetGames: G.targetGames,
+  };
+}
+function playOutRound(sim) {
+  for (let guard = 0; guard < 300; guard++) {
+    if (sim.phase === "trickEnd") { advanceTrick(sim); continue; }
+    if (sim.phase !== "playing") return;
+    applyPlay(sim, sim.turn, chooseAICard(sim, sim.turn, false));
+  }
+}
+
+/* Work budget in *simulated card plays*, not milliseconds. Cloudflare freezes
+   Date.now() between I/O operations, so a wall-clock cutoff never trips inside a
+   Durable Object and the search would always run its full width — the widest
+   position (13 legal moves, 52 cards live) is also the most expensive one. This
+   bound is deterministic, so node and Workers spend the same effort, and it
+   spends it where PIMC actually pays: the endgame. */
+const PIMC_PLAY_BUDGET = 8000;
+
+function choosePIMCCard(G, me, opts) {
+  const legal = legalCards(G, me);
+  if (legal.length <= 1) return legal[0];
+  const timeMs = (opts && opts.timeMs) || 25;
+  const budget = (opts && opts.playBudget) || PIMC_PLAY_BUDGET;
+  const cardsLeft = G.hands.reduce((n, h) => n + h.length, 0) || 1;
+  const affordable = Math.max(1, Math.floor(budget / (legal.length * cardsLeft)));
+  const maxDet = Math.min((opts && opts.determinizations) || 24, affordable);
+  const started = Date.now();
+  const iAmDeclaring = sideOf(G, me) === "D";
+  const totals = legal.map(() => 0), counts = legal.map(() => 0);
+
+  for (let d = 0; d < maxDet; d++) {
+    if (d >= 4 && Date.now() - started > timeMs) break; // secondary guard; a no-op on Workers
+    const world = determinize(G, me);
+    if (!world) return chooseAICard(G, me, false);
+    for (let i = 0; i < legal.length; i++) {
+      const sim = rolloutClone(G);
+      for (const p of [0, 1, 2, 3]) if (p !== me) sim.hands[p] = world[p].slice();
+      applyPlay(sim, me, legal[i]);
+      playOutRound(sim);
+      const dPts = sim.capturedPoints[sim.declarer] + sim.capturedPoints[sim.partner];
+      const made = dPts >= sim.bid;
+      const win = (iAmDeclaring === made) ? 1 : 0;
+      const margin = iAmDeclaring ? dPts : TOTAL_POINTS - dPts;
+      totals[i] += win * 1000 + margin; counts[i]++;
+    }
+  }
+  let best = 0, bestAvg = -Infinity;
+  for (let i = 0; i < legal.length; i++) {
+    if (!counts[i]) continue;
+    const avg = totals[i] / counts[i];
+    if (avg > bestAvg) { bestAvg = avg; best = i; }
+  }
+  return legal[best];
 }
 
 /* Public, hand-free snapshot safe to send to anyone. */
@@ -356,7 +495,7 @@ function publicView(G) {
     lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot,
     handCounts: G.hands.map(h => h.length), names: G.names.slice(),
     log: G.log.slice(-40), lastResult: G.lastResult || null,
-    consts: { MIN_BID, MAX_BID, BID_STEP, TOTAL_POINTS, TARGET_GAMES, NUM_PLAYERS },
+    consts: { MIN_BID, MAX_BID, BID_STEP, TOTAL_POINTS, TARGET_GAMES: G.targetGames || TARGET_GAMES, NUM_PLAYERS },
   };
 }
 
@@ -368,4 +507,5 @@ module.exports = {
   applyPlay, playIsLegal, advanceTrick, legalCards,
   aiActionFor, requiredActor, publicView,
   cardPoints, sameCard, sideOf, defenders, cardStr, rankLabel,
+  choosePIMCCard, randomInt, _determinize: determinize,
 };

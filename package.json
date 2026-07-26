@@ -6,6 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
+    "build:assets": "node scripts/build-assets.js",
+    "test": "node --test",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
