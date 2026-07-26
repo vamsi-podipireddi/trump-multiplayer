@@ -1,0 +1,21 @@
+{
+  "name": "TRUMP — 250-point bid & capture",
+  "short_name": "TRUMP",
+  "description": "Online multiplayer TRUMP: bid for points, call a hidden partner, capture tricks. 2–4 players plus AI.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1f14",
+  "theme_color": "#0d4d2e",
+  "categories": ["games", "entertainment"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Play vs 3 bots", "short_name": "Solo", "url": "/solo.html" }
+  ]
+}

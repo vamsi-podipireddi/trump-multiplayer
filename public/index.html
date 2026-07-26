@@ -2,8 +2,24 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>TRUMP — Multiplayer</title>
+<meta name="description" content="Online multiplayer TRUMP: bid for points, call a hidden partner, capture tricks. 2–4 players plus AI, no signup." />
+<meta name="theme-color" content="#0d4d2e" />
+<meta name="color-scheme" content="dark" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="TRUMP — online 250-point bid &amp; capture" />
+<meta property="og:description" content="Bid for points, call a hidden partner, capture tricks. Share a room code and play with 2–4 friends; AI fills the empty seats." />
+<meta property="og:image" content="/icon-512.png" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="TRUMP — online 250-point bid &amp; capture" />
+<meta name="twitter:description" content="Bid, call a hidden partner, capture tricks. 2–4 friends + AI, no signup." />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="TRUMP" />
 <style>
   :root {
     --felt-1:#1f7a4d; --felt-2:#0d4d2e; --wood-1:#6b4423; --wood-2:#4a2e16;
@@ -66,6 +82,7 @@
   .contract-badge { margin-left:auto; display:flex; align-items:center; gap:12px; background:rgba(0,0,0,.35); border:1px solid var(--gold); border-radius:10px; padding:5px 14px; }
   .contract-badge .lbl { font-size:10px; letter-spacing:2px; opacity:.8; } .contract-badge .sym { font-size:26px; line-height:1; font-weight:bold; }
   .contract-badge .sym.red { color:#ff6b6b; } .contract-badge .sym.black { color:#f3f3f3; } .contract-badge .deal { font-size:12px; opacity:.9; max-width:230px; }
+  body.fourcolor .contract-badge .sym.s-d { color:#7cbcff; } body.fourcolor .contract-badge .sym.s-c { color:#5fd8a0; }
   header button { font:inherit; font-size:13px; letter-spacing:1px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:8px; padding:8px 14px; font-weight:700; }
   header button.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
 
@@ -102,6 +119,15 @@
 
   .card { width:62px; height:88px; border-radius:7px; background:var(--card-bg); color:var(--ink); position:relative; box-shadow:0 3px 6px var(--shadow); user-select:none; font-family:"Georgia",serif; }
   .card.red { color:var(--red); }
+  button.card { display:block; border:none; padding:0; margin:0; font:inherit; font-family:"Georgia",serif; -webkit-appearance:none; }
+  .card:focus-visible, .mini-card:focus-visible, .emote-btn:focus-visible, .segbtn:focus-visible,
+  .mini-btn:focus-visible, .act-btn:focus-visible, .btn:focus-visible, button:focus-visible, input:focus-visible {
+    outline:3px solid #fff; outline-offset:2px; }
+  /* 4-colour deck (♦ blue, ♣ green) — opt-in, persisted */
+  body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:#1f6fd0; }
+  body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:#12924f; }
+  .sc { font-weight:700; color:#f3f3f3; } .sc.s-h, .sc.s-d { color:#ff7a7a; }
+  body.fourcolor .sc.s-d { color:#7cbcff; } body.fourcolor .sc.s-c { color:#5fd8a0; }
   .card .corner { position:absolute; font-weight:700; line-height:.9; text-align:center; }
   .card .corner .r { font-size:15px; display:block; } .card .corner .s { font-size:13px; display:block; }
   .card .corner.tl { top:5px; left:6px; } .card .corner.br { bottom:5px; right:6px; transform:rotate(180deg); }
@@ -111,12 +137,13 @@
   #action-bar { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:8px; padding:6px 14px; text-align:center; }
   #action-bar .prompt { font-size:14px; color:var(--gold); width:100%; } #action-bar .status { font-size:13px; opacity:.85; width:100%; }
   #action-bar .banner { font-size:13px; width:100%; padding:4px 0; } #action-bar .banner .d { color:var(--team-d); font-weight:700; } #action-bar .banner .o { color:var(--team-o); font-weight:700; }
-  .act-btn { font:inherit; font-size:14px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:8px; padding:7px 14px; font-weight:700; }
-  .act-btn.pass { background:#caa; } .act-btn.suit { font-size:22px; width:50px; padding:6px 0; } .act-btn.suit.red { color:var(--red); }
+  .act-btn { font:inherit; font-size:14px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:8px; padding:7px 14px; min-height:40px; font-weight:700; }
+  .act-btn.pass { background:#caa; } .act-btn.suit { font-size:22px; min-width:50px; padding:6px 0; } .act-btn.suit.red { color:var(--red); }
+  body.fourcolor .act-btn.suit.s-d { color:#1f6fd0; } body.fourcolor .act-btn.suit.s-c { color:#12924f; }
   .bidval { font-size:22px; color:var(--gold); min-width:56px; text-align:center; }
   .call-grid { display:flex; flex-direction:column; gap:4px; width:100%; align-items:center; max-height:150px; overflow-y:auto; }
   .call-row { display:flex; gap:4px; justify-content:center; flex-wrap:wrap; }
-  .mini-card { width:34px; height:46px; border-radius:5px; background:var(--card-bg); color:var(--ink); position:relative; cursor:pointer; box-shadow:0 2px 4px var(--shadow); font-family:"Georgia",serif; display:flex; align-items:center; justify-content:center; flex-direction:column; line-height:1; }
+  .mini-card { width:40px; height:52px; border-radius:5px; background:var(--card-bg); color:var(--ink); position:relative; cursor:pointer; box-shadow:0 2px 4px var(--shadow); font-family:"Georgia",serif; display:flex; align-items:center; justify-content:center; flex-direction:column; line-height:1; border:none; padding:0; }
   .mini-card.red { color:var(--red); } .mini-card .mr { font-size:13px; font-weight:700; } .mini-card .ms { font-size:14px; }
   .mini-card.ace { outline:2px solid var(--gold); } .mini-card.bonus { outline:2px solid #ff5e9c; }
 
@@ -142,19 +169,20 @@
   #log .entry.round { color:#7fd6a0; font-weight:700; border-top:1px dashed rgba(255,255,255,.15); padding-top:6px; margin-top:4px; }
 
   /* ---- chat + emotes ---- */
-  #chat-section { display:flex; flex-direction:column; min-height:0; flex:1; border-top:1px solid rgba(255,255,255,.07); }
+  #sec-log { flex:1; display:flex; flex-direction:column; min-height:0; }
+  #chat-section { display:flex; flex-direction:column; min-height:0; flex:1; padding:11px 0 0; border-top:1px solid rgba(255,255,255,.07); }
   #chat-log { flex:1; overflow-y:auto; font-size:12.5px; line-height:1.45; padding:8px 14px; min-height:60px; }
   #chat-log .msg { margin-bottom:4px; word-break:break-word; }
   #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:#7fd6a0; }
   #chat-log .empty { opacity:.5; font-style:italic; }
   #emote-bar { display:flex; gap:4px; padding:4px 10px 0; flex-wrap:wrap; }
-  .emote-btn { font-size:17px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
-    border-radius:8px; min-width:40px; min-height:34px; padding:4px; }
+  .emote-btn { font-size:18px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
+    border-radius:8px; min-width:40px; min-height:40px; padding:4px; }
   .emote-btn:hover { background:rgba(232,196,90,.2); }
   #chat-form { display:flex; gap:6px; padding:8px 10px 10px; }
-  #chat-input { flex:1; min-width:0; font:inherit; font-size:13px; padding:8px 10px; min-height:36px; border-radius:8px;
+  #chat-input { flex:1; min-width:0; font:inherit; font-size:13px; padding:8px 10px; min-height:40px; border-radius:8px;
     border:1px solid rgba(255,255,255,.2); background:#0c2417; color:#fff; }
-  #chat-send { font:inherit; font-size:13px; font-weight:700; cursor:pointer; border:none; border-radius:8px; padding:0 12px; min-height:36px; background:var(--gold); color:var(--ink); }
+  #chat-send { font:inherit; font-size:13px; font-weight:700; cursor:pointer; border:none; border-radius:8px; padding:0 14px; min-height:40px; background:var(--gold); color:var(--ink); }
   .float-emote { position:absolute; bottom:100%; left:50%; font-size:30px; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; }
   @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
     100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }
@@ -184,7 +212,36 @@
   #toast.show { opacity:1; }
   #conn { position:fixed; top:0; left:0; right:0; background:#7a1f1f; color:#fff; text-align:center; font-size:13px; padding:6px; z-index:300; display:none; }
   #conn.show { display:block; }
-  @media (max-width:900px) { #game { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; } aside { display:none; } header h1 { font-size:18px; } }
+  /* ---- mobile: the sidebar becomes a bottom sheet with tabs (nothing is dropped) ---- */
+  #sheet-tabs { display:none; position:fixed; left:0; right:0; bottom:0; z-index:120;
+    background:#0b2014; border-top:1px solid rgba(232,196,90,.35); padding-bottom:env(safe-area-inset-bottom); }
+  #sheet-tabs button { flex:1; font:inherit; font-size:12px; letter-spacing:1px; font-weight:700; cursor:pointer;
+    background:transparent; color:#cfe6d8; border:none; padding:11px 4px; min-height:46px; }
+  #sheet-tabs button[aria-expanded="true"] { color:var(--ink); background:var(--gold); }
+  #sheet-tabs .badge { display:inline-block; min-width:16px; margin-left:4px; border-radius:9px; background:var(--red); color:#fff; font-size:10px; padding:1px 5px; }
+  @media (max-width:900px) {
+    #game { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
+    header h1 { font-size:18px; } header .tagline { display:none; }
+    header button { padding:9px 10px; min-height:40px; font-size:12px; }
+    .contract-badge { padding:4px 10px; } .contract-badge .deal { max-width:150px; font-size:11px; }
+    body.in-game #sheet-tabs { display:flex; }   /* only over the table — never the join/lobby screens */
+    aside { position:fixed; left:0; right:0; bottom:46px; top:auto; z-index:110; height:min(52vh,420px);
+      border-left:none; border-top:2px solid var(--gold); transform:translateY(102%); transition:transform .22s ease-out;
+      box-shadow:0 -14px 40px rgba(0,0,0,.6); }
+    aside.open { transform:translateY(0); }
+    aside > .panel-section { display:none; }
+    aside[data-tab="score"] #sec-score, aside[data-tab="log"] #sec-log, aside[data-tab="chat"] #chat-section { display:flex; }
+    #sec-score { flex-direction:column; }
+    #bottom { padding-bottom:52px; }             /* keep the hand clear of the tab bar */
+    #my-hand { height:104px; } #my-hand .card { width:60px; height:86px; margin-left:-18px; }
+    #table-wrap { padding:8px; }
+    .seat .nameplate { font-size:11px; padding:3px 8px; } .card-back { width:20px; height:29px; }
+    .hand-backs .card-back:not(:first-child) { margin-left:-13px; } .hand-backs.vertical .card-back:not(:first-child) { margin-top:-22px; }
+    .act-btn { min-height:44px; } .mini-btn { min-height:40px; } .btn { min-height:46px; }
+  }
+  @media (max-width:900px) and (orientation:landscape) {
+    aside { height:min(70vh,300px); } #my-hand { height:88px; } #my-hand .card { width:52px; height:74px; }
+  }
 </style>
 </head>
 <body>
@@ -220,7 +277,11 @@
   <div class="panel">
     <h2>ROOM</h2>
     <div class="code-big" id="lobby-code">----</div>
-    <p class="muted" style="text-align:center;margin-top:0;">Share this code with friends to join.</p>
+    <div class="row" style="justify-content:center;margin-bottom:12px;">
+      <button class="btn ghost" id="btn-copy">Copy invite link</button>
+      <button class="btn ghost" id="btn-share" style="display:none;">Share…</button>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:0;">Anyone with the link (or the code) can take a seat.</p>
     <div class="seatlist" id="lobby-seats"></div>
     <h2>TABLE SETTINGS</h2>
     <div class="settings" id="lobby-settings"></div>
@@ -240,6 +301,7 @@
       <div><div class="lbl">TRUMP</div><div id="trump-sym" class="sym">—</div></div>
       <div class="deal" id="contract-text">—</div>
     </div>
+    <button class="ghost" id="btn-colors" aria-pressed="false" title="Colour ♦ blue and ♣ green">4-Color</button>
     <button class="ghost" id="btn-help">How to Play</button>
     <button class="ghost" id="btn-stand" title="Give up your seat — an AI takes over">Stand Up</button>
     <button class="ghost" id="btn-leave">Leave</button>
@@ -254,13 +316,13 @@
     </div>
   </div>
   <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
-  <aside>
-    <div class="panel-section"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
-    <div class="panel-section" style="flex:1;display:flex;flex-direction:column;min-height:0;"><h2>TABLE LOG</h2><div id="log"></div></div>
-    <div id="chat-section" class="panel-section" style="padding:11px 0 0;">
+  <aside data-tab="score">
+    <div class="panel-section" id="sec-score"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
+    <div class="panel-section" id="sec-log"><h2>TABLE LOG</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
+    <div id="chat-section" class="panel-section">
       <h2 style="padding:0 14px;">CHAT</h2>
-      <div id="chat-log" aria-live="polite"></div>
-      <div id="emote-bar"></div>
+      <div id="chat-log" aria-live="polite" aria-label="Chat messages"></div>
+      <div id="emote-bar" aria-label="Reactions"></div>
       <form id="chat-form" autocomplete="off">
         <input id="chat-input" maxlength="200" placeholder="Say something…" aria-label="Chat message" />
         <button id="chat-send" type="submit">Send</button>
@@ -268,6 +330,11 @@
     </div>
   </aside>
 </div>
+<nav id="sheet-tabs" aria-label="Table panels">
+  <button type="button" data-tab="score" aria-expanded="false">SCORE</button>
+  <button type="button" data-tab="log" aria-expanded="false">LOG</button>
+  <button type="button" data-tab="chat" aria-expanded="false">CHAT<span class="badge" id="chat-badge" style="display:none">0</span></button>
+</nav>
 
 <div id="awaybar">
   <span>💤 You're away — an AI is playing your seat.</span>
@@ -375,6 +442,8 @@ function render() {
   if (view.room.started) startingSolo = false;
   if (!view.room.started) { $("join-screen").classList.remove("show"); $("lobby-screen").classList.add("show"); $("game").style.display = "none"; renderLobby(); }
   else { $("join-screen").classList.remove("show"); $("lobby-screen").classList.remove("show"); $("game").style.display = "grid"; renderGame(); }
+  document.body.classList.toggle("in-game", !!view.room.started);
+  if (!view.room.started) closeSheet();
   $("awaybar").classList.toggle("show", !!(view.room.started && view.you.away));
   $("btn-stand").style.display = view.room.started && !view.you.spectator ? "" : "none";
   const ok = $("overlay").dataset.kind;
@@ -448,11 +517,18 @@ function renderSettings(host_el, isHost) {
 }
 
 // ---------- card elements ----------
-function cardEl(card) {
-  const el = document.createElement("div");
-  el.className = "card" + (RED.has(card.suit) ? " red" : "");
+const SUIT_KEY = { "♠":"s", "♥":"h", "♦":"d", "♣":"c" };
+const SUIT_NAME = { "♠":"spades", "♥":"hearts", "♦":"diamonds", "♣":"clubs" };
+const RANK_NAME = { 14:"ace", 13:"king", 12:"queen", 11:"jack" };
+const cardName = c => `${RANK_NAME[c.rank] || c.rank} of ${SUIT_NAME[c.suit] || c.suit}`;
+/* `asButton` gives keyboard users a real focusable control instead of a clickable div. */
+function cardEl(card, asButton) {
+  const el = document.createElement(asButton ? "button" : "div");
+  if (asButton) el.type = "button";
+  el.className = "card s-" + SUIT_KEY[card.suit] + (RED.has(card.suit) ? " red" : "");
   const r = rankLabel(card.rank);
   el.innerHTML = `<div class="corner tl"><span class="r">${r}</span><span class="s">${card.suit}</span></div><div class="pip">${card.suit}</div><div class="corner br"><span class="r">${r}</span><span class="s">${card.suit}</span></div>`;
+  if (!asButton) el.setAttribute("aria-hidden", "true"); // table furniture; the log narrates play
   return el;
 }
 
@@ -479,7 +555,7 @@ function renderGame() {
   ringEl = null; // rebuilt below if the active seat is on the clock
   // contract badge
   const ts = $("trump-sym");
-  if (view.trump) { ts.textContent = view.trump; ts.className = "sym " + (RED.has(view.trump) ? "red" : "black"); } else { ts.textContent = "—"; ts.className = "sym"; }
+  if (view.trump) { ts.textContent = view.trump; ts.className = "sym s-" + SUIT_KEY[view.trump] + (RED.has(view.trump) ? " red" : " black"); } else { ts.textContent = "—"; ts.className = "sym"; }
   const bonus = view.bonusSuit ? ` · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })}=30` : "";
   let ct;
   if (view.phase === "bidding") ct = (view.highBid ? `High bid <b>${view.highBid}</b> · ${esc(view.names[view.highBidder])}` : "Bidding for points…") + bonus;
@@ -548,13 +624,25 @@ function renderHand() {
   const canPlay = view.you.toAct && view.you.actKind === "play";
   const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
   hand.forEach(card => {
-    const el = cardEl(card);
-    if (view.trump && card.suit === view.trump) el.classList.add("trumpcard");
-    if (view.bonusSuit && card.suit === view.bonusSuit && card.rank === 3) el.classList.add("bonuscard");
+    const el = cardEl(card, true);              // real <button>: Tab to reach it, Enter/Space to play
+    const notes = [];
+    if (view.trump && card.suit === view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
+    if (view.bonusSuit && card.suit === view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
+    let label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
     if (canPlay) {
-      if (legalKey.has(card.suit + card.rank)) { el.classList.add("playable"); el.onclick = () => send({ type: "play", card }); }
-      else { el.classList.add("illegal"); el.title = "Must follow suit (" + view.leadSuit + ")"; }
+      if (legalKey.has(card.suit + card.rank)) {
+        el.classList.add("playable"); el.onclick = () => send({ type: "play", card });
+        label = "Play " + label;
+      } else {
+        el.classList.add("illegal");
+        el.setAttribute("aria-disabled", "true");
+        el.title = label = `${label} — you must follow ${SUIT_NAME[view.leadSuit] || view.leadSuit}`;
+      }
+    } else {
+      // still focusable (so the hand can be read out) but inert
+      el.setAttribute("aria-disabled", "true");
     }
+    el.setAttribute("aria-label", label);
     wrap.appendChild(el);
   });
 }
@@ -594,6 +682,7 @@ function renderChat() {
     box.appendChild(d);
   });
   if (atBottom) box.scrollTop = box.scrollHeight;
+  noteChatActivity();
   if (!$("emote-bar").children.length) {
     EMOTES.forEach(e => {
       const b = document.createElement("button");
@@ -679,7 +768,10 @@ function renderActionBar() {
     }
     if (view.you.actKind === "trump") {
       text("prompt", `You won the bid at ${view.bid} — choose the trump suit:`);
-      SUITS.forEach(s => button(s, "suit" + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s })));
+      SUITS.forEach(s => {
+        const b = button(s, "suit s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s }));
+        b.setAttribute("aria-label", "Choose " + SUIT_NAME[s] + " as trump");
+      });
       return;
     }
     if (view.you.actKind === "call") {
@@ -690,9 +782,11 @@ function renderActionBar() {
       SUITS.forEach(s => {
         const row = document.createElement("div"); row.className = "call-row";
         byS[s].sort((a, b) => b.rank - a.rank).forEach(cd => {
-          const m = document.createElement("div");
-          m.className = "mini-card" + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === view.bonusSuit && cd.rank === 3 ? " bonus" : "");
+          const m = document.createElement("button");
+          m.type = "button";
+          m.className = "mini-card s-" + SUIT_KEY[cd.suit] + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === view.bonusSuit && cd.rank === 3 ? " bonus" : "");
           m.innerHTML = `<span class="mr">${rankLabel(cd.rank)}</span><span class="ms">${cd.suit}</span>`;
+          m.setAttribute("aria-label", "Call " + cardName(cd) + (cd.suit === view.bonusSuit && cd.rank === 3 ? " (bonus 30 points)" : ""));
           m.onclick = () => send({ type: "call", card: { suit: cd.suit, rank: cd.rank } });
           row.appendChild(m);
         });
@@ -767,11 +861,74 @@ function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dat
 
 // ---------- helpers ----------
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"]/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;" }[ch])); }
-function suitSpan(s) { return s ? `<span style="color:${RED.has(s) ? "#ff7a7a" : "#f3f3f3"}">${s}</span>` : ""; }
-function cardSpan(c) { return c ? `<span style="color:${RED.has(c.suit) ? "#ff7a7a" : "#f3f3f3"}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }
-function textWithCards(t) { return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span style="color:${RED.has(s) ? "#ff7a7a" : "#f3f3f3"};font-weight:700">${m}</span>`); }
+// suit colours come from CSS classes (not inline styles) so the 4-colour deck can override them
+function suitSpan(s) { return s ? `<span class="sc s-${SUIT_KEY[s]}">${s}</span>` : ""; }
+function cardSpan(c) { return c ? `<span class="sc s-${SUIT_KEY[c.suit]}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }
+function textWithCards(t) { return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span class="sc s-${SUIT_KEY[s]}">${m}</span>`); }
 let toastT = null;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
+
+// ---------- invite / share ----------
+function inviteUrl() { return location.origin + location.pathname + "?room=" + encodeURIComponent(roomCode || ""); }
+$("btn-copy").onclick = async () => {
+  const url = inviteUrl();
+  try { await navigator.clipboard.writeText(url); toast("Invite link copied"); }
+  catch { window.prompt("Copy this invite link:", url); } // clipboard needs https + a gesture
+};
+if (navigator.share) {
+  $("btn-share").style.display = "";
+  $("btn-share").onclick = () => navigator.share({
+    title: "TRUMP — join my table",
+    text: `Join my TRUMP game — room ${roomCode}`,
+    url: inviteUrl(),
+  }).catch(() => {});
+}
+
+// ---------- 4-colour deck (persisted) ----------
+function setFourColor(on) {
+  document.body.classList.toggle("fourcolor", on);
+  $("btn-colors").setAttribute("aria-pressed", String(on));
+  try { localStorage.setItem("trump_4color", on ? "1" : "0"); } catch {}
+}
+setFourColor((() => { try { return localStorage.getItem("trump_4color") === "1"; } catch { return false; } })());
+$("btn-colors").onclick = () => setFourColor(!document.body.classList.contains("fourcolor"));
+
+// ---------- mobile bottom sheet ----------
+let unreadChat = 0, lastChatLen = 0;
+function openSheet(tab) {
+  const a = document.querySelector("aside");
+  const same = a.classList.contains("open") && a.dataset.tab === tab;
+  a.dataset.tab = tab;
+  a.classList.toggle("open", !same);
+  document.querySelectorAll("#sheet-tabs button").forEach(b =>
+    b.setAttribute("aria-expanded", String(!same && b.dataset.tab === tab)));
+  if (!same && tab === "chat") { unreadChat = 0; updateChatBadge(); $("chat-log").scrollTop = $("chat-log").scrollHeight; }
+}
+function closeSheet() {
+  const a = document.querySelector("aside");
+  a.classList.remove("open");
+  document.querySelectorAll("#sheet-tabs button").forEach(b => b.setAttribute("aria-expanded", "false"));
+}
+document.querySelectorAll("#sheet-tabs button").forEach(b => { b.onclick = () => openSheet(b.dataset.tab); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+function updateChatBadge() {
+  const el = $("chat-badge");
+  el.textContent = String(unreadChat);
+  el.style.display = unreadChat > 0 ? "" : "none";
+}
+/* Count messages that arrive while the chat panel isn't on screen. */
+function noteChatActivity() {
+  const msgs = (view.chat || []).length;
+  const a = document.querySelector("aside");
+  const visible = window.innerWidth > 900 || (a.classList.contains("open") && a.dataset.tab === "chat");
+  if (msgs > lastChatLen && !visible) { unreadChat += msgs - lastChatLen; updateChatBadge(); }
+  lastChatLen = msgs;
+}
+
+// ---------- PWA ----------
+if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js").catch(() => {}));
+}
 </script>
 </body>
 </html>
