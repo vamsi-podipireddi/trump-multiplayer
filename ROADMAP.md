@@ -108,10 +108,17 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] Commit M7.
 
 ### M8 — Stats (D1, optional) + hardening + README + final
-- [ ] D10: `schema.sql`, guarded writes at matchOver, `/stats` endpoint, client "Your record" line on join
+- [x] D10: `schema.sql`, guarded writes at matchOver, `/stats` endpoint, client "Your record" line on join
       screen when available; wrangler.toml commented `[[d1_databases]]` block + README setup steps.
-- [ ] D9 hardening in both adapters (Origin, per-IP cap node, private codes client+server).
-- [ ] README rewritten: features, settings, difficulty, PWA, stats setup, updated architecture section,
+- [x] D9 hardening in both adapters (Origin, per-IP cap node, private codes client+server).
+- [x] Extra beyond D8: `create` refuses an occupied code (`{code:"code-taken"}`) and the client re-mints —
+      without it a 4-char collision silently dropped you into a stranger's lobby.
+- [x] `test/worker.test.js` covers the Worker entry (upgrade/origin/room routing, D1-optional stats,
+      parameterised query, asset fallthrough); `src/package.json` marks the Worker subtree as ESM so
+      `node --test` can import it.
+- [x] README rewritten: features, settings, difficulty, PWA, stats setup, updated architecture section,
       test instructions ("verified by tests" now true).
-- [ ] Full `npm test` green; manual `node server.js` smoke; `wrangler dev` smoke.
-- [ ] Commit M8. Loop complete → stop.
+- [x] Full `npm test` green (45); `node server.js` smoke (settings/seats/chat/emotes/ready/redaction);
+      `wrangler dev` smoke (assets + MIME, 403 on cross-origin upgrade, DO alarms driving play,
+      persistence across reconnect).
+- [x] Commit M8. Loop complete → stop.

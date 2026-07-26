@@ -16,7 +16,18 @@ binding = "ASSETS"
 name = "ROOMS"
 class_name = "RoomDO"
 
-# SQLite-backed DO class (no storage used, but this backing is required for the free plan).
+# SQLite-backed DO class — room state is persisted in DO storage, so matches
+# survive hibernation, evictions and deploys.
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RoomDO"]
+
+# Optional player stats (D1). Everything works without this: with no DB binding
+# the Worker skips the writes and /stats answers {"available":false}.
+#   npx wrangler d1 create trump-stats
+#   npx wrangler d1 execute trump-stats --remote --file=./schema.sql
+# then uncomment and paste in the printed database_id:
+# [[d1_databases]]
+# binding = "DB"
+# database_name = "trump-stats"
+# database_id = "<paste-from-wrangler-d1-create>"

@@ -218,6 +218,14 @@ function join(room, msg, now) {
   let pid = typeof msg.playerId === "string" ? msg.playerId : null;
   let player = pid ? room.players[pid] : null;
   let resumed = false;
+
+  /* "Create room" mints its code on the client, so it can collide with a
+     live room; landing a stranger in someone else's lobby is worse than a
+     retry. Only a fresh create is refused — reconnects never set `create`. */
+  if (msg.create && !player && Object.keys(room.players).length > 0) {
+    return { pid: null, resumed: false, fx: { sends: [{ pid: null,
+      obj: { type: "error", code: "code-taken", message: "that room code is already in use" } }] } };
+  }
   if (player) {
     resumed = player.connected; // an old live socket exists — adapter must close it
     room.timers = room.timers.filter(t => !(t.kind === "drop" && t.data && t.data.pid === pid));

@@ -47,6 +47,9 @@
   .btn:disabled { opacity:.5; cursor:not-allowed; }
   .row { display:flex; gap:10px; }
   .muted { font-size:12.5px; opacity:.7; line-height:1.5; }
+  .chk { display:flex; align-items:center; gap:8px; font-size:12.5px; opacity:.85; margin:0 0 12px; cursor:pointer; min-height:40px; }
+  .chk input { width:18px; height:18px; accent-color:var(--gold); }
+  #join-record b { color:var(--gold); }
   .err { color:#ff8080; font-size:13px; min-height:16px; }
 
   .seatlist { display:flex; flex-direction:column; gap:8px; margin:6px 0 16px; }
@@ -263,11 +266,13 @@
 
     <h2>👥 PLAY WITH FRIENDS</h2>
     <p class="muted" style="margin:0 0 8px;">Start a room and share the code — friends join from any device. Empty seats are filled by AI, so a partial table still works.</p>
-    <button class="btn" id="btn-create" style="width:100%;margin-bottom:10px;">Create Room</button>
+    <button class="btn" id="btn-create" style="width:100%;margin-bottom:8px;">Create Room</button>
+    <label class="chk" for="join-private"><input type="checkbox" id="join-private" /> Private room — longer code nobody can stumble into</label>
     <div class="row">
-      <input id="join-code" maxlength="6" placeholder="ROOM CODE" style="flex:1;" />
+      <input id="join-code" maxlength="8" placeholder="ROOM CODE" style="flex:1;" />
       <button class="btn ghost" id="btn-join">Join</button>
     </div>
+    <div class="muted" id="join-record" style="margin-top:14px;text-align:center;"></div>
   </div>
 </div>
 
@@ -359,16 +364,28 @@ let ws = null, view = null, myPid = null, mySeat = null, roomCode = null;
 let humanBidValue = null, bidCtxKey = null, reconnectTimer = null, wantConnected = false;
 let autoStartSolo = false, startingSolo = false; // one-click "Play vs 3 Bots"
 let serverSkew = 0;   // Date.now() - server now; keeps deadlines honest across clock drift
+let creating = false, createPrivate = false, createTries = 0, myName = "";
 
 // ---------- networking ----------
 // Production "Pages + separate Worker" split: set WS_BASE to the Worker's URL,
 // e.g. "wss://trump-multiplayer.<your-subdomain>.workers.dev".
 // Leave "" for same-origin (single Worker w/ static assets, or local `node server.js`).
 const WS_BASE = "";
-const mintCode = () => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < 4; i++) s += A[Math.floor(Math.random() * A.length)]; return s; };
+/* Codes are minted client-side because the Durable Object is routed by the code
+   before the socket opens. 4 chars for a shareable room, 8 for a private one. */
+const mintCode = (len) => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < (len || 4); i++) s += A[Math.floor(Math.random() * A.length)]; return s; };
+/* Stable per-browser id for optional stats — random, no account, never leaves as PII. */
+function myUid() {
+  try {
+    let u = localStorage.getItem("trump_uid");
+    if (!u) { u = mintCode(8).toLowerCase() + Date.now().toString(36); localStorage.setItem("trump_uid", u); }
+    return u;
+  } catch { return null; }
+}
 function connect(name, code) {
   wantConnected = true;
-  if (!code) code = mintCode();   // create/solo: mint a room code (the DO is routed by it before the socket opens)
+  myName = name;
+  if (!code) code = mintCode(createPrivate ? 8 : 4);
   roomCode = code;
   const base = WS_BASE || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
   ws = new WebSocket(`${base}/ws?room=${encodeURIComponent(code)}`);
@@ -376,7 +393,7 @@ function connect(name, code) {
     $("conn").classList.remove("show");
     let pid = null; // only auto-resume a recent session token (avoids hijacking a stale one on a shared device)
     const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code);
-    ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null }));
+    ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null, uid: myUid(), create: creating, private: createPrivate }));
   };
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
   ws.onclose = () => { if (wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
@@ -389,6 +406,7 @@ function scheduleReconnect(name) {
 function onMsg(m) {
   if (m.type === "joined") {
     myPid = m.playerId; roomCode = m.room;
+    creating = false; createTries = 0;   // a later reconnect must not re-assert "create"
     localStorage.setItem("trump_pid_" + m.room, m.playerId);
     localStorage.setItem("trump_pid_" + m.room + "_t", String(Date.now()));
     localStorage.setItem("trump_name", $("join-name").value.trim());
@@ -401,6 +419,15 @@ function onMsg(m) {
   } else if (m.type === "emote") {
     showEmote(m.seat, m.e);
   } else if (m.type === "error") {
+    // a freshly minted code collided with a live room — mint another and try again
+    if (m.code === "code-taken" && creating && createTries < 6) {
+      createTries++;
+      const dead = ws;
+      if (dead) { dead.onclose = null; dead.onerror = null; dead.onmessage = null; try { dead.close(); } catch {} }
+      ws = null; roomCode = null;
+      connect(myName, "");
+      return;
+    }
     toast(m.message);
   }
 }
@@ -413,6 +440,7 @@ function doJoin(create) {
   if (!name) { $("join-err").textContent = "Enter a name."; return; }
   const code = create ? "" : $("join-code").value.trim().toUpperCase();
   if (!create && !code) { $("join-err").textContent = "Enter a room code, or use Create New Room."; return; }
+  creating = !!create; createPrivate = create && $("join-private").checked; createTries = 0;
   roomCode = code || null;
   connect(name, code);
 }
@@ -420,12 +448,27 @@ function doSolo() {
   const name = $("join-name").value.trim();
   if (!name) { $("join-err").textContent = "Enter a name."; return; }
   autoStartSolo = true; startingSolo = true; roomCode = null;
+  creating = true; createPrivate = false; createTries = 0;
   connect(name, ""); // create a fresh room, then auto-start with 3 bots
 }
 $("btn-solo").onclick = doSolo;
 $("btn-join").onclick = () => doJoin(false);
 $("btn-create").onclick = () => doJoin(true);
 $("join-name").value = localStorage.getItem("trump_name") || "";
+/* Optional: the Cloudflare backend reports a lifetime record when a D1 binding
+   exists. Any failure (node backend, no DB, offline) just leaves the line off. */
+(async function loadRecord() {
+  const uid = myUid(); if (!uid) return;
+  const base = WS_BASE ? WS_BASE.replace(/^ws/, "http") : "";
+  try {
+    const r = await fetch(`${base}/stats?uid=${encodeURIComponent(uid)}`);
+    if (!r.ok) return;
+    const j = await r.json();
+    if (!j || !j.available || !j.games) return;
+    $("join-record").innerHTML = `Your record: <b>${j.games}</b> match${j.games === 1 ? "" : "es"} · ` +
+      `<b>${j.wins}</b> won · bids taken <b>${j.bidsWon}</b>, made <b>${j.bidsMade}</b>`;
+  } catch {}
+})();
 { const p = new URLSearchParams(location.search).get("room"); if (p) $("join-code").value = p.toUpperCase(); }
 $("btn-leave").onclick = () => { wantConnected = false; try { if (roomCode) { localStorage.removeItem("trump_pid_" + roomCode); localStorage.removeItem("trump_pid_" + roomCode + "_t"); } } catch {} if (ws) ws.close(); location.href = location.pathname; };
 $("btn-help").onclick = showHelp;

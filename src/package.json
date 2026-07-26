@@ -1,0 +1,4 @@
+{
+  "//": "src/ is the Cloudflare Worker: ES modules, unlike the CommonJS node server at the repo root. This marker lets `node --test` import worker.js directly (and matches how wrangler/esbuild treat it).",
+  "type": "module"
+}

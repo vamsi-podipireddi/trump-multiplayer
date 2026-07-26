@@ -316,3 +316,40 @@ test("room capacity: 13th player rejected", () => {
   assert.equal(pid, null);
   assert.equal(fx.sends[0].obj.type, "error");
 });
+
+test("create refuses an occupied code so nobody lands in a stranger's room", () => {
+  const now = 1_000_000;
+  const room = mkRoom();
+
+  // creating an empty room is fine
+  const first = R.join(room, { name: "Ann", create: true }, now);
+  assert.ok(first.pid);
+
+  // a second "create" that happens to mint the same code is refused, not merged
+  const clash = R.join(room, { name: "Bob", create: true }, now);
+  assert.equal(clash.pid, null);
+  assert.equal(clash.fx.sends[0].obj.code, "code-taken");
+  assert.equal(Object.keys(room.players).length, 1, "the refused create must not create a player");
+
+  // ...while a plain join with the shared code still works
+  const guest = R.join(room, { name: "Bob" }, now);
+  assert.ok(guest.pid);
+  assert.equal(room.players[guest.pid].seat, 1);
+
+  // ...and the creator's own reconnect is never mistaken for a fresh create
+  R.disconnect(room, first.pid, now);
+  const back = R.join(room, { name: "Ann", playerId: first.pid, create: true }, now);
+  assert.equal(back.pid, first.pid, "reconnect with a stale create flag must still resume");
+  assert.equal(room.players[first.pid].seat, 0);
+});
+
+test("stats identity: uid is stored on the player, capped, and never in another player's view", () => {
+  const now = 1_000_000;
+  const room = mkRoom();
+  const a = R.join(room, { name: "Ann", uid: "u".repeat(80) }, now);
+  const b = R.join(room, { name: "Bob", uid: "bob-uid" }, now);
+  assert.equal(room.players[a.pid].uid.length, 32, "uid is truncated");
+  const view = JSON.stringify(R.buildView(room, a.pid, now));
+  assert.ok(!view.includes("bob-uid"), "uids must never be broadcast");
+  assert.ok(!view.includes(room.players[a.pid].uid), "not even your own uid needs to ride in the view");
+});
