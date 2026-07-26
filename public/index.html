@@ -25,9 +25,13 @@
     --felt-1:#1f7a4d; --felt-2:#0d4d2e; --wood-1:#6b4423; --wood-2:#4a2e16;
     --gold:#e8c45a; --ink:#1c1c1c; --red:#c52b2b; --card-bg:#fbf8f0; --shadow:rgba(0,0,0,.35);
     --team-d:#e8c45a; --team-o:#6fa8ff;
+    --kb:0px;   /* on-screen keyboard height, measured from visualViewport */
   }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif; color:#f3f3f3; background:#0a1f14; overflow:hidden; }
+  html,body { margin:0; height:100%; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif; color:#f3f3f3; background:#0a1f14; overflow:hidden;
+    -webkit-text-size-adjust:100%; text-size-adjust:100%; overscroll-behavior:none; }
+  /* iOS: taps shouldn't wait for a double-tap-to-zoom that this layout never uses */
+  button, .card, .mini-card, input, label, .seatrow { touch-action:manipulation; }
 
   /* ---- Join / Lobby screens ---- */
   .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:center; gap:18px; z-index:50;
@@ -42,7 +46,7 @@
   .field input { font:inherit; font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.25); background:#0c2417; color:#fff; text-transform:none; }
   #join-code { text-transform:uppercase; letter-spacing:3px; }
   .btn { font:inherit; font-size:15px; letter-spacing:1px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:10px; padding:11px 18px; font-weight:800; transition:transform .08s,filter .15s; }
-  .btn:hover { filter:brightness(1.08); } .btn:active { transform:translateY(1px); }
+  @media (hover:hover) { .btn:hover { filter:brightness(1.08); } } .btn:active { transform:translateY(1px); }
   .btn.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
   .btn:disabled { opacity:.5; cursor:not-allowed; }
   .row { display:flex; gap:10px; }
@@ -63,8 +67,8 @@
   .code-big { font-size:34px; letter-spacing:8px; color:var(--gold); font-weight:800; text-align:center; padding:6px 0; }
   .mini-btn { font:inherit; font-size:11px; letter-spacing:1px; cursor:pointer; border-radius:7px; padding:5px 10px; min-height:30px; font-weight:700;
     background:transparent; color:var(--gold); border:1px solid var(--gold); }
-  .mini-btn:hover { background:rgba(232,196,90,.15); }
-  .mini-btn.danger { color:#ff9a9a; border-color:#ff9a9a; } .mini-btn.danger:hover { background:rgba(255,154,154,.15); }
+  .mini-btn.danger { color:#ff9a9a; border-color:#ff9a9a; }
+  @media (hover:hover) { .mini-btn:hover { background:rgba(232,196,90,.15); } .mini-btn.danger:hover { background:rgba(255,154,154,.15); } }
   .mini-btn:disabled { opacity:.4; cursor:not-allowed; }
 
   /* ---- lobby settings ---- */
@@ -78,8 +82,11 @@
   .setval { font-size:13px; font-weight:700; color:var(--gold); }
 
   /* ---- Game ---- */
-  #game { height:100vh; display:none; grid-template-columns:1fr 290px; grid-template-rows:auto 1fr; }
-  header { grid-column:1/3; display:flex; align-items:center; gap:16px; padding:9px 18px; background:linear-gradient(180deg,#15321f,#0b2014); border-bottom:2px solid var(--gold); }
+  /* 100dvh, not 100vh: iOS Safari sizes vh to the *largest* viewport, so with the
+     toolbars showing a 100vh layout hides its own bottom rows behind them. */
+  #game { height:100vh; height:100dvh; display:none; grid-template-columns:1fr 290px; grid-template-rows:auto 1fr; }
+  header { grid-column:1/3; display:flex; align-items:center; gap:16px; background:linear-gradient(180deg,#15321f,#0b2014); border-bottom:2px solid var(--gold);
+    padding:9px 18px; padding-top:calc(9px + env(safe-area-inset-top)); padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right)); }
   header h1 { margin:0; font-size:22px; letter-spacing:4px; color:var(--gold); text-shadow:0 2px 4px #000; }
   header .tagline { font-size:11px; opacity:.7; letter-spacing:1px; }
   .contract-badge { margin-left:auto; display:flex; align-items:center; gap:12px; background:rgba(0,0,0,.35); border:1px solid var(--gold); border-radius:10px; padding:5px 14px; }
@@ -157,7 +164,11 @@
   #my-hand .card.trumpcard { box-shadow:0 0 0 2px var(--gold),0 3px 6px var(--shadow); }
   #my-hand .card.bonuscard { box-shadow:0 0 0 2px #ff5e9c,0 3px 6px var(--shadow); }
   #my-hand .card.trumpcard.bonuscard { box-shadow:0 0 0 2px var(--gold),0 0 0 4px #ff5e9c,0 3px 6px var(--shadow); }
-  #my-hand .card.playable { cursor:pointer; } #my-hand .card.playable:hover { transform:translateY(-22px); box-shadow:0 10px 18px var(--shadow); z-index:10; }
+  #my-hand .card.playable { cursor:pointer; }
+  /* Lift on hover only where hover exists — on iOS the state sticks after a tap. */
+  @media (hover:hover) { #my-hand .card.playable:hover { transform:translateY(-22px); box-shadow:0 10px 18px var(--shadow); z-index:10; } }
+  #my-hand .card.playable:focus-visible { transform:translateY(-22px); z-index:10; }
+  #my-hand .card.playable:active { transform:translateY(-10px); }
   #my-hand .card.illegal { filter:grayscale(.7) brightness(.78); }
 
   aside { grid-row:2/3; grid-column:2/3; background:linear-gradient(180deg,#102a1b,#0a1d12); border-left:1px solid rgba(232,196,90,.3); display:flex; flex-direction:column; min-height:0; }
@@ -181,7 +192,8 @@
   #emote-bar { display:flex; gap:4px; padding:4px 10px 0; flex-wrap:wrap; }
   .emote-btn { font-size:18px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
     border-radius:8px; min-width:40px; min-height:40px; padding:4px; }
-  .emote-btn:hover { background:rgba(232,196,90,.2); }
+  @media (hover:hover) { .emote-btn:hover { background:rgba(232,196,90,.2); } }
+  .emote-btn:active { background:rgba(232,196,90,.35); }
   #chat-form { display:flex; gap:6px; padding:8px 10px 10px; }
   #chat-input { flex:1; min-width:0; font:inherit; font-size:13px; padding:8px 10px; min-height:40px; border-radius:8px;
     border:1px solid rgba(255,255,255,.2); background:#0c2417; color:#fff; }
@@ -192,7 +204,8 @@
 
   /* ---- away / autopilot ---- */
   #awaybar { position:fixed; top:0; left:0; right:0; z-index:290; display:none; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
-    background:#8a5a12; color:#fff; font-size:13.5px; padding:8px 14px; text-align:center; }
+    background:#8a5a12; color:#fff; font-size:13.5px; text-align:center;
+    padding:8px 14px; padding-top:calc(8px + env(safe-area-inset-top)); }
   #awaybar.show { display:flex; }
   #awaybar button { font:inherit; font-size:13px; font-weight:800; cursor:pointer; border:none; border-radius:8px; padding:8px 16px; min-height:36px; background:#fff; color:var(--ink); }
   .seat.away-seat .nameplate { opacity:.6; } .seat .zzz { font-size:11px; opacity:.8; }
@@ -213,11 +226,13 @@
 
   #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#7a1f1f; color:#fff; padding:8px 16px; border-radius:8px; font-size:13px; z-index:200; opacity:0; transition:opacity .2s; pointer-events:none; }
   #toast.show { opacity:1; }
-  #conn { position:fixed; top:0; left:0; right:0; background:#7a1f1f; color:#fff; text-align:center; font-size:13px; padding:6px; z-index:300; display:none; }
+  #conn { position:fixed; top:0; left:0; right:0; background:#7a1f1f; color:#fff; text-align:center; font-size:13px; z-index:300; display:none;
+    padding:6px; padding-top:calc(6px + env(safe-area-inset-top)); }
   #conn.show { display:block; }
   /* ---- mobile: the sidebar becomes a bottom sheet with tabs (nothing is dropped) ---- */
-  #sheet-tabs { display:none; position:fixed; left:0; right:0; bottom:0; z-index:120;
-    background:#0b2014; border-top:1px solid rgba(232,196,90,.35); padding-bottom:env(safe-area-inset-bottom); }
+  #sheet-tabs { display:none; position:fixed; left:0; right:0; bottom:var(--kb); z-index:120; transition:bottom .15s;
+    background:#0b2014; border-top:1px solid rgba(232,196,90,.35);
+    padding-bottom:env(safe-area-inset-bottom); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
   #sheet-tabs button { flex:1; font:inherit; font-size:12px; letter-spacing:1px; font-weight:700; cursor:pointer;
     background:transparent; color:#cfe6d8; border:none; padding:11px 4px; min-height:46px; }
   #sheet-tabs button[aria-expanded="true"] { color:var(--ink); background:var(--gold); }
@@ -228,14 +243,15 @@
     header button { padding:9px 10px; min-height:40px; font-size:12px; }
     .contract-badge { padding:4px 10px; } .contract-badge .deal { max-width:150px; font-size:11px; }
     body.in-game #sheet-tabs { display:flex; }   /* only over the table — never the join/lobby screens */
-    aside { position:fixed; left:0; right:0; bottom:46px; top:auto; z-index:110; height:min(52vh,420px);
+    /* the sheet sits on top of the tab bar, which itself sits above the home indicator */
+    aside { position:fixed; left:0; right:0; bottom:calc(46px + env(safe-area-inset-bottom) + var(--kb)); top:auto; z-index:110; height:min(52dvh,420px);
       border-left:none; border-top:2px solid var(--gold); transform:translateY(102%); transition:transform .22s ease-out;
       box-shadow:0 -14px 40px rgba(0,0,0,.6); }
     aside.open { transform:translateY(0); }
     aside > .panel-section { display:none; }
     aside[data-tab="score"] #sec-score, aside[data-tab="log"] #sec-log, aside[data-tab="chat"] #chat-section { display:flex; }
     #sec-score { flex-direction:column; }
-    #bottom { padding-bottom:52px; }             /* keep the hand clear of the tab bar */
+    #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }   /* clear the tab bar + home indicator */
     #my-hand { height:104px; } #my-hand .card { width:60px; height:86px; margin-left:-18px; }
     #table-wrap { padding:8px; }
     .seat .nameplate { font-size:11px; padding:3px 8px; } .card-back { width:20px; height:29px; }
@@ -243,7 +259,23 @@
     .act-btn { min-height:44px; } .mini-btn { min-height:40px; } .btn { min-height:46px; }
   }
   @media (max-width:900px) and (orientation:landscape) {
-    aside { height:min(70vh,300px); } #my-hand { height:88px; } #my-hand .card { width:52px; height:74px; }
+    aside { height:min(70dvh,300px); } #my-hand { height:88px; } #my-hand .card { width:52px; height:74px; }
+  }
+  /* Any touch device: controls stay thumb-sized regardless of width. iPad landscape
+     (1024px) and iPad Pro portrait sit above the 900px query, which is exactly where
+     the desktop-sized 30px buttons used to survive on a touch-only device. */
+  @media (pointer:coarse) {
+    header button { min-height:44px; padding:10px 14px; }
+    .mini-btn, .segbtn { min-height:44px; padding:8px 14px; }
+    .btn { min-height:48px; }
+    .emote-btn { min-width:44px; min-height:44px; }
+    #chat-input, #chat-send { min-height:44px; }
+    .mini-card { width:44px; height:58px; }
+  }
+  /* Tablets only — phones already size the hand in the 900px block above. */
+  @media (pointer:coarse) and (min-width:901px) {
+    #my-hand .card { width:78px; height:110px; }   /* fingers, not a mouse pointer */
+    #my-hand { height:128px; }
   }
 </style>
 </head>
@@ -967,6 +999,23 @@ function noteChatActivity() {
   if (msgs > lastChatLen && !visible) { unreadChat += msgs - lastChatLen; updateChatBadge(); }
   lastChatLen = msgs;
 }
+
+/* iOS floats the keyboard over fixed elements instead of resizing the layout, so the
+   chat sheet and its tab bar would end up underneath it. visualViewport reports the
+   covered height; --kb lifts both above it. */
+if (window.visualViewport) {
+  const vv = window.visualViewport;
+  const trackKeyboard = () => {
+    const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    document.documentElement.style.setProperty("--kb", (covered > 60 ? covered : 0) + "px");
+  };
+  vv.addEventListener("resize", trackKeyboard);
+  vv.addEventListener("scroll", trackKeyboard);
+  trackKeyboard();
+}
+$("chat-input").addEventListener("focus", () => {
+  setTimeout(() => { $("chat-log").scrollTop = $("chat-log").scrollHeight; }, 250); // after the keyboard animates in
+});
 
 // ---------- PWA ----------
 if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {

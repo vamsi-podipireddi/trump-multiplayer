@@ -96,3 +96,35 @@ test("mobile: the sidebar survives as a bottom sheet instead of being hidden", (
     assert.ok(new RegExp(`${sel.replace(/[.#*]/g, m => "\\" + m)}[^}]*min-height:(4[0-9]|[5-9][0-9])px`).test(CLIENT),
       `${sel} has no >=40px touch target`);
 });
+
+test("iOS/iPad: dynamic viewport, safe areas, and touch-only pointers are handled", () => {
+  // 100vh alone hides the action bar behind Safari's toolbars
+  assert.ok(/#game \{ height:100vh; height:100dvh;/.test(CLIENT), "#game must fall back 100vh -> 100dvh");
+  assert.ok(!/height:min\(\d+vh,/.test(CLIENT), "sheet heights should use dvh too");
+
+  // notch / home indicator
+  for (const sel of ["header", "#awaybar", "#conn", "#sheet-tabs"])
+    assert.ok(new RegExp(`${sel.replace(/[.#]/g, m => "\\" + m)} \\{[^}]*env\\(safe-area-inset`).test(CLIENT),
+      `${sel} ignores the safe-area inset it overlaps`);
+  assert.ok(/bottom:calc\(46px \+ env\(safe-area-inset-bottom\) \+ var\(--kb\)\)/.test(CLIENT),
+    "the sheet must clear the tab bar, the home indicator and the keyboard");
+  assert.ok(/#bottom \{ padding-bottom:calc\(52px \+ env\(safe-area-inset-bottom\)\)/.test(CLIENT),
+    "the hand must clear the home indicator");
+
+  // iPad sits above the 900px phone breakpoint but is still touch-only
+  assert.ok(/@media \(pointer:coarse\) \{/.test(CLIENT), "no coarse-pointer sizing for tablets");
+  const coarse = CLIENT.match(/@media \(pointer:coarse\) \{([\s\S]*?)\n  \}/)[1];
+  for (const sel of ["header button", ".mini-btn, .segbtn", ".emote-btn", "#chat-input"])
+    assert.ok(new RegExp(`${sel.replace(/[.#]/g, m => "\\" + m)}[^}]*min-(height|width):(4[4-9]|[5-9][0-9])px`).test(coarse),
+      `${sel} stays under 44px on touch devices wider than 900px`);
+
+  // sticky :hover after a tap is an iOS classic
+  assert.ok(/@media \(hover:hover\) \{ #my-hand \.card\.playable:hover/.test(CLIENT),
+    "the card lift must be gated behind hover:hover");
+  assert.ok(!/^\s*\.emote-btn:hover/m.test(CLIENT) && !/^\s*\.btn:hover/m.test(CLIENT),
+    "hover effects must not apply on touch-only devices");
+
+  assert.ok(/touch-action:manipulation/.test(CLIENT), "taps should not wait for double-tap zoom");
+  assert.ok(/-webkit-text-size-adjust:100%/.test(CLIENT), "rotation must not inflate text on iOS");
+  assert.ok(/visualViewport/.test(CLIENT), "the on-screen keyboard must not cover the chat sheet");
+});

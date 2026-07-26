@@ -106,6 +106,11 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - [x] `test/pwa.test.js` pins manifest↔icons↔sw↔client wiring, the D12 byte-identical solo copy, the a11y
       affordances and the 40px touch-target floor.
 - [x] Commit M7.
+- [x] iOS/iPad follow-up: `100dvh` (Safari's toolbars make `100vh` overflow), safe-area insets on every
+      fixed bar and on the sheet/hand, `@media (pointer:coarse)` so iPad — which is *above* the 900px
+      phone breakpoint — still gets 44px controls, hover effects gated behind `hover:hover` (sticky
+      tap state on iOS), `touch-action:manipulation`, and a `visualViewport` lift so the on-screen
+      keyboard can't cover the chat sheet. NOT visually verified on a device — no browser here.
 
 ### M8 — Stats (D1, optional) + hardening + README + final
 - [x] D10: `schema.sql`, guarded writes at matchOver, `/stats` endpoint, client "Your record" line on join
