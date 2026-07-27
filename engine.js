@@ -74,7 +74,7 @@ function createMatch(names, opts) {
     phase: "lobby", dealer: 0, roundNumber: 0, scores: [0,0,0,0],
     names: names ? names.slice() : ["South","West","North","East"],
     hands: [[],[],[],[]],
-    bidActive: [], bidTurn: 0, highBid: null, highBidder: null, redealCount: 0,
+    bidActive: [], bidTurn: 0, highBid: null, highBidder: null, bids: [null,null,null,null], redealCount: 0,
     declarer: null, bid: null, trump: null, calledCard: null, partner: null,
     teamsRevealed: false, bonusSuit: null,
     trick: [], leadSuit: null, turn: 0, leader: 0, trickNumber: 0,
@@ -109,7 +109,7 @@ function deal(G) {
   G.lastWinner = -1; G.lastWinnerSlot = -1;
   G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
   G.hands.forEach(h => sortHand(h, null));
-  G.bidActive = [0,1,2,3]; G.highBid = null; G.highBidder = null;
+  G.bidActive = [0,1,2,3]; G.highBid = null; G.highBidder = null; G.bids = [null,null,null,null];
   G.bidTurn = (G.dealer + 1) % NUM_PLAYERS; G.phase = "bidding";
   logG(G, `Round ${G.roundNumber} · ${name(G, G.dealer)} deals · bonus card ${cardStr({ suit: G.bonusSuit, rank: 3 })} = 30 pts`, "round");
   logG(G, `Bidding starts with ${name(G, G.bidTurn)} — bid the points (of ${TOTAL_POINTS}) your side will capture.`);
@@ -133,7 +133,10 @@ function bidIsLegal(G, p, value) {
 }
 function applyBid(G, p, value) {
   if (value === null) { G.bidActive = G.bidActive.filter(x => x !== p); logG(G, `${name(G, p)} passes`, "bid"); }
-  else { G.highBid = value; G.highBidder = p; logG(G, `${name(G, p)} bids ${value}`, "bid"); }
+  /* A pass deliberately does not write to `bids` — leaving `bidActive` is what marks
+     a seat as folded. That keeps bids[p] number-or-null, so the table can tell
+     "passed" from "hasn't acted yet" without a sentinel value. */
+  else { G.highBid = value; G.highBidder = p; G.bids[p] = value; logG(G, `${name(G, p)} bids ${value}`, "bid"); }
   G.bidTurn = (p + 1) % NUM_PLAYERS;
   advanceBidding(G);
 }
@@ -489,7 +492,7 @@ function publicView(G) {
     capturedPoints: G.capturedPoints.slice(), tricksWon: G.tricksWon.slice(),
     bonusSuit: G.bonusSuit, trump: G.trump, declarer: G.declarer,
     partner: G.teamsRevealed ? G.partner : null, teamsRevealed: G.teamsRevealed, bid: G.bid,
-    highBid: G.highBid, highBidder: G.highBidder, bidActive: G.bidActive.slice(), bidTurn: G.bidTurn,
+    highBid: G.highBid, highBidder: G.highBidder, bids: G.bids.slice(), bidActive: G.bidActive.slice(), bidTurn: G.bidTurn,
     leader: G.leader, turn: G.turn, leadSuit: G.leadSuit,
     trick: G.trick.map(t => ({ player: t.player, card: t.card })),
     lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot,

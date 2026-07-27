@@ -165,6 +165,27 @@ test("mobile: the sidebar survives as a bottom sheet instead of being hidden", (
   }
 });
 
+/* Regression pin. #game has three row children — header, #table-wrap, #bottom — and
+   #bottom carries an explicit grid-column. With only two declared rows it was
+   auto-placed into an unsized implicit third row *after* 1fr had taken the height,
+   so the hand overflowed 100dvh and body{overflow:hidden} clipped it. The phone
+   block always declared three rows, which is why only desktop showed it. */
+test("the game grid declares a row for every row child, and the sidebar spans them", () => {
+  const tracks = (v) => v.trim().split(/\s+(?![^(]*\))/).length;   // splits on spaces outside ()
+  const rowDecls = declared(BASE, "#game", "grid-template-rows");
+  assert.ok(rowDecls.length, "#game declares no grid-template-rows");
+  assert.equal(tracks(rowDecls[rowDecls.length - 1]), 3,
+    `#game must declare 3 rows for header/table/bottom (declares "${rowDecls[rowDecls.length - 1]}")`);
+
+  const phoneRows = declared(mediaBlock(CSS, "(max-width:900px)"), "#game", "grid-template-rows");
+  assert.equal(tracks(phoneRows[phoneRows.length - 1]), 3, "the phone grid must keep its three rows");
+
+  const asideRow = declared(BASE, "aside", "grid-row");
+  assert.ok(asideRow.length, "aside declares no grid-row");
+  assert.match(asideRow[asideRow.length - 1].trim(), /\/\s*4$/,
+    `the sidebar must span to the end of the third row (declares "${asideRow[asideRow.length - 1]}")`);
+});
+
 test("iOS/iPad: dynamic viewport, safe areas, and touch-only pointers are handled", () => {
   // 100vh alone hides the action bar behind Safari's toolbars; dvh must win
   const gameH = declared(CSS, "#game", "height");

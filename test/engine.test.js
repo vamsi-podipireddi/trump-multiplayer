@@ -209,6 +209,49 @@ test("publicView never contains hands", () => {
       assert.ok(!s.includes(JSON.stringify(c)), "hand card leaked into public view");
 });
 
+test("publicView carries each seat's latest bid, and a pass is absent rather than zero", () => {
+  const G = E.createMatch();
+  E.startMatch(G);
+  assert.deepEqual(E.publicView(G).bids, [null, null, null, null], "no bids before the auction opens");
+
+  const first = E.findBidActor(G);
+  E.applyBid(G, first, E.MIN_BID);
+  const passer = E.findBidActor(G);
+  E.applyBid(G, passer, null);
+
+  let pv = E.publicView(G);
+  assert.equal(pv.bids[first], E.MIN_BID, "a bid is recorded against its seat");
+  assert.equal(pv.bids[passer], null, "a pass writes nothing — leaving bidActive is what marks it");
+  assert.ok(!pv.bidActive.includes(passer), "a passed seat leaves the auction");
+  assert.ok(pv.bidActive.includes(first));
+
+  // a raise overwrites the seat's own entry, and the high bidder always matches highBid
+  const raiser = E.findBidActor(G);
+  if (raiser != null && E.bidIsLegal(G, raiser, E.minNextBid(G))) {
+    const raised = E.minNextBid(G);
+    E.applyBid(G, raiser, raised);
+    pv = E.publicView(G);
+    assert.equal(pv.bids[raiser], raised);
+    assert.equal(pv.bids[pv.highBidder], pv.highBid, "highBidder's entry is the high bid");
+  }
+
+  // and they clear at the next deal rather than bleeding across rounds
+  while (G.phase !== "roundEnd" && G.phase !== "matchOver") {
+    const ra = E.requiredActor(G);
+    if (!ra) break;
+    const a = E.aiActionFor(G, ra.seat, "easy");
+    if (ra.kind === "bid") E.applyBid(G, ra.seat, a.value);
+    else if (ra.kind === "trump") E.applyTrump(G, a.suit);
+    else if (ra.kind === "call") E.applyCall(G, a.card);
+    else if (ra.kind === "play") E.applyPlay(G, ra.seat, a.card);
+    if (G.phase === "trickEnd") E.advanceTrick(G);
+  }
+  if (G.phase === "roundEnd") {
+    E.nextDeal(G);
+    assert.deepEqual(E.publicView(G).bids, [null, null, null, null], "bids reset with the deal");
+  }
+});
+
 test("callableCards excludes declarer's holdings and callIsLegal agrees", () => {
   const G = E.createMatch();
   E.startMatch(G);
