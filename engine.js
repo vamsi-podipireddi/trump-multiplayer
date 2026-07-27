@@ -7,62 +7,19 @@
    A/K/Q/J/10=10, each 5=5, one random suit's 3 = 30.
    ============================================================ */
 
-const SUITS = ["♠", "♥", "♦", "♣"];
-const RANKS = [2,3,4,5,6,7,8,9,10,11,12,13,14];
-const NUM_PLAYERS = 4;
-const MIN_BID = 130, MAX_BID = 250, BID_STEP = 5, TOTAL_POINTS = 250, TARGET_GAMES = 5, MAX_REDEALS = 4;
+import { SUITS, RANKS, NUM_PLAYERS, MIN_BID, MAX_BID, BID_STEP,
+         TOTAL_POINTS, TARGET_GAMES, MAX_REDEALS } from "./app/js/core/engine/constants.js";
+import { randomInt, shuffle, shuffleFast } from "./app/js/core/engine/random.js";
+import { buildDeck, sameCard, rankLabel, cardStr, sortHand, beats, winningIndex } from "./app/js/core/engine/cards.js";
+import { logG, name } from "./app/js/core/engine/log.js";
+import { cardPoints, trickPoints, sideOf, defenders } from "./app/js/core/engine/scoring.js";
 
-/* ---- randomness ----
-   The deal must not come off the same stream as anything an opponent can
-   observe. V8's Math.random is xorshift128+, and its state is recoverable from
-   a handful of outputs — i.e. from the cards a player is dealt — which would
-   leak both future deals and room.js's session tokens. Dealing therefore uses
-   the platform CSPRNG (present in node >=19 and in Workers), with rejection
-   sampling so the modulo is unbiased. AI-internal randomness has nothing to
-   protect and stays on the cheap generator. */
-function randomInt(n) {
-  const c = globalThis.crypto;
-  if (!c || typeof c.getRandomValues !== "function") return Math.floor(Math.random() * n);
-  const limit = Math.floor(0x100000000 / n) * n; // drop the biased tail of the 32-bit range
-  const buf = new Uint32Array(1);
-  let v;
-  do { c.getRandomValues(buf); v = buf[0]; } while (v >= limit);
-  return v % n;
-}
-
-// ---- card helpers ----
-function buildDeck() { const d = []; for (const s of SUITS) for (const r of RANKS) d.push({ suit: s, rank: r }); return d; }
-function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = randomInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-function shuffleFast(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-function sameCard(a, b) { return !!a && !!b && a.suit === b.suit && a.rank === b.rank; }
-function rankLabel(r) { return ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r); }
-function cardStr(c) { return rankLabel(c.rank) + c.suit; }
-function sortHand(hand, trump) {
-  const order = SUITS.filter(s => s !== trump).concat(trump ? [trump] : []);
-  hand.sort((a, b) => { const sa = order.indexOf(a.suit), sb = order.indexOf(b.suit); return sa !== sb ? sa - sb : b.rank - a.rank; });
-}
-function cardPoints(G, c) { if (c.rank === 3 && c.suit === G.bonusSuit) return 30; if (c.rank >= 10) return 10; if (c.rank === 5) return 5; return 0; }
-function trickPoints(G, trick) { return trick.reduce((s, t) => s + cardPoints(G, t.card), 0); }
-function beats(a, b, lead, trump) {
-  const aT = a.suit === trump, bT = b.suit === trump;
-  if (aT !== bT) return aT;
-  if (aT && bT) return a.rank > b.rank;
-  const aL = a.suit === lead, bL = b.suit === lead;
-  if (aL !== bL) return aL;
-  if (aL && bL) return a.rank > b.rank;
-  return false;
-}
-function winningIndex(trick, lead, trump) { let best = 0; for (let i = 1; i < trick.length; i++) if (beats(trick[i].card, trick[best].card, lead, trump)) best = i; return best; }
 function legalCards(G, p) {
   const hand = G.hands[p];
   if (G.trick.length === 0) return hand.slice();
   const hasLead = hand.some(c => c.suit === G.leadSuit);
   return hasLead ? hand.filter(c => c.suit === G.leadSuit) : hand.slice();
 }
-function sideOf(G, p) { return (p === G.declarer || p === G.partner) ? "D" : "O"; }
-function defenders(G) { return [0,1,2,3].filter(p => p !== G.declarer && p !== G.partner); }
-function name(G, p) { return (G.names && G.names[p]) || ["South","West","North","East"][p]; }
-function logG(G, text, cls) { if (G._silent) return; G.log.push({ text, cls: cls || "" }); if (G.log.length > 80) G.log.shift(); }
 
 // ============================================================
 //  Lifecycle
