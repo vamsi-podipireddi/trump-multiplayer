@@ -126,7 +126,17 @@ test("static serving refuses to walk out of app/", async () => {
     const res = await fetch(url + bad);
     assert.ok(res.status === 403 || res.status === 404, `${bad} must not be served (got ${res.status})`);
     const body = await res.text();
-    assert.ok(!body.includes("require("), `${bad} leaked source`);
+    /* Post-ESM, "require(" appears nowhere in the repo any more, so it quit
+       being a canary at all — this assertion would pass no matter what
+       leaked. Neither replacement is generic: "new WebSocketServer(" only
+       appears in server.js (the browser client uses the native WebSocket,
+       never the ws package), and the "./engine.js" import line only appears
+       in room.js. Two canaries, not one, because traversal above targets
+       both files, and each one's import line is distinct — a single string
+       shared by both would have to be vaguer, and vaguer is how you end up
+       matching an innocuous asset instead. */
+    assert.ok(!body.includes("new WebSocketServer(") && !body.includes('import * as E from "./engine.js"'),
+      `${bad} leaked source`);
   }
   const ok = await fetch(url + "/");
   assert.equal(ok.status, 200);
