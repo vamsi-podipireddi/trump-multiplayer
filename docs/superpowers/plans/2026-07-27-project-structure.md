@@ -397,7 +397,9 @@ git commit -m "refactor: extract engine constants, randomness, cards, scoring"
 
 **Interfaces:**
 - Consumes: `constants.js`, `random.js`, `cards.js`, `log.js`, `scoring.js` (Task 3)
-- Produces: `createMatch(names: string[], opts?: {targetDeals?: number}): G`, `startMatch(G): void`, `nextDeal(G): void`, `deal(G): void`, `endRound(G): void`, `publicView(G, seat): object`
+- Produces: `createMatch(names: string[], opts?: {targetDeals?: number}): G`, `startMatch(G): void`, `nextDeal(G): void`, `deal(G): void`, `endRound(G): void`, `publicView(G): object`
+
+  `publicView` takes **one** argument. It is the seat-independent snapshot: it carries `handCounts` (lengths only) and deliberately contains **no hands**. Adding the viewer's own hand is the caller's job — `buildView` in the room core does exactly that with `v.you.hand = G.hands[seat].slice()`, which is the single line that keeps hand secrecy working. Any other caller must do the same.
 
 - [ ] **Step 1: Create `match.js`**
 
@@ -1969,7 +1971,17 @@ This mirrors `drive()` in `src/core/room/drive.js`, which paces the server the s
 
 Read `AI_DELAY` and `TRICK_DELAY` off the deleted root `index.html` (recover it with `git show HEAD~1:index.html` if you have already removed it) so the pacing is unchanged. The player's click handlers call `apply(ME, …)` then `paint()` then `step()` — the same path the AI takes.
 
-`paint()` calls `E.publicView(G, ME)` and hands the result to the render modules. Reuse `cards/deck.js`, `cards/labels.js`, `ui/hand.js`, `ui/log.js`, `ui/modals.js` and `util/dom.js` rather than re-deriving them. Where a UI module currently reads `S.view`, pass the view in as an argument instead of populating `S` — solo has no session, and writing to `S` from here would couple the two clients.
+`paint()` builds the view the render modules expect. **`E.publicView(G)` takes one argument and returns no hands** — only `handCounts`. Rendering its output directly would draw the player an empty hand. Mirror what `buildView` does in the room core:
+
+```js
+function paint() {
+  const v = E.publicView(G);
+  v.you = { seat: ME, hand: G.hands[ME].slice() };   // the one line that puts cards in your hand
+  render(v);
+}
+```
+
+Read `buildView` in `src/core/room/view.js` and match the shape it produces — the UI modules were written against that shape, and any field it sets that `paint()` omits will render as blank or throw. Reuse `cards/deck.js`, `cards/labels.js`, `ui/hand.js`, `ui/log.js`, `ui/modals.js` and `util/dom.js` rather than re-deriving them. Where a UI module currently reads `S.view`, pass the view in as an argument instead of populating `S` — solo has no session, and writing to `S` from here would couple the two clients.
 
 - [ ] **Step 4: Write `app/solo.html`**
 
