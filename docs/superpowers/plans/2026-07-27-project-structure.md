@@ -1119,7 +1119,9 @@ The highest-risk milestone: the suite is thin on client rendering. Extract in de
 - Produces:
   - `util/dom.js` → `$(id): Element`, `esc(s): string`, `toast(msg): void`, `nameHue(name): number`, `paintAvatar(el, name, isAI): void`, `avatarHtml(name, isAI): string`
   - `util/prefs.js` → `setFourColor(on: boolean): void`, `initPrefs(): void`
-  - `cards/labels.js` → `RANK_NAME`, `SUIT_NAME`, `SUIT_KEY`, `rankLabel(r)`, `cardStr(c)`, `cardName(c)`, `suitSvg(s)`, `suitSpan(s)`, `cardSpan(c)`, `textWithCards(t)`, `SUITS`, `RED`
+  - `cards/labels.js` → `RANK_NAME`, `SUIT_NAME`, `SUIT_KEY`, `cardName(c)`, `suitSvg(s)`, `suitSpan(s)`, `cardSpan(c)`, `textWithCards(t)`, `RED`, plus `SUITS`, `rankLabel(r)`, `cardStr(c)` **re-exported from the engine barrel** (see Step 3)
+
+  This makes the multiplayer client load the engine tree even though it never runs it — the server is authoritative. That is deliberate and not an oversight: the service worker precaches those modules for the solo game regardless, so after first load they are cache hits, and one import rule ("outside the engine, import the barrel") is worth more than the handful of KB saved by reaching for leaf modules.
   - `cards/icons.js` → `ICONS`, `REACTIONS`, `EMOTES`, `icon(name, cls)`, `reactionIcon(e)`, `reactionName(e)`, `paintIcons(root)`
   - `cards/deck.js` → `suitPath(s, cx, cy, size, flip)`, `courtFigure(rank)`, `cardFace(card, compact)`, `cardEl(card, asButton)`, `COL`, `ROW_TOP`, `ROW_BOT`, `PIP_SIZE`
 
@@ -1138,7 +1140,25 @@ Move `$` and `esc` from the helpers section (~lines 1802-1816), `toast` and its 
 
 - [ ] **Step 3: Extract `cards/labels.js`**
 
-Move `SUITS`/`RED` (828), `rankLabel`/`cardStr` (830-831), `RANK_NAME`/`SUIT_NAME`/`SUIT_KEY`/`cardName` (~1112-1116), `suitSvg` (~1132), `suitSpan`/`cardSpan`/`textWithCards` (~1807-1814).
+`SUITS`, `rankLabel` and `cardStr` are **not** moved — the engine already exports all three with identical logic, and the browser can import it. Re-export them instead of defining a second copy:
+
+```js
+/* A card's name has one definition, shared with the server and the solo game.
+   The rest of this file is display-layer only: markup, CSS keys, and the
+   screen-reader spellings the engine has no reason to know about. */
+export { SUITS, rankLabel, cardStr } from "/js/core/engine/index.js";
+```
+
+Then move only the display-layer pieces: `RED` (828), `RANK_NAME`/`SUIT_NAME`/`SUIT_KEY`/`cardName` (~1112-1116), `suitSvg` (~1132), `suitSpan`/`cardSpan`/`textWithCards` (~1807-1814). Delete the client's own `SUITS`/`rankLabel`/`cardStr` definitions at lines 828-831.
+
+Verify the re-export is faithful before deleting:
+```bash
+node -e "import('./app/js/core/engine/index.js').then(E => {
+  for (const s of ['♠','♥','♦','♣']) for (let r = 2; r <= 14; r++)
+    console.log(E.cardStr({suit:s, rank:r}));
+})" | tr '\n' ' '
+```
+Expected: `2♠ 3♠ … A♠ 2♥ … A♣` — the same strings the client produced.
 
 Keep the comment noting suit colours come from CSS classes, not inline styles — `client.test.js` asserts on that behaviour and the comment is why.
 
