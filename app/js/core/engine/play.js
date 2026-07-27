@@ -47,4 +47,4 @@ function advanceTrick(G) {
   else G.phase = "playing";
 }
 
-export { legalCards, playIsLegal, applyPlay, resolveTrick, advanceTrick };
+export { legalCards, playIsLegal, applyPlay, advanceTrick };

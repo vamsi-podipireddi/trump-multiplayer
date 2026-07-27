@@ -13,9 +13,9 @@ import { randomInt, shuffleFast } from "./app/js/core/engine/random.js";
 import { buildDeck, sameCard, rankLabel, cardStr, beats, winningIndex } from "./app/js/core/engine/cards.js";
 import { cardPoints, trickPoints, sideOf, defenders } from "./app/js/core/engine/scoring.js";
 import { createMatch, startMatch, nextDeal, publicView } from "./app/js/core/engine/match.js";
-import { findBidActor, minNextBid, bidIsLegal, applyBid, advanceBidding, forceBid, finalizeDeclarer, redeal } from "./app/js/core/engine/bidding.js";
-import { applyTrump, callableCards, callIsLegal, applyCall, beginPlay } from "./app/js/core/engine/contract.js";
-import { legalCards, playIsLegal, applyPlay, resolveTrick, advanceTrick } from "./app/js/core/engine/play.js";
+import { findBidActor, minNextBid, bidIsLegal, applyBid } from "./app/js/core/engine/bidding.js";
+import { applyTrump, callableCards, callIsLegal, applyCall } from "./app/js/core/engine/contract.js";
+import { legalCards, playIsLegal, applyPlay, advanceTrick } from "./app/js/core/engine/play.js";
 
 // ============================================================
 //  AI
