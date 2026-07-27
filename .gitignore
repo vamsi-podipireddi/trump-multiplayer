@@ -5,3 +5,4 @@ node_modules/
 npm-debug.log*
 .wrangler/
 .dev.vars
+.superpowers/

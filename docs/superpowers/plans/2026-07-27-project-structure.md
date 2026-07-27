@@ -179,12 +179,7 @@ export {
 };
 ```
 
-The `crypto` require near the top becomes:
-```js
-import crypto from "node:crypto";
-```
-
-Note: `randomInt` must keep working in a browser in Milestone 2. Leave that for Task 8 — for now `node:crypto` is correct, since only Node and the Worker import it.
+`engine.js` has **no** `require` of any kind other than none — verify with `grep -n "require(" engine.js`, which returns nothing. `randomInt` already reads `globalThis.crypto`, so there is no crypto import to convert and the engine is already browser-safe. Do not add one.
 
 - [ ] **Step 4: Convert `room.js`**
 
@@ -334,7 +329,9 @@ export const MIN_BID = 130, MAX_BID = 250, BID_STEP = 5,
 
 - [ ] **Step 2: Create `random.js`**
 
-Move `engine.js` lines 16-37 — the `randomInt` function **and the block comment above it explaining why dealing must not use `Math.random`** — plus `shuffle` and `shuffleFast`. Keep `import crypto from "node:crypto";` for now; Task 8 makes it browser-safe.
+Move `engine.js` lines 16-37 — the `randomInt` function **and the block comment above it explaining why dealing must not use `Math.random`** — plus `shuffle` and `shuffleFast`.
+
+`randomInt` reads `globalThis.crypto` and falls back to `Math.random` where Web Crypto is absent. Move it **verbatim**: it already works in Node, workerd and browsers, and the rejection-sampling window (`Math.floor(0x100000000 / n) * n`) is what keeps the deal unbiased. Add no imports to this file.
 
 Export `randomInt`, `shuffle`, `shuffleFast`.
 
@@ -688,77 +685,75 @@ git commit -m "refactor: engine.js becomes app/js/core/engine/"
 
 ---
 
-## Task 8: Make the engine's randomness browser-safe
+## Task 8: Guard the engine's browser-safety and deal uniformity
 
-`random.js` imports `node:crypto`, which no browser can resolve. The solo game imports the engine in Milestone 5, so this must be fixed before then — and fixing it now keeps `import` graphs honest.
+`randomInt` is **already** browser-safe — it reads `globalThis.crypto` with a `Math.random` fallback, and there is no `node:` import anywhere in the engine. This task changes no behaviour; it pins those two properties so a later edit cannot quietly break the browser build or the deal.
+
+Nothing currently tests `randomInt`'s distribution, and a biased deal is close to invisible in play.
 
 **Files:**
-- Modify: `app/js/core/engine/random.js`
-- Test: `test/engine.test.js`
+- Test: `test/engine.test.js` (add two tests; change no source)
 
 **Interfaces:**
-- Consumes: Task 3
-- Produces: `randomInt(n)` with identical semantics, working in Node, workerd and browsers
+- Consumes: Tasks 3-7
+- Produces: no new interfaces — test-only
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing tests**
 
 Add to `test/engine.test.js`:
 
 ```js
-test("randomInt is uniform over [0,n) and uses no node-only import", async () => {
-  const src = fs.readFileSync(
-    path.join(__dirname, "..", "app", "js", "core", "engine", "random.js"), "utf8");
-  assert.ok(!/node:crypto|require\(/.test(src),
-    "random.js must not import node:crypto — the browser cannot resolve it");
+test("the engine tree imports nothing the browser cannot resolve", () => {
+  const dir = path.join(__dirname, "..", "app", "js", "core", "engine");
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  for (const f of walk(dir).filter(f => f.endsWith(".js"))) {
+    const src = fs.readFileSync(f, "utf8");
+    assert.ok(!/from\s+["']node:|require\(/.test(src),
+      `${path.relative(dir, f)} imports a node-only module — the browser serves this file`);
+    for (const m of src.matchAll(/from\s+["'](\.[^"']*)["']/g))
+      assert.ok(m[1].endsWith(".js"),
+        `${path.relative(dir, f)} imports "${m[1]}" without a .js extension — browsers do not guess`);
+  }
+});
 
+test("randomInt is uniform over [0,n)", () => {
   const counts = new Array(6).fill(0);
   for (let i = 0; i < 60000; i++) counts[E.randomInt(6)]++;
-  for (const c of counts) assert.ok(c > 8000 && c < 12000, `skewed bucket: ${counts}`);
+  for (const c of counts) assert.ok(c > 9000 && c < 11000, `skewed bucket: ${counts}`);
   for (let i = 0; i < 1000; i++) assert.strictEqual(E.randomInt(1), 0);
+  for (const n of [2, 3, 4, 13, 52])
+    for (let i = 0; i < 500; i++) {
+      const v = E.randomInt(n);
+      assert.ok(Number.isInteger(v) && v >= 0 && v < n, `randomInt(${n}) returned ${v}`);
+    }
 });
 ```
 
 `test/engine.test.js` needs `fs`, `path` and the `__dirname` shim at the top if it does not already have them.
 
-- [ ] **Step 2: Run it to confirm it fails**
+- [ ] **Step 2: Run them**
 
 Run: `node --test test/engine.test.js`
-Expected: FAIL — "random.js must not import node:crypto".
 
-- [ ] **Step 3: Switch to the Web Crypto API**
+The uniformity test must **pass** immediately — `randomInt` is already correct, and a failure here means Task 3 damaged it while moving it.
 
-`globalThis.crypto.getRandomValues` is available in browsers, in workerd, and in Node 20+ as a global. Replace the `node:crypto` import and the body of `randomInt`, **keeping the existing block comment about V8's `Math.random` being recoverable from observed outputs**:
+The import test may **fail**, and that is the point: it catches any `.js`-less relative import introduced in Tasks 3-7. Fix the offending imports in `app/js/core/engine/**` until it passes. Fix nothing else.
 
-```js
-/* Rejection sampling over a 32-bit window: taking `x % n` directly would bias
-   the low residues whenever n does not divide 2^32. */
-export function randomInt(n) {
-  if (n <= 1) return 0;
-  const limit = Math.floor(0x100000000 / n) * n;
-  const buf = new Uint32Array(1);
-  let x;
-  do { globalThis.crypto.getRandomValues(buf); x = buf[0]; } while (x >= limit);
-  return x % n;
-}
-```
-
-- [ ] **Step 4: Run the suite**
+- [ ] **Step 3: Run the suite**
 
 Run: `npm test`
-Expected: all pass, including the new uniformity test.
+Expected: all pass.
 
-- [ ] **Step 5: Confirm the Worker still deals**
-
-Run: `npx wrangler dev`, create a room, click through to a dealt hand. Stop.
-
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add -A
-git commit -m "refactor: engine randomness uses Web Crypto, not node:crypto
+git commit -m "test: pin engine browser-safety and deal uniformity
 
-The browser imports the engine from M5 onward and cannot resolve
-node:crypto. getRandomValues is global in browsers, workerd and Node 20+."
+The engine is served to the browser from M5, so a node: import or an
+extensionless relative import would break it there while every server
+test still passed. Nothing covered randomInt's distribution either."
 ```
 
 ---
@@ -1535,8 +1530,8 @@ The split must be a **pure partition** — every line lands in exactly one file,
 node -e "
 const fs=require('fs');
 const h=fs.readFileSync('app/index.html','utf8');
-fs.writeFileSync('/tmp/css-before.txt', h.match(/<style>([\s\S]*?)<\/style>/)[1]);
-" && wc -l /tmp/css-before.txt
+fs.writeFileSync('.superpowers/sdd/css-before.txt', h.match(/<style>([\s\S]*?)<\/style>/)[1]);
+" && wc -l .superpowers/sdd/css-before.txt
 ```
 
 - [ ] **Step 2: Partition the stylesheet along its existing section comments**
@@ -1562,7 +1557,7 @@ node -e "
 const fs=require('fs');
 const files=['tokens','base','table','panels','responsive'].map(n=>'app/css/'+n+'.css');
 const got=files.map(f=>fs.readFileSync(f,'utf8')).join('\n');
-const want=fs.readFileSync('/tmp/css-before.txt','utf8');
+const want=fs.readFileSync('.superpowers/sdd/css-before.txt','utf8');
 const norm=s=>s.replace(/\s+/g,' ').trim();
 if(norm(got)===norm(want)) console.log('IDENTICAL');
 else { console.log('DIFFERS'); console.log('before',norm(want).length,'after',norm(got).length); process.exit(1); }
@@ -1609,7 +1604,7 @@ Run: `npm start`. Compare against the pre-split appearance at desktop (1440px), 
 - [ ] **Step 8: Clean up and commit**
 
 ```bash
-rm /tmp/css-before.txt
+rm .superpowers/sdd/css-before.txt
 git add -A
 git commit -m "refactor: split the stylesheet into five cascade-ordered files"
 ```
@@ -1821,7 +1816,7 @@ test("cardFace draws every card without throwing, and marks its suit", () => {
 });
 ```
 
-`cardFace` must return a string and touch no DOM. If it currently builds elements, have it return markup and let `cardEl` do the DOM work — that separation is what makes it testable.
+`cardFace` already returns an SVG string and touches no DOM (`cardEl` does the DOM work) — that is what makes this test possible without a DOM stub. Keep that separation; do not let `cardFace` grow an element dependency.
 
 - [ ] **Step 5: Run the suite**
 
