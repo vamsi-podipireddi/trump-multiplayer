@@ -90,7 +90,7 @@ layers above it.
 | L3 | `match.js` | `createMatch startMatch nextDeal deal endRound publicView` |
 | L4 | `bidding.js` | `findBidActor minNextBid bidIsLegal applyBid advanceBidding forceBid finalizeDeclarer` **and `redeal`** |
 | L4 | `contract.js` | `applyTrump callableCards callIsLegal applyCall beginPlay` |
-| L4 | `play.js` | `legalCards playIsLegal applyPlay resolveTrick advanceTrick` |
+| L4 | `play.js` | `legalCards playIsLegal applyPlay advanceTrick`; `resolveTrick` is module-private (`applyPlay` calls it; nothing outside does) |
 | L5 | `ai/heuristic.js` | `aiBidEstimate aiBidDecision aiPickTrump aiPickPartner chooseAICard` |
 | L5 | `ai/pimc.js` | `cardKey determinize rolloutClone playOutRound choosePIMCCard PIMC_PLAY_BUDGET` |
 | L6 | `flow.js` | `requiredActor` |

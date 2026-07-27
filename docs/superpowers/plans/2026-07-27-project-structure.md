@@ -450,7 +450,7 @@ git commit -m "refactor: extract the engine match lifecycle"
 - Produces:
   - `bidding.js` → `findBidActor(G): number|null`, `minNextBid(G): number`, `bidIsLegal(G, p, value): boolean`, `applyBid(G, p, value): void`, `advanceBidding(G): void`, `forceBid(G): void`, `finalizeDeclarer(G): void`, `redeal(G): void`
   - `contract.js` → `applyTrump(G, suit): void`, `callableCards(G, p): Card[]`, `callIsLegal(G, card): boolean`, `applyCall(G, card): void`, `beginPlay(G): void`
-  - `play.js` → `legalCards(G, p): Card[]`, `playIsLegal(G, p, card): boolean`, `applyPlay(G, p, card): void`, `resolveTrick(G): void`, `advanceTrick(G): void`
+  - `play.js` → `legalCards(G, p): Card[]`, `playIsLegal(G, p, card): boolean`, `applyPlay(G, p, card): void`, `advanceTrick(G): void`. `resolveTrick(G)` moves into this file but stays **module-private** — `applyPlay` calls it when the fourth card lands, and nothing outside `play.js` ever does (not even the PIMC rollout, which drives play through `applyPlay`/`advanceTrick`). It must not appear in `play.js`'s `export {...}` list.
 
 - [ ] **Step 1: Create `bidding.js`**
 
@@ -493,7 +493,7 @@ import { endRound } from "./match.js";
 ```js
 import { findBidActor, minNextBid, bidIsLegal, applyBid, advanceBidding, forceBid, finalizeDeclarer, redeal } from "./app/js/core/engine/bidding.js";
 import { applyTrump, callableCards, callIsLegal, applyCall, beginPlay } from "./app/js/core/engine/contract.js";
-import { legalCards, playIsLegal, applyPlay, resolveTrick, advanceTrick } from "./app/js/core/engine/play.js";
+import { legalCards, playIsLegal, applyPlay, advanceTrick } from "./app/js/core/engine/play.js";
 ```
 
 - [ ] **Step 5: Run the suite**
@@ -555,7 +555,7 @@ import { NUM_PLAYERS } from "../constants.js";
 import { sameCard, winningIndex } from "../cards.js";
 import { shuffleFast } from "../random.js";
 import { cardPoints, trickPoints, sideOf } from "../scoring.js";
-import { legalCards, applyPlay, resolveTrick, advanceTrick } from "../play.js";
+import { legalCards, applyPlay, advanceTrick } from "../play.js";
 import { chooseAICard } from "./heuristic.js";
 ```
 
