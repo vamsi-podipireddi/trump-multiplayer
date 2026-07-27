@@ -14,7 +14,7 @@ const path = require("path");
 const vm = require("node:vm");
 const R = require("../room");
 
-const CLIENT = fs.readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8");
+const CLIENT = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
 const CORE = fs.readFileSync(path.join(__dirname, "..", "room.js"), "utf8");
 
 const uniq = a => [...new Set(a)].sort();

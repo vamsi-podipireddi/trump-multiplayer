@@ -13,7 +13,7 @@ const fs = require("fs");
 const path = require("path");
 
 const ROOT = path.join(__dirname, "..");
-const PUB = path.join(ROOT, "public");
+const PUB = path.join(ROOT, "app");
 const read = p => fs.readFileSync(path.join(PUB, p), "utf8");
 const CLIENT = read("index.html");
 const SW = read("sw.js");
@@ -123,7 +123,7 @@ test("service worker precaches only files that exist, and never caches the live 
 test("offline fallback is the untouched root single-player game (D12)", () => {
   const rootGame = fs.readFileSync(path.join(ROOT, "index.html"));
   const solo = fs.readFileSync(path.join(PUB, "solo.html"));
-  assert.ok(rootGame.equals(solo), "public/solo.html must stay a byte-identical copy of the root offline game");
+  assert.ok(rootGame.equals(solo), "app/solo.html must stay a byte-identical copy of the root offline game");
   assert.ok(!solo.includes("/ws?room="), "the offline build must not need a server");
 });
 

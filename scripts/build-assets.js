@@ -2,7 +2,7 @@
 /* ============================================================
    Keeps two derived files honest:
 
-   1. public/solo.html — the byte-identical copy of the root single-player
+   1. app/solo.html — the byte-identical copy of the root single-player
       game that the service worker serves when there is no network (D12).
       It was previously copied by hand, so the two could silently drift.
 
@@ -20,15 +20,15 @@ const crypto = require("crypto");
 
 const ROOT = path.join(__dirname, "..");
 const SOLO_SRC = path.join(ROOT, "index.html");
-const SOLO_DST = path.join(ROOT, "public", "solo.html");
-const SW = path.join(ROOT, "public", "sw.js");
+const SOLO_DST = path.join(ROOT, "app", "solo.html");
+const SW = path.join(ROOT, "app", "sw.js");
 
 /* Everything the service worker precaches, minus sw.js itself — hashing the
    file we are about to stamp would never reach a fixed point. */
 const SHELL = [
-  "public/index.html", "public/solo.html", "public/manifest.webmanifest",
-  "public/icon-192.png", "public/icon-512.png", "public/icon-maskable-512.png",
-  "public/apple-touch-icon.png", "public/favicon-32.png",
+  "app/index.html", "app/solo.html", "app/manifest.webmanifest",
+  "app/icon-192.png", "app/icon-512.png", "app/icon-maskable-512.png",
+  "app/apple-touch-icon.png", "app/favicon-32.png",
 ];
 
 function shellVersion() {
@@ -46,11 +46,11 @@ const VERSION_RE = /const VERSION = "([^"]*)";/;
 function check() {
   const stale = [];
   if (!fs.existsSync(SOLO_DST) || !fs.readFileSync(SOLO_SRC).equals(fs.readFileSync(SOLO_DST)))
-    stale.push("public/solo.html");
+    stale.push("app/solo.html");
   const sw = fs.readFileSync(SW, "utf8");
   const m = sw.match(VERSION_RE);
-  if (!m) stale.push("public/sw.js (no VERSION constant)");
-  else if (m[1] !== shellVersion()) stale.push("public/sw.js (VERSION)");
+  if (!m) stale.push("app/sw.js (no VERSION constant)");
+  else if (m[1] !== shellVersion()) stale.push("app/sw.js (VERSION)");
   return stale;
 }
 

@@ -34,8 +34,8 @@ function clientIp(req) {
   return req.socket.remoteAddress || "?";
 }
 
-// ---- HTTP: serve the static client from public/ ----
-const PUB = path.join(__dirname, "public");
+// ---- HTTP: serve the static client from app/ ----
+const PUB = path.join(__dirname, "app");
 const MIME = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
   ".json": "application/json", ".webmanifest": "application/manifest+json",

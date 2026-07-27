@@ -115,7 +115,7 @@ test("at the room cap, empty rooms are recycled but occupied ones are not", asyn
   live.close(); fresh.close();
 });
 
-test("static serving refuses to walk out of public/", async () => {
+test("static serving refuses to walk out of app/", async () => {
   const url = (await listening()).replace("ws://", "http://");
   for (const bad of ["/../server.js", "/..%2fserver.js", "/%2e%2e/room.js", "//etc/passwd"]) {
     const res = await fetch(url + bad);

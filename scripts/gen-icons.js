@@ -97,7 +97,7 @@ function draw(size, pad) {
   return encodePNG(size, size, buf);
 }
 
-const OUT = path.join(__dirname, "..", "public");
+const OUT = path.join(__dirname, "..", "app");
 const files = [
   ["icon-192.png", 192, 0],       // any: fills the tile
   ["icon-512.png", 512, 0],
@@ -108,7 +108,7 @@ const files = [
 if (require.main === module) {
   for (const [name, size, pad] of files) {
     fs.writeFileSync(path.join(OUT, name), draw(size, pad));
-    console.log("wrote public/" + name);
+    console.log("wrote app/" + name);
   }
 }
 module.exports = { encodePNG, draw, files };
