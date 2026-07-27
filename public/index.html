@@ -21,92 +21,195 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="TRUMP" />
 <style>
+  /* ============================================================
+     "One lamp over the table."
+
+     The room is dark and a warm light hangs over the felt, so the cards
+     are the only bright objects on screen — which is right, because the
+     cards are what you are actually looking at. Everything else (rail,
+     panels, chrome) stays quiet and lets them carry the detail.
+
+     Two rules the old sheet broke, and the reason it read as clip-art:
+       · suits are drawn (SVG paths), never typed. ♠♥♦♣ are font glyphs
+         and every OS ships a different, flatter one.
+       · nothing in the interface is an emoji. Emoji can't take the
+         interface's colour and are mud below 16px.
+     ============================================================ */
   :root {
-    --felt-1:#1f7a4d; --felt-2:#0d4d2e; --wood-1:#6b4423; --wood-2:#4a2e16;
-    --gold:#e8c45a; --ink:#1c1c1c; --red:#c52b2b; --card-bg:#fbf8f0; --shadow:rgba(0,0,0,.35);
-    --team-d:#e8c45a; --team-o:#6fa8ff;
+    /* the room */
+    --room-0:#070c0a; --room-1:#0d1613; --room-2:#14211b; --room-3:#1b2a23;
+    --felt-hi:#1f5741; --felt:#123a2c; --felt-lo:#091e17;
+    --rail-hi:#6a4b2e; --rail:#33231a; --rail-lo:#17100b;
+    /* card stock */
+    --stock:#f7f3e7; --stock-lo:#e6dfca; --ink:#15171a; --red:#b02a2e;
+    --dia-4c:#1b62c8; --club-4c:#0d7a47;
+    /* accents — brass is the lamp; slate is the defending side */
+    --gold:#debd79; --gold-hi:#f2dca9; --gold-dim:#9c7a34;
+    --team-d:#debd79; --team-o:#8bb0e0; --ok:#5fc495; --danger:#e4705e;
+    /* ink on brass — near-black with a warm cast, never pure #000 */
+    --on-gold:#1a1509;
+    --shadow:rgba(0,0,0,.45); --card-bg:#f7f3e7;
     --kb:0px;   /* on-screen keyboard height, measured from visualViewport */
     /* type scale — everything used to sit between 10 and 14px, so nothing read as primary */
-    --t-xs:11px; --t-sm:12.5px; --t-md:14px; --t-lg:16px; --t-xl:20px; --t-2xl:26px; --t-3xl:34px;
-    --txt:#f3f3f3; --txt-2:rgba(243,243,243,.72); --txt-3:rgba(243,243,243,.5);
-    --surface-1:#102a1b; --surface-2:#0a1d12; --surface-3:rgba(0,0,0,.35);
-    --line:rgba(255,255,255,.10); --line-gold:rgba(232,196,90,.28);
-    --r-sm:8px; --r-md:12px; --r-lg:16px; --r-pill:999px;
-    --gold-dim:#b9942f; --danger:#ff8080; --ok:#7fd6a0;
+    --t-2xs:10px; --t-xs:11.5px; --t-sm:13px; --t-md:14.5px; --t-lg:17px; --t-xl:21px; --t-2xl:28px; --t-3xl:38px;
+    --txt:#ecefea; --txt-2:rgba(236,239,234,.70); --txt-3:rgba(236,239,234,.42);
+    --surface-1:#101b16; --surface-2:#0a120f; --surface-3:rgba(0,0,0,.3);
+    --line:rgba(255,255,255,.075); --line-2:rgba(255,255,255,.14); --line-gold:rgba(222,189,121,.26);
+    --r-xs:6px; --r-sm:9px; --r-md:13px; --r-lg:18px; --r-xl:26px; --r-pill:999px;
+    /* Two roles, and only two. The grotesk prints the interface (and the card
+       indices, which want lining figures Georgia doesn't have); the serif is
+       reserved for the wordmark and the engraved ace, where it earns its keep. */
+    --fu:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --fd:ui-serif,Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;
   }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif; color:#f3f3f3; background:#0a1f14; overflow:hidden;
-    -webkit-text-size-adjust:100%; text-size-adjust:100%; overscroll-behavior:none; }
+  html,body { margin:0; height:100%; font-family:var(--fu); color:var(--txt); background:var(--room-0); overflow:hidden;
+    -webkit-text-size-adjust:100%; text-size-adjust:100%; overscroll-behavior:none;
+    -webkit-font-smoothing:antialiased; }
+  /* Every number in this app is compared against another number in the row
+     above it, so none of them may be proportionally spaced. */
+  b, strong, .num, table.score td, .bidval, .seat .meta, .code-big { font-variant-numeric:tabular-nums lining-nums; }
   /* iOS: taps shouldn't wait for a double-tap-to-zoom that this layout never uses */
   button, .card, .mini-card, input, label, .seatrow { touch-action:manipulation; }
+  /* the shared icon size; individual call sites override */
+  .ic { width:16px; height:16px; flex:none; display:block; }
+  .su { display:inline-block; vertical-align:-.1em; width:1em; height:1em; }
+  @media (prefers-reduced-motion:reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 
   /* ---- Join / Lobby screens ---- */
   /* justify-content:center would park content above the scroll origin once it
      overflows a short viewport; auto margins centre it and still scroll. */
-  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:flex-start; gap:16px; z-index:50;
-    overflow-y:auto; padding:20px 14px; padding-top:calc(20px + env(safe-area-inset-top)); padding-bottom:calc(20px + env(safe-area-inset-bottom));
-    background:radial-gradient(ellipse at 50% 30%, #15321f, #07150d); }
+  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:flex-start; gap:18px; z-index:50;
+    overflow-y:auto; padding:22px 16px; padding-top:calc(22px + env(safe-area-inset-top)); padding-bottom:calc(22px + env(safe-area-inset-bottom));
+    background:
+      radial-gradient(60% 46% at 50% 20%, rgba(255,235,190,.055), rgba(255,235,190,0) 70%),
+      radial-gradient(90% 70% at 50% 24%, #10231b, var(--room-0) 76%); }
   .screen.show { display:flex; }
   .screen > * { flex:none; max-width:100%; } .screen.show > :first-child { margin-top:auto; } .screen.show > :last-child { margin-bottom:auto; }
-  .screen h1 { margin:0; font-size:40px; letter-spacing:10px; color:var(--gold); text-shadow:0 2px 6px #000; }
-  .screen h1 .suits { letter-spacing:0; font-size:28px; margin-left:8px; }
-  .panel { background:linear-gradient(180deg,#15321f,#0b2014); border:2px solid var(--gold); border-radius:16px; padding:26px 30px; width:min(440px,92vw); box-shadow:0 20px 60px rgba(0,0,0,.6); }
+
+  /* ---- the wordmark: a fan of real cards, then the name, then a ruled colophon.
+     The hero is the deck itself — the most characteristic object this game owns. ---- */
+  .brand { display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .brand-fan { display:flex; justify-content:center; height:104px; margin-bottom:18px; }
+  .brand-fan .card { width:70px; height:99px; margin-left:-30px; transform-origin:50% 130%;
+    animation:fanIn .5s cubic-bezier(.2,.9,.3,1) backwards; }
+  .brand-fan .card:first-child { margin-left:0; }
+  @keyframes fanIn { from { opacity:0; transform:translateY(16px) rotate(0deg) scale(.94); } }
+  .screen h1 { margin:0; font-family:var(--fd); font-weight:600; font-size:clamp(38px,10vw,54px); line-height:1;
+    letter-spacing:.18em; text-indent:.18em; color:var(--gold);
+    text-shadow:0 0 34px rgba(222,189,121,.22), 0 2px 0 rgba(0,0,0,.5); }
+  .colophon { display:flex; align-items:center; gap:12px; margin:12px 0 6px; color:var(--gold-dim); }
+  .colophon .bar { display:block; width:clamp(34px,9vw,64px); height:1px; background:linear-gradient(90deg,transparent,var(--line-gold)); }
+  .colophon .bar:last-child { background:linear-gradient(270deg,transparent,var(--line-gold)); }
+  .colophon .su { width:11px; height:11px; opacity:.85; }
+  .colophon .su + .su { margin-left:7px; }
+  .lede { margin:0; max-width:36ch; text-align:center; font-size:var(--t-md); line-height:1.6; color:var(--txt-2); }
+
+  .panel { background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line-2); border-radius:var(--r-lg);
+    padding:22px 24px; width:min(430px,92vw);
+    box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 22px 50px rgba(0,0,0,.5); }
   /* two paths, two cards — they used to be two <h2>s and a hand-rolled divider in one panel */
   .join-cards { display:flex; gap:14px; align-items:stretch; justify-content:center; flex-wrap:wrap; }
-  .join-cards .panel { width:min(330px,92vw); display:flex; flex-direction:column; padding:20px 22px; }
-  .join-cards .panel > .muted:first-of-type { flex:1; }
-  .panel.slim { padding:18px 22px; }
+  .join-cards .panel { width:min(324px,92vw); display:flex; flex-direction:column; padding:20px 22px; }
+  /* Bottom-align the two cards' final row so the panels agree, but take the
+     slack *after* the copy — putting flex:1 on the first paragraph blew a gap
+     into the middle of the sentence it was supposed to be part of. */
+  .join-cards .panel > :last-child { margin-top:auto; }
+  .panel.slim { padding:18px 20px; }
   .code-ticket { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
-    background:rgba(0,0,0,.3); border:1px dashed var(--line-gold); border-radius:var(--r-md); padding:12px 16px; margin-bottom:12px; }
-  .code-ticket .lbl { font-size:10px; letter-spacing:2px; color:var(--txt-3); font-weight:700; }
-  .code-ticket .code-big { padding:2px 0 0; text-align:left; font-size:30px; letter-spacing:6px; }
+    background:var(--surface-3); border:1px solid var(--line-gold); border-radius:var(--r-md); padding:13px 16px; margin-bottom:12px; }
+  .code-ticket .lbl { font-size:var(--t-2xs); letter-spacing:.18em; color:var(--txt-3); font-weight:700; }
+  .code-ticket .code-big { padding:2px 0 0; text-align:left; font-size:30px; letter-spacing:.22em; }
   .ticket-actions { display:flex; gap:8px; flex-wrap:wrap; }
-  .ticket-actions .btn { font-size:13px; padding:9px 14px; }
-  .avatar { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:50%; flex:none;
-    background:rgba(232,196,90,.18); border:1px solid var(--line-gold); color:var(--gold); font-size:12px; font-weight:800; }
-  .avatar.ai { background:rgba(111,168,255,.18); border-color:rgba(111,168,255,.4); color:var(--team-o); }
-  .panel h2 { margin:0 0 14px; color:var(--gold); letter-spacing:2px; font-size:15px; }
-  .field { display:flex; flex-direction:column; gap:6px; margin-bottom:14px; }
-  .field label { font-size:12px; letter-spacing:1px; opacity:.8; }
-  .field input { font:inherit; font-size:16px; padding:10px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.25); background:#0c2417; color:#fff; text-transform:none; }
-  #join-code { text-transform:uppercase; letter-spacing:3px; }
-  .btn { font:inherit; font-size:15px; letter-spacing:1px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:10px; padding:11px 18px; font-weight:800; transition:transform .08s,filter .15s; }
-  @media (hover:hover) { .btn:hover { filter:brightness(1.08); } } .btn:active { transform:translateY(1px); }
-  .btn.ghost { background:transparent; color:var(--gold); border:1px solid var(--gold); }
-  .btn:disabled { opacity:.5; cursor:not-allowed; }
-  .row { display:flex; gap:10px; }
-  .muted { font-size:12.5px; opacity:.7; line-height:1.5; }
-  .chk { display:flex; align-items:center; gap:8px; font-size:12.5px; opacity:.85; margin:0 0 12px; cursor:pointer; min-height:40px; }
-  .chk input { width:18px; height:18px; accent-color:var(--gold); }
-  #join-record b { color:var(--gold); }
-  .err { color:#ff8080; font-size:13px; min-height:16px; }
+  .ticket-actions .btn { font-size:var(--t-sm); padding:9px 14px; }
+
+  /* ---- identity: a name is the one thing you bring to the table, so it gets
+     a face. The disc takes a hue from the name itself, so the same person is
+     the same colour to everyone in the room. ---- */
+  .avatar { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; flex:none;
+    background:hsl(var(--h,42) 42% 24%); border:1px solid hsl(var(--h,42) 50% 46% / .55); color:hsl(var(--h,42) 70% 76%);
+    font-size:var(--t-sm); font-weight:700; letter-spacing:.02em; overflow:hidden; }
+  .avatar .ic { width:15px; height:15px; opacity:.9; }
+  .avatar.ai { background:rgba(139,176,224,.14); border-color:rgba(139,176,224,.38); color:var(--team-o); }
+  .avatar.lg { width:46px; height:46px; font-size:var(--t-lg); }
+  .avatar.lg .ic { width:22px; height:22px; }
+  .name-row { display:flex; align-items:center; gap:12px; }
+  .name-row input { flex:1; min-width:0; }
+
+  .panel h2 { margin:0 0 12px; display:flex; align-items:center; gap:9px; color:var(--gold);
+    letter-spacing:.11em; font-size:var(--t-sm); font-weight:700; text-transform:uppercase; }
+  .panel h2 .ic { width:17px; height:17px; opacity:.85; }
+  .field { display:flex; flex-direction:column; gap:7px; margin-bottom:14px; }
+  .field label { font-size:var(--t-2xs); letter-spacing:.16em; text-transform:uppercase; font-weight:700; color:var(--txt-3); }
+  .field input, .row input { font:inherit; font-size:16px; padding:11px 13px; border-radius:var(--r-sm);
+    border:1px solid var(--line-2); background:rgba(0,0,0,.34); color:var(--txt); text-transform:none;
+    transition:border-color .15s, box-shadow .15s; }
+  .field input::placeholder, .row input::placeholder { color:var(--txt-3); }
+  .field input:focus, .row input:focus { outline:none; border-color:var(--line-gold); box-shadow:0 0 0 3px rgba(222,189,121,.13); }
+  #join-code { text-transform:uppercase; letter-spacing:.24em; font-weight:700; }
+  .btn { font:inherit; font-size:var(--t-md); letter-spacing:.01em; cursor:pointer; color:var(--on-gold);
+    background:linear-gradient(180deg,var(--gold-hi),var(--gold)); border:none; border-radius:var(--r-sm); padding:12px 18px; font-weight:700;
+    box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 6px 16px rgba(0,0,0,.35);
+    transition:transform .08s,filter .15s,box-shadow .15s; }
+  @media (hover:hover) { .btn:hover { filter:brightness(1.05); box-shadow:0 1px 0 rgba(255,255,255,.45) inset, 0 8px 22px rgba(0,0,0,.42); } }
+  .btn:active { transform:translateY(1px); }
+  .btn.ghost { background:transparent; color:var(--gold); border:1px solid var(--line-gold); box-shadow:none; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  /* min-width:0 on both: a flex item's automatic minimum is its content, and an
+     <input>'s is ~20 characters wide — so the code field refused to shrink and
+     shoved the Join button out through the side of the panel. */
+  .row { display:flex; gap:9px; min-width:0; }
+  .row > input { min-width:0; }
+  .muted { font-size:var(--t-sm); color:var(--txt-2); line-height:1.55; }
+  .chk { display:flex; align-items:center; gap:10px; font-size:var(--t-sm); color:var(--txt-2); margin:12px 0 4px; cursor:pointer; min-height:40px; }
+  .chk input { width:17px; height:17px; flex:none; accent-color:var(--gold); }
+  /* a labelled hairline: "or join one" belongs to the divider, not above it */
+  .or { display:flex; align-items:center; gap:10px; margin:12px 0 10px;
+    font-size:var(--t-2xs); letter-spacing:.16em; text-transform:uppercase; font-weight:700; color:var(--txt-3); }
+  .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
+  #join-record { text-align:center; font-size:var(--t-sm); color:var(--txt-3); }
+  #join-record b { color:var(--gold); font-weight:700; }
+  .err { color:var(--danger); font-size:var(--t-sm); min-height:16px; }
+  .err:empty { min-height:0; }
 
   .seatlist { display:flex; flex-direction:column; gap:8px; margin:6px 0 16px; }
   /* wrap + min-width:0 — a flex item's automatic minimum is its content, so an
      un-shrinkable seat row used to push the whole panel wider than a phone */
-  .seatrow { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; background:rgba(0,0,0,.3); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:9px 12px; font-size:14px; }
-  .seatrow .tag { font-size:10px; letter-spacing:1px; opacity:.6; min-width:46px; }
-  .seatrow .who { font-weight:700; min-width:0; overflow:hidden; text-overflow:ellipsis; }
-  .seatrow.you { border-color:var(--gold); }
-  .seatrow .pill { font-size:10px; letter-spacing:1px; padding:2px 8px; border-radius:10px; }
+  .seatrow { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; background:var(--surface-3); border:1px solid var(--line);
+    border-radius:var(--r-md); padding:9px 12px; font-size:var(--t-md); }
+  /* the compass label is what the table calls this chair; it is data, not decoration */
+  .seatrow .tag { font-size:var(--t-2xs); letter-spacing:.14em; font-weight:700; color:var(--txt-3); min-width:44px; }
+  .seatrow .who { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .seatrow.you { border-color:var(--line-gold); background:rgba(222,189,121,.06); }
+  .seatrow .pill { font-size:var(--t-2xs); letter-spacing:.1em; font-weight:700; padding:3px 9px; border-radius:var(--r-pill); }
   .seatrow .spacer { margin-left:auto; }
-  .pill.open { background:rgba(255,255,255,.12); } .pill.ai { background:#6fa8ff; color:#07150d; } .pill.on { background:#7fd6a0; color:#07150d; } .pill.off { background:#c97; color:#07150d; }
-  .code-big { font-size:34px; letter-spacing:8px; color:var(--gold); font-weight:800; text-align:center; padding:6px 0; }
-  .mini-btn { font:inherit; font-size:11px; letter-spacing:1px; cursor:pointer; border-radius:7px; padding:5px 10px; min-height:30px; font-weight:700;
-    background:transparent; color:var(--gold); border:1px solid var(--gold); }
-  .mini-btn.danger { color:#ff9a9a; border-color:#ff9a9a; }
-  @media (hover:hover) { .mini-btn:hover { background:rgba(232,196,90,.15); } .mini-btn.danger:hover { background:rgba(255,154,154,.15); } }
+  .pill.open { background:rgba(255,255,255,.07); color:var(--txt-3); border:1px dashed var(--line-2); }
+  .pill.ai { background:rgba(139,176,224,.16); color:var(--team-o); }
+  .pill.on { background:rgba(95,196,149,.16); color:var(--ok); }
+  .pill.off { background:rgba(228,112,94,.15); color:var(--danger); }
+  .code-big { font-size:34px; letter-spacing:.24em; color:var(--gold); font-weight:700; text-align:center; padding:6px 0; }
+  .mini-btn { font:inherit; font-size:var(--t-xs); letter-spacing:.03em; cursor:pointer; border-radius:var(--r-xs); padding:6px 11px; min-height:32px; font-weight:700;
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(255,255,255,.05); color:var(--txt-2); border:1px solid var(--line-2); transition:background .15s,color .15s,border-color .15s; }
+  .mini-btn .ic { width:13px; height:13px; }
+  .mini-btn.danger { color:var(--danger); border-color:rgba(228,112,94,.3); }
+  @media (hover:hover) {
+    .mini-btn:hover { background:rgba(222,189,121,.14); color:var(--gold); border-color:var(--line-gold); }
+    .mini-btn.danger:hover { background:rgba(228,112,94,.14); color:var(--danger); border-color:rgba(228,112,94,.5); }
+  }
   .mini-btn:disabled { opacity:.4; cursor:not-allowed; }
 
   /* ---- lobby settings ---- */
-  .settings { display:flex; flex-direction:column; gap:10px; margin:2px 0 16px; }
-  .setrow { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-  .setrow > .lbl { font-size:11px; letter-spacing:1px; opacity:.75; min-width:88px; }
-  .segbtn { font:inherit; font-size:12px; cursor:pointer; border-radius:7px; padding:5px 10px; min-height:30px; font-weight:700;
-    background:rgba(255,255,255,.06); color:#f3f3f3; border:1px solid rgba(255,255,255,.18); }
-  .segbtn[aria-pressed="true"] { background:var(--gold); color:var(--ink); border-color:var(--gold); }
-  .segbtn:disabled { cursor:default; } .segbtn:disabled:not([aria-pressed="true"]) { opacity:.45; }
-  .setval { font-size:13px; font-weight:700; color:var(--gold); }
+  .settings { display:flex; flex-direction:column; gap:11px; margin:2px 0 16px; }
+  .setrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .setrow > .lbl { font-size:var(--t-2xs); letter-spacing:.14em; text-transform:uppercase; font-weight:700; color:var(--txt-3); min-width:92px; }
+  /* one segmented control, not a row of loose buttons: the group is the choice */
+  .segbtn { font:inherit; font-size:var(--t-sm); cursor:pointer; border-radius:var(--r-xs); padding:6px 11px; min-height:32px; font-weight:600;
+    background:rgba(255,255,255,.05); color:var(--txt-2); border:1px solid var(--line); transition:background .15s,color .15s; }
+  .segbtn[aria-pressed="true"] { background:var(--gold); color:var(--on-gold); border-color:var(--gold); font-weight:700; }
+  @media (hover:hover) { .segbtn:not([aria-pressed="true"]):not(:disabled):hover { background:rgba(255,255,255,.11); color:var(--txt); } }
+  .segbtn:disabled { cursor:default; } .segbtn:disabled:not([aria-pressed="true"]) { opacity:.4; }
+  .setval { font-size:var(--t-sm); font-weight:700; color:var(--gold); }
 
   /* ---- Game ---- */
   /* 100dvh, not 100vh: iOS Safari sizes vh to the *largest* viewport, so with the
@@ -117,60 +220,91 @@
      clipped by body{overflow:hidden}. The phone block always had three rows, which
      is why only desktop showed it. */
   #game { height:100vh; height:100dvh; display:none; grid-template-columns:1fr clamp(300px,22vw,340px); grid-template-rows:auto 1fr auto; }
-  header { grid-column:1/3; display:flex; align-items:center; gap:16px; background:linear-gradient(180deg,#15321f,#0b2014); border-bottom:2px solid var(--gold);
+  header { grid-column:1/3; display:flex; align-items:center; gap:16px; background:linear-gradient(180deg,var(--room-2),var(--room-1));
+    border-bottom:1px solid var(--line-2); box-shadow:0 1px 0 rgba(222,189,121,.14);
     padding:9px 18px; padding-top:calc(9px + env(safe-area-inset-top)); padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right)); }
-  header h1 { margin:0; font-size:var(--t-xl); letter-spacing:4px; color:var(--gold); text-shadow:0 2px 4px #000; line-height:1.15; }
-  header .tagline { font-size:var(--t-xs); color:var(--txt-3); letter-spacing:1px; }
+  header h1 { margin:0; font-family:var(--fd); font-weight:600; font-size:var(--t-xl); letter-spacing:.16em; color:var(--gold); line-height:1.15; }
+  header .tagline { font-size:var(--t-xs); color:var(--txt-3); letter-spacing:.04em; margin-top:1px; }
   header .tagline b { color:var(--txt-2); font-weight:700; }
-  .hdr-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
-  header .narrow { display:none; }
+  .hdr-actions { margin-left:auto; display:flex; align-items:center; gap:7px; }
   /* One quiet family, differentiated by weight: toggles read as chrome, Leave reads as an exit. */
-  header button { font:inherit; font-size:var(--t-sm); letter-spacing:.5px; cursor:pointer; min-height:38px;
-    color:var(--txt-2); background:rgba(255,255,255,.05); border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 12px; font-weight:700;
+  header button { font:inherit; font-size:var(--t-sm); letter-spacing:.01em; cursor:pointer; min-height:38px;
+    display:inline-flex; align-items:center; gap:7px;
+    color:var(--txt-2); background:rgba(255,255,255,.045); border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 12px; font-weight:600;
     transition:background .15s,color .15s,border-color .15s; }
-  header button[aria-pressed="true"] { background:var(--gold); color:var(--ink); border-color:var(--gold); }
-  header button.danger { color:var(--danger); border-color:rgba(255,128,128,.3); }
+  header button[aria-pressed="true"] { background:var(--gold); color:var(--on-gold); border-color:var(--gold); font-weight:700; }
+  header button.danger { color:var(--danger); border-color:rgba(228,112,94,.26); }
   @media (hover:hover) {
-    header button:hover { background:rgba(255,255,255,.11); color:var(--txt); }
-    header button[aria-pressed="true"]:hover { background:var(--gold); color:var(--ink); }
-    header button.danger:hover { background:rgba(255,128,128,.14); color:var(--danger); }
+    header button:hover { background:rgba(255,255,255,.1); color:var(--txt); border-color:var(--line-2); }
+    header button[aria-pressed="true"]:hover { background:var(--gold-hi); color:var(--on-gold); }
+    header button.danger:hover { background:rgba(228,112,94,.13); color:var(--danger); border-color:rgba(228,112,94,.45); }
   }
 
   #table-wrap { position:relative; padding:16px; display:flex; align-items:center; justify-content:center; min-height:0; min-width:0; }
   /* Sized, not stretched: at 100% width/height on a wide monitor the felt became a
      stadium with the seats flung to its rim and a dead centre. */
-  #table { position:relative; width:min(100%,940px); aspect-ratio:1.7; height:auto; max-height:100%; border-radius:50%/42%;
-    background:radial-gradient(ellipse at 50% 42%, var(--felt-1), var(--felt-2) 72%);
-    box-shadow:0 0 0 14px var(--wood-1),0 0 0 20px var(--wood-2),0 24px 60px rgba(0,0,0,.55),inset 0 0 120px rgba(0,0,0,.45); }
-  .seat { position:absolute; display:flex; flex-direction:column; align-items:center; gap:5px; }
-  .seat .nameplate { display:flex; align-items:center; gap:8px; background:rgba(0,0,0,.45); border:1px solid var(--line); border-radius:var(--r-pill); padding:5px 13px; font-size:var(--t-md); font-weight:600; white-space:nowrap;
-    transition:transform .15s,box-shadow .15s,border-color .15s; }
+  /* The rail is five stacked shadows, not a 20px slab of brown: a hairline of
+     light, thin walnut, a brass line, then the dark that drops it into the room. */
+  #table { position:relative; width:min(100%,960px); aspect-ratio:1.72; height:auto; max-height:100%; border-radius:50%/44%;
+    background:
+      radial-gradient(52% 58% at 50% 40%, rgba(255,238,199,.14), rgba(255,238,199,0) 72%),
+      radial-gradient(80% 84% at 50% 42%, var(--felt-hi), var(--felt) 54%, var(--felt-lo) 100%);
+    box-shadow:
+      0 0 0 1px rgba(255,255,255,.05),
+      0 0 0 9px var(--rail),
+      0 0 0 10px rgba(222,189,121,.2),
+      0 0 0 15px var(--rail-lo),
+      0 26px 70px rgba(0,0,0,.6),
+      inset 0 0 90px rgba(0,0,0,.4); }
+  /* woven cloth, so the felt isn't a flat gradient under raking light */
+  #table::before { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:.55;
+    background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.055) 0 1px,transparent 1px 3px),
+                     repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px); }
+
+  .seat { position:absolute; display:flex; flex-direction:column; align-items:center; gap:5px; z-index:3; }
+  .seat .nameplate { display:flex; align-items:center; gap:8px; background:rgba(7,12,10,.62); backdrop-filter:blur(6px);
+    border:1px solid var(--line-2); border-radius:var(--r-pill); padding:4px 12px 4px 4px; font-size:var(--t-md); font-weight:600; white-space:nowrap;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+    transition:transform .15s,box-shadow .15s,border-color .15s,background .15s; }
   /* The lift goes on the nameplate, never on .seat — .seat's transform is what
      centres it on the felt edge (translateX/-Y 50%) and would be clobbered. */
-  .seat.active .nameplate { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold),0 0 18px rgba(232,196,90,.55); background:rgba(232,196,90,.16); transform:translateY(-2px); }
-  .seat.dealer .nameplate::after { content:"D"; display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%; background:#fff; color:var(--ink); font-size:11px; font-weight:800; }
-  .seat.team-d .nameplate { border-color:var(--team-d); box-shadow:0 0 0 1px var(--team-d) inset; }
-  .seat.team-o .nameplate { border-color:var(--team-o); box-shadow:0 0 0 1px var(--team-o) inset; }
-  .seat .off { opacity:.45; }
-  .role { font-size:10px; letter-spacing:1px; padding:1px 7px; border-radius:10px; font-weight:700; }
-  .role.bidder { background:var(--team-d); color:var(--ink); } .role.partner { background:var(--gold-dim); color:#fff; }
-  .role.def { background:var(--team-o); color:var(--ink); } .role.bidding { background:rgba(255,255,255,.15); color:#fff; }
+  .seat.active .nameplate { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold),0 0 22px rgba(222,189,121,.4),0 4px 14px rgba(0,0,0,.4);
+    background:rgba(48,38,16,.72); transform:translateY(-2px); }
+  .seat.team-d .nameplate { border-color:rgba(222,189,121,.5); }
+  .seat.team-o .nameplate { border-color:rgba(139,176,224,.5); }
+  .seat .off { opacity:.5; }
+  /* The dealer button is a physical object on a real table — a white puck that
+     moves round the seats — so it is drawn as one rather than spelled out. */
+  .dealer-btn { display:inline-flex; align-items:center; justify-content:center; width:19px; height:19px; border-radius:50%;
+    background:linear-gradient(180deg,#fff,#d9d5c8); color:#1a1a1a; font-size:var(--t-2xs); font-weight:800; letter-spacing:0;
+    box-shadow:0 1px 3px rgba(0,0,0,.5); }
+  .role { font-size:var(--t-2xs); letter-spacing:.11em; padding:2px 8px; border-radius:var(--r-pill); font-weight:700; text-transform:uppercase; }
+  .role.bidder { background:var(--gold); color:var(--on-gold); }
+  .role.partner { background:rgba(222,189,121,.2); color:var(--gold); box-shadow:inset 0 0 0 1px rgba(222,189,121,.45); }
+  .role.def { background:rgba(139,176,224,.18); color:var(--team-o); box-shadow:inset 0 0 0 1px rgba(139,176,224,.4); }
+  .role.bidding { background:rgba(255,255,255,.1); color:var(--txt-2); }
   /* a seat that folded used to render as nothing at all — indistinguishable from one yet to act */
-  .role.passed { background:rgba(255,255,255,.06); color:var(--txt-3); }
-  .seat .bidchip { font-size:var(--t-sm); font-weight:700; color:var(--txt-2); letter-spacing:.5px;
-    background:rgba(0,0,0,.4); border:1px solid var(--line); border-radius:var(--r-pill); padding:1px 9px; }
-  .seat .bidchip.high { color:var(--gold); border-color:var(--line-gold); }
-  .seat .meta { font-size:var(--t-xs); color:var(--txt-2); text-align:center; } .seat .meta b { color:var(--gold); font-size:var(--t-sm); }
-  .seat.south { bottom:8px; left:50%; transform:translateX(-50%); }
-  .seat.west { left:18px; top:50%; transform:translateY(-50%); }
-  .seat.north { top:12px; left:50%; transform:translateX(-50%); }
-  .seat.east { right:18px; top:50%; transform:translateY(-50%); }
+  .role.passed { background:transparent; color:var(--txt-3); box-shadow:inset 0 0 0 1px var(--line-2); }
+  .seat .bidchip { font-size:var(--t-sm); font-weight:700; color:var(--txt-2); letter-spacing:.02em;
+    background:rgba(7,12,10,.7); border:1px solid var(--line-2); border-radius:var(--r-pill); padding:2px 10px; }
+  .seat .bidchip.high { color:var(--gold); border-color:var(--line-gold); background:rgba(48,38,16,.7); }
+  .seat .meta { font-size:var(--t-xs); color:var(--txt-3); text-align:center; letter-spacing:.02em; }
+  .seat .meta b { color:var(--gold); font-size:var(--t-sm); font-weight:700; }
+  .seat.south { bottom:6px; left:50%; transform:translateX(-50%); }
+  .seat.west { left:14px; top:50%; transform:translateY(-50%); }
+  .seat.north { top:10px; left:50%; transform:translateX(-50%); }
+  .seat.east { right:14px; top:50%; transform:translateY(-50%); }
+
   .hand-backs { display:flex; position:relative; } .hand-backs.vertical { flex-direction:column; }
-  .card-back { width:24px; height:34px; border-radius:4px; border:1.5px solid #f3eede; box-shadow:0 2px 4px var(--shadow);
-    background:repeating-linear-gradient(45deg,#8d2b2b 0 5px,#6e1f1f 5px 10px); }
-  .hand-backs .card-back:not(:first-child) { margin-left:-17px; } .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-27px; }
-  .backs-count { position:absolute; right:-7px; bottom:-6px; font-size:10px; font-weight:800; line-height:1;
-    background:rgba(0,0,0,.65); border:1px solid var(--line); border-radius:var(--r-pill); padding:2px 6px; color:var(--txt-2); }
+  /* A real back: a fine lattice inside a white margin, not a barber pole. */
+  .card-back { width:23px; height:33px; border-radius:3px; box-shadow:0 0 0 1.4px var(--stock),0 0 0 2.2px rgba(0,0,0,.5),0 2px 5px rgba(0,0,0,.45);
+    background:
+      repeating-linear-gradient(45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
+      repeating-linear-gradient(-45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
+      linear-gradient(155deg,#8d2f38,#5a1620); }
+  .hand-backs .card-back:not(:first-child) { margin-left:-16px; } .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-26px; }
+  .backs-count { position:absolute; right:-8px; bottom:-7px; font-size:var(--t-2xs); font-weight:700; line-height:1;
+    background:rgba(7,12,10,.85); border:1px solid var(--line-2); border-radius:var(--r-pill); padding:2px 6px; color:var(--txt-2); }
 
   /* ---- centre medallion: the felt used to be the largest, emptiest thing on screen ----
      Two modes on one element. `full` is a centred plaque for the phases where the
@@ -181,21 +315,24 @@
      shrink-to-fits into the *remaining* half of its container, so the strip's rows
      were being squeezed to 490px and wrapping mid-phrase. max-content opts out. */
   #medallion { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:1; pointer-events:none;
-    display:flex; flex-direction:column; align-items:center; gap:3px; text-align:center;
-    width:max-content; max-width:min(92%,520px); min-width:250px; padding:16px 28px; border-radius:var(--r-lg);
-    background:radial-gradient(ellipse at 50% 0%, rgba(0,0,0,.45), rgba(0,0,0,.3));
-    border:1px solid var(--line-gold); box-shadow:0 10px 30px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06);
+    display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
+    width:max-content; max-width:min(92%,520px); min-width:250px; padding:18px 30px; border-radius:var(--r-lg);
+    background:radial-gradient(ellipse at 50% 0%, rgba(4,10,7,.5), rgba(4,10,7,.34));
+    border:1px solid var(--line-gold); box-shadow:0 10px 34px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.05);
     transition:opacity .18s, padding .18s; }
-  .med-label { font-size:var(--t-xs); letter-spacing:3px; font-weight:700; color:var(--txt-3); }
-  .med-main { font-size:var(--t-3xl); font-weight:800; line-height:1.05; color:var(--gold); text-shadow:0 2px 6px rgba(0,0,0,.5); }
+  .med-label { font-size:var(--t-xs); letter-spacing:.24em; font-weight:700; color:var(--txt-3); text-transform:uppercase;
+    display:flex; align-items:center; justify-content:center; gap:6px; }
+  .med-label .su { width:12px; height:12px; }
+  .med-main { font-size:var(--t-3xl); font-weight:700; line-height:1.05; color:var(--gold); letter-spacing:-.01em; }
   .med-main.set { color:var(--team-o); }
-  .med-sub { font-size:var(--t-sm); color:var(--txt-2); } .med-sub b { color:var(--txt); }
-  .med-bar { display:none; width:190px; height:6px; margin-top:5px; border-radius:var(--r-pill); background:rgba(0,0,0,.45); overflow:hidden; }
+  .med-sub { font-size:var(--t-sm); color:var(--txt-3); } .med-sub b { color:var(--txt-2); font-weight:600; }
+  .med-bar { display:none; width:190px; height:5px; margin-top:7px; border-radius:var(--r-pill); background:rgba(0,0,0,.5); overflow:hidden; }
   #medallion.has-bar .med-bar { display:block; }
-  .med-bar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold)); transition:width .3s; }
-  .med-chips { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:5px; }
-  .med-chips span { font-size:var(--t-xs); letter-spacing:.5px; padding:3px 9px; border-radius:var(--r-pill); white-space:nowrap;
-    background:rgba(0,0,0,.4); border:1px solid var(--line); color:var(--txt-2); }
+  .med-bar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi)); transition:width .35s ease-out; }
+  .med-chips { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:7px; }
+  .med-chips span { font-size:var(--t-xs); letter-spacing:.02em; padding:3px 10px; border-radius:var(--r-pill); white-space:nowrap;
+    display:inline-flex; align-items:center; gap:4px;
+    background:rgba(0,0,0,.42); border:1px solid var(--line); color:var(--txt-3); }
   /* --strip-top centres the strip in the band between the lowest trick card and the
      south seat; fitTable() measures it, because that band is 110px on a desktop felt
      and 22px on a phone's. */
@@ -208,29 +345,59 @@
   #medallion[data-mode="strip"] .med-bar { width:110px; margin:0; }
   #medallion[data-mode="strip"] .med-chips { margin:0; }
 
-  #trick { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) scale(var(--trick-scale,1)); width:220px; height:200px; z-index:2; }
-  .trick-card { position:absolute; top:50%; left:50%; transition:all .25s ease-out; animation:dealIn .25s ease-out; }
-  @keyframes dealIn { from { opacity:0; transform:translate(-50%,-50%) scale(.6); } }
-  .trick-card.winner { filter:drop-shadow(0 0 12px var(--gold)); z-index:5; }
-  .trick-card.pos-0 { transform:translate(-50%,18px); } .trick-card.pos-1 { transform:translate(-118px,-50%); }
-  .trick-card.pos-2 { transform:translate(-50%,-118px); } .trick-card.pos-3 { transform:translate(18px,-50%); }
+  /* ---- the trick: four cards, one per seat, meeting in the middle ----
+     The old cross was laid out with four hand-picked pixel offsets that did not
+     agree with each other (south sat 62px below centre, north 74px above it),
+     so the pile was visibly lopsided. One radius per axis, applied symmetrically,
+     is the whole fix — and it lets each card fly in from its own seat. */
+  /* One radius per axis, declared here so both the layout and fitTable() read
+     the same number instead of each carrying its own copy of it. */
+  #trick { --reach-x:54px; --reach-y:47px;
+    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) scale(var(--trick-scale,1));
+    width:0; height:0; z-index:2; }
+  .trick-card { --tx:0px; --ty:0px; --tr:0deg; --ts:1;
+    position:absolute; top:0; left:0;
+    transform:translate(-50%,-50%) translate(var(--tx),var(--ty)) rotate(var(--tr)) scale(var(--ts));
+    transition:transform .22s ease-out, filter .22s ease-out; animation:dealIn .28s cubic-bezier(.2,.85,.3,1); }
+  @keyframes dealIn { from { opacity:0;
+    transform:translate(-50%,-50%) translate(calc(var(--tx) * 2.2),calc(var(--ty) * 2.2)) rotate(var(--tr)) scale(.9); } }
+  .trick-card.winner { --ts:1.07; z-index:5; filter:drop-shadow(0 0 14px rgba(222,189,121,.75)); }
+  .trick-card.pos-0 { --ty:var(--reach-y);                --tr:1.4deg; }
+  .trick-card.pos-1 { --tx:calc(-1 * var(--reach-x));     --tr:-1.4deg; }
+  .trick-card.pos-2 { --ty:calc(-1 * var(--reach-y));     --tr:-1.4deg; }
+  .trick-card.pos-3 { --tx:var(--reach-x);                --tr:1.4deg; }
   #trick .trick-card { position:absolute; } /* beat the later, equal-specificity .card{position:relative} so cards form the N/E/S/W cross instead of stacking */
+  #trick .card { width:66px; height:93px; }
 
-  .card { width:62px; height:88px; border-radius:7px; background:var(--card-bg); color:var(--ink); position:relative; box-shadow:0 3px 6px var(--shadow); user-select:none; font-family:"Georgia",serif; }
+  /* ---- the card ----
+     The element is the physical object: stock, edge, shadow. The SVG inside is
+     the printing, and it is the only thing that knows what rank this is —
+     the old face drew one oversized suit glyph on every card in the deck, so a
+     2 and a 9 were indistinguishable and a King was just a crown-less club. */
+  .card { width:62px; height:88px; border-radius:4.5px; color:var(--ink); position:relative; user-select:none;
+    background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
+    box-shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 0 0 1px rgba(21,23,26,.18), 0 3px 7px var(--shadow); }
   .card.red { color:var(--red); }
-  button.card { display:block; border:none; padding:0; margin:0; font:inherit; font-family:"Georgia",serif; -webkit-appearance:none; }
+  .card > svg { display:block; width:100%; height:100%; border-radius:inherit; }
+  button.card { border:none; padding:0; margin:0; font:inherit; -webkit-appearance:none; }
+  /* The index is set in the grotesk, not the serif: Georgia's figures are
+     old-style, so a "10" would sit half below the baseline on every card. */
+  .card text, .mini-card text { font-family:var(--fu); font-weight:800; letter-spacing:-.02em; }
+  /* ink for the parts of a face that are never suit-coloured (frames, hair, outlines) */
+  .card .ci { fill:var(--ink); } .card .cs { fill:var(--stock); }
+  .card .cl { fill:none; stroke:var(--ink); stroke-width:2.4; stroke-linejoin:round; }
+  .card .cfr { fill:none; stroke:rgba(21,23,26,.26); stroke-width:2; }
   .card:focus-visible, .mini-card:focus-visible, .emote-btn:focus-visible, .segbtn:focus-visible,
   .mini-btn:focus-visible, .act-btn:focus-visible, .btn:focus-visible, button:focus-visible, input:focus-visible {
-    outline:3px solid #fff; outline-offset:2px; }
+    outline:3px solid var(--gold-hi); outline-offset:2px; }
   /* 4-colour deck (♦ blue, ♣ green) — opt-in, persisted */
-  body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:#1f6fd0; }
-  body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:#12924f; }
-  .sc { font-weight:700; color:#f3f3f3; } .sc.s-h, .sc.s-d { color:#ff7a7a; }
-  body.fourcolor .sc.s-d { color:#7cbcff; } body.fourcolor .sc.s-c { color:#5fd8a0; }
-  .card .corner { position:absolute; font-weight:700; line-height:.9; text-align:center; }
-  .card .corner .r { font-size:15px; display:block; } .card .corner .s { font-size:13px; display:block; }
-  .card .corner.tl { top:5px; left:6px; } .card .corner.br { bottom:5px; right:6px; transform:rotate(180deg); }
-  .card .pip { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:32px; opacity:.9; }
+  body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:var(--dia-4c); }
+  body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:var(--club-4c); }
+  /* a suit named inside a sentence: the log, the medallion, a chip */
+  .sc { font-weight:700; color:var(--txt); white-space:nowrap; font-variant-numeric:tabular-nums lining-nums; }
+  .sc .su { margin-left:.1em; width:.82em; height:.82em; }
+  .sc.s-h, .sc.s-d { color:#f08b8b; }
+  body.fourcolor .sc.s-d { color:#8cc3ff; } body.fourcolor .sc.s-c { color:#6fdca9; }
 
   /* min-width:0 on both column-1 rows: a grid track's `auto` minimum is its
      min-content size, so a hand wider than the screen used to stretch the whole
@@ -239,39 +406,64 @@
   /* The only place you actually do something used to be the faintest thing on screen.
      min-height keeps it from jumping between phases; the rail says whose turn it is. */
   #action-bar { position:relative; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:9px;
-    min-height:92px; width:min(100% - 32px,820px); margin:0 auto 12px; padding:11px 20px 11px 24px; text-align:center; border-radius:var(--r-md);
-    background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(0,0,0,.2)); border:1px solid var(--line);
+    min-height:92px; width:min(100% - 32px,820px); margin:0 auto 12px; padding:12px 20px 12px 24px; text-align:center; border-radius:var(--r-md);
+    background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line);
     transition:border-color .2s,box-shadow .2s; }
-  #action-bar::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:4px; border-radius:var(--r-pill); background:var(--line); transition:background .2s; }
-  #action-bar[data-turn="you"] { border-color:var(--line-gold); box-shadow:0 8px 26px rgba(0,0,0,.32); }
-  #action-bar[data-turn="you"]::before { background:var(--gold); }
-  #action-bar .prompt { font-size:var(--t-lg); font-weight:700; color:var(--gold); width:100%; } #action-bar .status { font-size:var(--t-md); color:var(--txt-2); width:100%; }
-  #action-bar .banner { font-size:var(--t-md); width:100%; padding:2px 0; color:var(--txt-2); } #action-bar .banner b { color:var(--txt); }
+  #action-bar::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:var(--r-pill); background:var(--line-2); transition:background .2s,box-shadow .2s; }
+  #action-bar[data-turn="you"] { border-color:var(--line-gold); box-shadow:0 10px 30px rgba(0,0,0,.4); }
+  #action-bar[data-turn="you"]::before { background:var(--gold); box-shadow:0 0 14px rgba(222,189,121,.6); }
+  #action-bar .prompt { font-size:var(--t-lg); font-weight:600; color:var(--txt); width:100%; letter-spacing:-.005em; }
+  #action-bar .prompt b { color:var(--gold); }
+  #action-bar .status { font-size:var(--t-md); color:var(--txt-3); width:100%; }
+  #action-bar .banner { font-size:var(--t-md); width:100%; padding:2px 0; color:var(--txt-2); } #action-bar .banner b { color:var(--txt); font-weight:700; }
   #action-bar .banner .d { color:var(--team-d); font-weight:700; } #action-bar .banner .o { color:var(--team-o); font-weight:700; }
-  .act-btn { font:inherit; font-size:var(--t-md); cursor:pointer; color:var(--ink); background:var(--gold); border:1px solid var(--gold); border-radius:var(--r-sm); padding:9px 18px; min-height:42px; font-weight:700; }
-  .act-btn.pass { background:transparent; color:var(--txt-2); border-color:var(--line); }
-  @media (hover:hover) { .act-btn:hover { filter:brightness(1.07); } .act-btn.pass:hover { background:rgba(255,255,255,.08); color:var(--txt); } }
-  .act-btn.suit { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; font-size:24px; line-height:1; min-width:66px; min-height:66px; padding:6px 10px; }
-  .act-btn.suit small { font-size:9px; letter-spacing:1px; font-weight:800; text-transform:uppercase; color:var(--ink); opacity:.65; }
+  .act-btn { font:inherit; font-size:var(--t-md); cursor:pointer; color:var(--on-gold); background:linear-gradient(180deg,var(--gold-hi),var(--gold));
+    border:1px solid var(--gold); border-radius:var(--r-sm); padding:9px 18px; min-height:42px; font-weight:700;
+    box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 4px 12px rgba(0,0,0,.3); transition:filter .15s,transform .08s; }
+  .act-btn:active { transform:translateY(1px); }
+  /* Pass is not a mistake, but it is not the headline either — quiet, still tappable. */
+  .act-btn.pass { background:transparent; color:var(--txt-2); border-color:var(--line-2); box-shadow:none; }
+  /* the steppers flank the number; they are adjustments, not the decision */
+  .act-btn.step { background:rgba(255,255,255,.06); color:var(--txt); border-color:var(--line-2); box-shadow:none;
+    min-width:46px; font-variant-numeric:tabular-nums; }
+  @media (hover:hover) {
+    .act-btn:hover { filter:brightness(1.06); }
+    .act-btn.pass:hover { background:rgba(255,255,255,.07); color:var(--txt); }
+    .act-btn.step:hover { background:rgba(255,255,255,.12); }
+  }
+  /* Choosing trump is the single biggest decision in a deal, so the four suits
+     are the biggest targets on screen and drawn, not typed. */
+  .act-btn.suit { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; line-height:1;
+    min-width:74px; min-height:74px; padding:8px 10px; background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
+    border-color:rgba(21,23,26,.2); color:var(--ink); }
+  .act-btn.suit .su { width:30px; height:30px; }
+  .act-btn.suit small { font-size:var(--t-2xs); letter-spacing:.11em; font-weight:700; text-transform:uppercase; color:var(--ink); opacity:.55; }
   .act-btn.suit.red { color:var(--red); }
-  body.fourcolor .act-btn.suit.s-d { color:#1f6fd0; } body.fourcolor .act-btn.suit.s-c { color:#12924f; }
-  .bidval { font-size:var(--t-2xl); font-weight:800; color:var(--gold); min-width:64px; text-align:center; }
+  body.fourcolor .act-btn.suit.s-d { color:var(--dia-4c); } body.fourcolor .act-btn.suit.s-c { color:var(--club-4c); }
+  .bidval { font-size:var(--t-2xl); font-weight:700; color:var(--gold); min-width:72px; text-align:center; letter-spacing:-.02em; }
   /* The old 150px cap hid half the callable cards behind a scrollbar nobody noticed;
      no cap at all is worse — on a phone each suit wraps over four lines, the grid runs
      to ~1000px, and #bottom squeezes the felt to nothing. Bound it generously instead. */
-  .call-grid { display:flex; flex-direction:column; gap:5px; width:100%; align-items:center;
+  .call-grid { display:flex; flex-direction:column; gap:6px; width:100%; align-items:center;
     max-height:min(44dvh,320px); overflow-y:auto; }
   .call-row { display:flex; gap:5px; justify-content:center; align-items:center; flex-wrap:wrap; }
-  .call-row .call-suit { font-size:var(--t-md); font-weight:700; width:18px; text-align:center; }
-  .mini-card { width:44px; height:58px; border-radius:5px; background:var(--card-bg); color:var(--ink); position:relative; cursor:pointer; box-shadow:0 2px 4px var(--shadow); font-family:"Georgia",serif; display:flex; align-items:center; justify-content:center; flex-direction:column; line-height:1; border:none; padding:0; }
-  .mini-card.red { color:var(--red); } .mini-card .mr { font-size:14px; font-weight:700; } .mini-card .ms { font-size:15px; }
-  .mini-card.ace { outline:2px solid var(--gold); } .mini-card.bonus { outline:2px solid #ff5e9c; }
-  @media (hover:hover) { .mini-card:hover { transform:translateY(-3px); box-shadow:0 6px 12px var(--shadow); } }
+  .call-row .call-suit { width:20px; display:flex; justify-content:center; }
+  .call-row .call-suit .su { width:15px; height:15px; }
+  .mini-card { width:44px; height:61px; border-radius:3.5px; color:var(--ink); position:relative; cursor:pointer; border:none; padding:0;
+    background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
+    box-shadow:0 0 0 1px rgba(21,23,26,.16), 0 2px 5px var(--shadow); transition:transform .13s, box-shadow .13s; }
+  .mini-card > svg { display:block; width:100%; height:100%; }
+  .mini-card .ci { fill:var(--ink); }
+  .mini-card.red { color:var(--red); }
+  /* the two cards worth naming: the ace of a suit, and the 3 that carries 30 points */
+  .mini-card.ace { box-shadow:0 0 0 2px var(--gold), 0 2px 5px var(--shadow); }
+  .mini-card.bonus { box-shadow:0 0 0 2px #e0679c, 0 2px 5px var(--shadow); }
+  @media (hover:hover) { .mini-card:hover { transform:translateY(-4px); box-shadow:0 0 0 1px rgba(21,23,26,.16), 0 8px 16px var(--shadow); } }
 
   /* padding-bottom clears the fan, not just the card box: rotation about an origin
      below the card swings the outer bottom corners past the unrotated edge, and
      transforms contribute nothing to layout, so the row can't size around them. */
-  #my-hand { --ml-base:-22px; --seam:16px; display:flex; justify-content:center; height:150px; align-items:flex-end; padding-bottom:18px; }
+  #my-hand { --ml-base:-22px; --seam:16px; display:flex; justify-content:center; height:162px; align-items:flex-end; padding-bottom:30px; }
   /* One composed transform driven by custom properties, so the fan (--rot/--dy, set
      per card in renderHand) and the lift (--lift, set by state) cannot overwrite each
      other — a plain `transform:translateY()` on hover would flatten the fan. */
@@ -281,101 +473,147 @@
   #my-hand .card:first-child { margin-left:0; }
   /* a visible seam between suits — hands arrive sorted by suit, then rank */
   #my-hand .card.suit-start:not(:first-child) { margin-left:calc(var(--ml,var(--ml-base)) + var(--seam)); }
-  #my-hand .card .corner .r { font-size:19px; } #my-hand .card .corner .s { font-size:16px; } #my-hand .card .pip { font-size:40px; }
-  #my-hand .card.trumpcard { box-shadow:0 0 0 2px var(--gold),0 3px 6px var(--shadow); }
-  #my-hand .card.bonuscard { box-shadow:0 0 0 2px #ff5e9c,0 3px 6px var(--shadow); }
-  #my-hand .card.trumpcard.bonuscard { box-shadow:0 0 0 2px var(--gold),0 0 0 4px #ff5e9c,0 3px 6px var(--shadow); }
+  /* Trump and the bonus 3 are marked on the card's own edge rather than by
+     recolouring its shadow, so the marks survive the lift filters below. */
+  #my-hand .card.trumpcard { box-shadow:0 0 0 1.5px var(--gold),0 3px 7px var(--shadow); }
+  #my-hand .card.trumpcard::before { content:""; position:absolute; left:0; right:0; top:0; height:4px;
+    border-radius:4.5px 4.5px 0 0; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi),var(--gold-dim)); }
+  #my-hand .card.bonuscard::after { content:"30"; position:absolute; top:-7px; right:-6px; z-index:2;
+    font-size:9.5px; font-weight:800; line-height:1; letter-spacing:.02em; color:#fff; background:#c9457f;
+    border:1.5px solid var(--stock); border-radius:var(--r-pill); padding:3px 5px; box-shadow:0 2px 5px rgba(0,0,0,.5); }
   /* legal cards sit proud and glow the moment it is your turn: the playable set
      reads at a glance instead of by elimination. drop-shadow, not box-shadow —
-     the trump and bonus rings own box-shadow and must survive. */
-  #my-hand .card.playable { --lift:-8px; cursor:pointer; filter:drop-shadow(0 0 11px rgba(232,196,90,.7)); }
+     the trump ring owns box-shadow and must survive. */
+  #my-hand .card.playable { --lift:-9px; cursor:pointer; filter:drop-shadow(0 0 10px rgba(222,189,121,.55)); }
   /* Lift on hover only where hover exists — on iOS the state sticks after a tap. */
-  @media (hover:hover) { #my-hand .card.playable:hover { --lift:-26px; z-index:10; filter:drop-shadow(0 0 14px rgba(232,196,90,.8)); } }
+  @media (hover:hover) { #my-hand .card.playable:hover { --lift:-26px; z-index:10; filter:drop-shadow(0 6px 16px rgba(0,0,0,.5)) drop-shadow(0 0 14px rgba(222,189,121,.75)); } }
   #my-hand .card.playable:focus-visible { --lift:-26px; z-index:10; }
-  #my-hand .card.playable:active { --lift:-14px; }
-  #my-hand .card.illegal { filter:grayscale(.7) brightness(.72); opacity:.82; }
+  #my-hand .card.playable:active { --lift:-15px; }
+  /* An unplayable card must still be a *card*. It used to be 82% opaque, so the
+     card behind it showed straight through and the hand looked like it had
+     failed to load. Darken it, never make it transparent. */
+  #my-hand .card.illegal { filter:grayscale(.9) brightness(.55) contrast(1.05); }
 
   /* 2/4, not 2/3 — the grid has three rows now and the sidebar spans table + bottom */
-  aside { grid-row:2/4; grid-column:2/3; background:linear-gradient(180deg,var(--surface-1),var(--surface-2)); border-left:1px solid rgba(232,196,90,.3); display:flex; flex-direction:column; min-height:0; }
-  .panel-section { padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.07); }
-  .panel-section h2 { margin:0 0 9px; font-size:var(--t-xs); letter-spacing:2px; color:var(--gold); opacity:.9; }
-  table.score { width:100%; border-collapse:collapse; font-size:var(--t-md); } table.score th,table.score td { text-align:center; padding:5px 2px; }
-  table.score th { font-size:10px; letter-spacing:1px; color:var(--txt-3); font-weight:600; } table.score td.name { text-align:left; font-weight:600; padding-left:8px; }
-  table.score tr.you td.name { color:var(--gold); } table.score td b { color:var(--gold); }
+  aside { grid-row:2/4; grid-column:2/3; background:linear-gradient(180deg,var(--surface-1),var(--surface-2));
+    border-left:1px solid var(--line-2); display:flex; flex-direction:column; min-height:0; }
+  .panel-section { padding:13px 15px; border-bottom:1px solid var(--line); }
+  .panel-section h2 { margin:0 0 10px; font-size:var(--t-2xs); letter-spacing:.2em; text-transform:uppercase; color:var(--gold-dim); font-weight:700; }
+  table.score { width:100%; border-collapse:collapse; font-size:var(--t-md); } table.score th,table.score td { text-align:right; padding:6px 2px; }
+  table.score th { font-size:var(--t-2xs); letter-spacing:.13em; text-transform:uppercase; color:var(--txt-3); font-weight:700; padding-bottom:3px; }
+  table.score td.name, table.score th.name { text-align:left; font-weight:600; padding-left:10px; }
+  table.score tr.you td.name { color:var(--gold); } table.score td b { color:var(--txt); font-weight:700; }
+  table.score tr.you td b { color:var(--gold); }
+  table.score td.deals { padding-left:10px; white-space:nowrap; }
   /* side is a rail on the row, not a dot in the cell — readable at a glance, one element fewer */
   table.score tr.side-d td.name { box-shadow:inset 3px 0 0 var(--team-d); }
   table.score tr.side-o td.name { box-shadow:inset 3px 0 0 var(--team-o); }
-  .pip { display:inline-block; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.16); margin-left:3px; vertical-align:middle; }
-  .pip.on { background:var(--gold); }
-  .contract-line { font-size:var(--t-sm); margin-top:9px; color:var(--txt-2); }
-  .cbar-top { display:flex; justify-content:space-between; gap:8px; margin-bottom:4px; } .cbar-top b { color:var(--gold); }
-  .cbar { height:6px; border-radius:var(--r-pill); background:rgba(0,0,0,.4); overflow:hidden; }
-  .cbar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold)); transition:width .3s; }
-  .chip { display:inline-block; font-size:var(--t-xs); padding:2px 8px; margin-right:4px; border-radius:var(--r-pill); background:rgba(0,0,0,.3); border:1px solid var(--line); }
-  .chip b { color:var(--gold); }
-  #log { flex:1; overflow-y:auto; font-size:var(--t-sm); line-height:1.55; padding:10px 14px; }
-  #log .entry { color:var(--txt-2); margin-bottom:3px; padding-left:8px; border-left:2px solid transparent; }
-  #log .entry.win { color:var(--gold); font-weight:600; border-left-color:var(--gold); }
-  #log .entry.bid { color:#9fd; border-left-color:rgba(153,255,221,.4); }
-  #log .entry.round { color:var(--ok); font-weight:700; border-top:1px dashed rgba(255,255,255,.15); border-left-color:transparent; padding-top:6px; margin-top:6px; }
+  /* deals won against the target, as a row of counters you can read without arithmetic */
+  .tally { display:inline-block; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.13); margin-left:4px; vertical-align:middle; }
+  .tally.on { background:var(--gold); box-shadow:0 0 7px rgba(222,189,121,.55); }
+  .contract-line { font-size:var(--t-sm); margin-top:11px; color:var(--txt-2); }
+  .cbar-top { display:flex; justify-content:space-between; gap:8px; margin-bottom:5px; align-items:baseline; }
+  .cbar-top b { color:var(--gold); font-weight:700; }
+  .cbar { height:5px; border-radius:var(--r-pill); background:rgba(0,0,0,.45); overflow:hidden; }
+  .cbar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi)); transition:width .35s ease-out; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:var(--t-xs); padding:3px 9px; margin-right:5px; border-radius:var(--r-pill);
+    background:rgba(0,0,0,.3); border:1px solid var(--line); color:var(--txt-3); }
+  .chip b { color:var(--txt-2); font-weight:700; }
+  #log { flex:1; overflow-y:auto; font-size:var(--t-sm); line-height:1.55; padding:10px 15px; }
+  #log .entry { color:var(--txt-3); margin-bottom:4px; padding-left:10px; border-left:2px solid transparent; }
+  #log .entry b { color:var(--txt-2); font-weight:600; }
+  #log .entry.win { color:var(--gold); font-weight:600; border-left-color:var(--gold); display:flex; gap:7px; align-items:flex-start; }
+  #log .entry.win .ic { width:13px; height:13px; margin-top:3px; opacity:.9; }
+  #log .entry.win b { color:var(--gold-hi); }
+  #log .entry.bid { color:var(--txt-2); border-left-color:rgba(139,176,224,.45); }
+  #log .entry.round { color:var(--ok); font-weight:600; border-top:1px solid var(--line); border-left-color:transparent;
+    padding-top:9px; margin-top:9px; }
 
   /* ---- chat + emotes ---- */
   /* the log earns more room than an empty chat box: 1.4 : 1, both floored */
   #sec-log { flex:1.4 1 0; display:flex; flex-direction:column; min-height:140px; }
   #chat-section { display:flex; flex-direction:column; min-height:180px; flex:1 1 0; padding:11px 0 0; border-top:1px solid rgba(255,255,255,.07); }
-  #chat-log { flex:1; overflow-y:auto; font-size:12.5px; line-height:1.45; padding:8px 14px; min-height:60px; }
-  #chat-log .msg { margin-bottom:4px; word-break:break-word; }
-  #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:#7fd6a0; }
+  #chat-log { flex:1; overflow-y:auto; font-size:var(--t-sm); line-height:1.5; padding:8px 15px; min-height:60px; }
+  #chat-log .msg { margin-bottom:5px; word-break:break-word; color:var(--txt-2); }
+  #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:var(--ok); }
   /* the placeholder lives outside #chat-log so the live region only ever holds real messages */
-  #chat-empty { opacity:.5; font-style:italic; padding:6px 14px; font-size:13px; }
-  #emote-bar { display:flex; gap:4px; padding:4px 10px 0; flex-wrap:wrap; }
-  .emote-btn { font-size:18px; line-height:1; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.14);
-    border-radius:8px; min-width:40px; min-height:40px; padding:4px; }
-  @media (hover:hover) { .emote-btn:hover { background:rgba(232,196,90,.2); } }
-  .emote-btn:active { background:rgba(232,196,90,.35); }
-  #chat-form { display:flex; gap:6px; padding:8px 10px 10px; }
-  #chat-input { flex:1; min-width:0; font:inherit; font-size:13px; padding:8px 10px; min-height:40px; border-radius:8px;
-    border:1px solid rgba(255,255,255,.2); background:#0c2417; color:#fff; }
-  #chat-send { font:inherit; font-size:13px; font-weight:700; cursor:pointer; border:none; border-radius:8px; padding:0 14px; min-height:40px; background:var(--gold); color:var(--ink); }
-  .float-emote { position:absolute; bottom:100%; left:50%; font-size:30px; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; }
+  #chat-empty { color:var(--txt-3); padding:6px 15px; font-size:var(--t-sm); }
+  #emote-bar { display:flex; gap:5px; padding:5px 11px 0; flex-wrap:wrap; }
+  /* Reactions are drawn, so they take the interface's colour and stay legible
+     at 20px — a platform emoji font does neither. */
+  .emote-btn { line-height:0; cursor:pointer; color:var(--txt-2); background:rgba(255,255,255,.05); border:1px solid var(--line);
+    border-radius:var(--r-sm); min-width:40px; min-height:40px; padding:4px; display:inline-flex; align-items:center; justify-content:center;
+    transition:background .13s,color .13s,transform .08s; }
+  .emote-btn svg { width:20px; height:20px; }
+  @media (hover:hover) { .emote-btn:hover { background:rgba(222,189,121,.16); color:var(--gold); } }
+  .emote-btn:active { transform:scale(.94); background:rgba(222,189,121,.28); }
+  #chat-form { display:flex; gap:7px; padding:9px 11px 11px; }
+  #chat-input { flex:1; min-width:0; font:inherit; font-size:var(--t-sm); padding:9px 11px; min-height:40px; border-radius:var(--r-sm);
+    border:1px solid var(--line-2); background:rgba(0,0,0,.34); color:var(--txt); }
+  #chat-input::placeholder { color:var(--txt-3); }
+  #chat-input:focus { outline:none; border-color:var(--line-gold); }
+  #chat-send { font:inherit; font-size:var(--t-sm); font-weight:700; cursor:pointer; border:none; border-radius:var(--r-sm); padding:0 15px; min-height:40px;
+    background:var(--gold); color:var(--on-gold); }
+  .float-emote { position:absolute; bottom:100%; left:50%; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; color:var(--gold-hi); }
+  .float-emote svg { width:30px; height:30px; filter:drop-shadow(0 3px 8px rgba(0,0,0,.6)); }
   @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
     100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }
 
   /* ---- away / autopilot ---- */
   #awaybar { position:fixed; top:0; left:0; right:0; z-index:290; display:none; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
-    background:#8a5a12; color:#fff; font-size:13.5px; text-align:center;
-    padding:8px 14px; padding-top:calc(8px + env(safe-area-inset-top)); }
+    background:linear-gradient(180deg,#7a5a18,#5f4611); color:#fff5df; font-size:var(--t-sm); text-align:center;
+    box-shadow:0 6px 20px rgba(0,0,0,.45);
+    padding:9px 14px; padding-top:calc(9px + env(safe-area-inset-top)); }
   #awaybar.show { display:flex; }
-  #awaybar button { font:inherit; font-size:13px; font-weight:800; cursor:pointer; border:none; border-radius:8px; padding:8px 16px; min-height:36px; background:#fff; color:var(--ink); }
-  .seat.away-seat .nameplate { opacity:.6; } .seat .zzz { font-size:11px; opacity:.8; }
+  #awaybar .msg { display:inline-flex; align-items:center; gap:8px; }
+  #awaybar button { font:inherit; font-size:var(--t-sm); font-weight:700; cursor:pointer; border:none; border-radius:var(--r-xs); padding:8px 16px; min-height:36px; background:#fff5df; color:#3a2a06; }
+  .seat.away-seat .nameplate { opacity:.62; } .seat .zzz { color:var(--txt-3); }
 
-  /* ---- turn timer ring ---- */
-  .ring { width:20px; height:20px; border-radius:50%; flex:none;
-    background:conic-gradient(var(--gold) calc(var(--p,1) * 360deg), rgba(255,255,255,.18) 0); position:relative; }
-  .ring::after { content:""; position:absolute; inset:3px; border-radius:50%; background:#123; }
-  .ring.urgent { background:conic-gradient(#ff6b6b calc(var(--p,1) * 360deg), rgba(255,255,255,.18) 0); }
-  .act-btn.ready { background:#7fd6a0; } .act-btn.ready:disabled { opacity:.55; cursor:default; }
+  /* ---- turn timer: a ring around the player's own face, where the eye already is ---- */
+  .avatar.ticking { position:relative; overflow:visible; }
+  .avatar.ticking::after { content:""; position:absolute; inset:-3.5px; border-radius:50%; pointer-events:none;
+    background:conic-gradient(var(--gold) calc(var(--p,1) * 360deg), rgba(255,255,255,.14) 0);
+    -webkit-mask:radial-gradient(circle, transparent 0 calc(50% - 2.5px), #000 calc(50% - 2.5px));
+    mask:radial-gradient(circle, transparent 0 calc(50% - 2.5px), #000 calc(50% - 2.5px)); }
+  .avatar.ticking.urgent::after { background:conic-gradient(#ff7a6b calc(var(--p,1) * 360deg), rgba(255,255,255,.14) 0); }
+  .act-btn.ready { background:linear-gradient(180deg,#7fdcae,var(--ok)); border-color:var(--ok); color:#08281a; }
+  .act-btn.ready:disabled { opacity:.5; cursor:default; }
 
-  #overlay { position:fixed; inset:0; background:rgba(0,0,0,.72); display:none; align-items:center; justify-content:center; z-index:100; }
-  #overlay.show { display:flex; } .modal { background:linear-gradient(180deg,#15321f,#0b2014); border:2px solid var(--gold); border-radius:16px; padding:26px 32px; max-width:480px; text-align:center; box-shadow:0 20px 60px rgba(0,0,0,.6); }
-  .modal h2 { margin:0 0 10px; color:var(--gold); letter-spacing:2px; } .modal p { margin:8px 0; line-height:1.5; font-size:14px; } .modal .big { font-size:22px; font-weight:800; }
-  .modal .standings { margin:14px 0; font-size:14px; } .modal .standings div { padding:3px 0; }
-  .modal button { margin-top:16px; font:inherit; font-size:15px; cursor:pointer; color:var(--ink); background:var(--gold); border:none; border-radius:10px; padding:12px 28px; font-weight:800; }
-  .modal .how { text-align:left; font-size:13px; opacity:.92; } .modal .how li { margin:4px 0; }
+  #overlay { position:fixed; inset:0; background:rgba(3,7,5,.78); backdrop-filter:blur(3px); display:none; align-items:center; justify-content:center; z-index:100; padding:18px; }
+  #overlay.show { display:flex; }
+  .modal { background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line-gold); border-radius:var(--r-lg);
+    padding:28px 32px; max-width:500px; max-height:88dvh; overflow-y:auto; text-align:center; box-shadow:0 30px 80px rgba(0,0,0,.7); }
+  .modal h2 { margin:0 0 12px; font-family:var(--fd); font-weight:600; font-size:var(--t-xl); letter-spacing:.05em; color:var(--gold); }
+  .modal p { margin:9px 0; line-height:1.55; font-size:var(--t-md); color:var(--txt-2); }
+  .modal .big { font-size:var(--t-xl); font-weight:700; color:var(--txt); display:flex; align-items:center; justify-content:center; gap:10px; }
+  .modal .big .ic { width:26px; height:26px; color:var(--gold); }
+  .modal .standings { margin:16px 0 4px; font-size:var(--t-md); text-align:left; }
+  .modal .standings div { display:flex; justify-content:space-between; gap:14px; padding:7px 2px; border-top:1px solid var(--line); color:var(--txt-2); }
+  .modal .standings div span:last-child { color:var(--txt-3); font-variant-numeric:tabular-nums; }
+  .modal .standings div.me { color:var(--gold); font-weight:700; }
+  .modal button { margin-top:18px; font:inherit; font-size:var(--t-md); cursor:pointer; color:var(--on-gold);
+    background:linear-gradient(180deg,var(--gold-hi),var(--gold)); border:none; border-radius:var(--r-sm); padding:12px 28px; font-weight:700; }
+  .modal .how { text-align:left; font-size:var(--t-sm); color:var(--txt-2); line-height:1.6; padding-left:20px; margin:0; }
+  .modal .how li { margin:9px 0; } .modal .how b { color:var(--txt); }
 
-  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:#7a1f1f; color:#fff; padding:8px 16px; border-radius:8px; font-size:13px; z-index:200; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--room-3); color:var(--txt);
+    border:1px solid var(--line-2); padding:10px 18px; border-radius:var(--r-sm); font-size:var(--t-sm); z-index:200; opacity:0;
+    box-shadow:0 12px 30px rgba(0,0,0,.55); transition:opacity .2s; pointer-events:none; }
   #toast.show { opacity:1; }
-  #conn { position:fixed; top:0; left:0; right:0; background:#7a1f1f; color:#fff; text-align:center; font-size:13px; z-index:300; display:none;
-    padding:6px; padding-top:calc(6px + env(safe-area-inset-top)); }
-  #conn.show { display:block; }
+  #conn { position:fixed; top:0; left:0; right:0; background:linear-gradient(180deg,#7d2b26,#5d1d19); color:#ffe8e4;
+    align-items:center; justify-content:center; gap:9px;
+    font-size:var(--t-sm); z-index:300; display:none;
+    padding:7px; padding-top:calc(7px + env(safe-area-inset-top)); }
+  #conn.show { display:flex; }
   /* ---- mobile: the sidebar becomes a bottom sheet with tabs (nothing is dropped) ---- */
   #sheet-tabs { display:none; position:fixed; left:0; right:0; bottom:var(--kb); z-index:120; transition:bottom .15s;
-    background:#0b2014; border-top:1px solid rgba(232,196,90,.35);
+    background:var(--room-1); border-top:1px solid var(--line-2);
     padding-bottom:env(safe-area-inset-bottom); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
-  #sheet-tabs button { flex:1; font:inherit; font-size:12px; letter-spacing:1px; font-weight:700; cursor:pointer;
-    background:transparent; color:#cfe6d8; border:none; padding:11px 4px; min-height:46px; }
-  #sheet-tabs button[aria-expanded="true"] { color:var(--ink); background:var(--gold); }
-  #sheet-tabs .badge { display:inline-block; min-width:16px; margin-left:4px; border-radius:9px; background:var(--red); color:#fff; font-size:10px; padding:1px 5px; }
+  #sheet-tabs button { flex:1; font:inherit; font-size:var(--t-xs); letter-spacing:.14em; text-transform:uppercase; font-weight:700; cursor:pointer;
+    background:transparent; color:var(--txt-3); border:none; padding:11px 4px; min-height:46px; transition:color .13s,background .13s; }
+  #sheet-tabs button[aria-expanded="true"] { color:var(--on-gold); background:var(--gold); }
+  #sheet-tabs .badge { display:inline-block; min-width:16px; margin-left:5px; border-radius:var(--r-pill); background:var(--danger); color:#2a0f0a;
+    font-size:var(--t-2xs); font-weight:800; padding:1px 5px; }
   @media (max-width:900px) {
     #game { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
     header h1 { font-size:18px; } header .tagline { display:none; }
@@ -383,7 +621,20 @@
     header button { padding:9px 10px; min-height:40px; font-size:12px; }
     /* a phone is portrait: a 1.7 oval leaves the felt 220px tall with the seats,
        the strip and the trick cross all fighting for it */
-    #table { aspect-ratio:0.9; }
+    #table { aspect-ratio:0.78; }
+    /* On a 390px felt the east and west plates are ~150px each, so parking them
+       at the vertical centre put them on top of one another *and* on top of the
+       trick. Lift them clear of the middle and cap how wide a name may get. */
+    .seat.west, .seat.east { top:40%; }
+    .seat.west { left:6px; align-items:flex-start; } .seat.east { right:6px; align-items:flex-end; }
+    .seat.west, .seat.east { max-width:45vw; }
+    .seat .nameplate { max-width:100%; }
+    /* let the role badge drop to a second line instead of squeezing the name to
+       an ellipsis — "Bot…  PARTNER" told you less than either line alone */
+    .seat.west .nameplate, .seat.east .nameplate { flex-wrap:wrap; justify-content:center; white-space:normal; row-gap:3px; }
+    .seat .nameplate .who { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .role { font-size:9px; letter-spacing:.06em; padding:2px 6px; }
+    .dealer-btn { width:17px; height:17px; }
     #medallion { min-width:150px; max-width:94%; padding:11px 16px; gap:2px; }
     .med-main { font-size:var(--t-xl); } .med-bar { width:130px; }
     #medallion[data-mode="strip"] { gap:8px; padding:5px 11px; } #medallion[data-mode="strip"] .med-bar { width:70px; }
@@ -403,14 +654,17 @@
     #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }   /* clear the tab bar + home indicator */
     /* 56px, not 60: at 60 a thirteen-card hand can only fit by overlapping past the
        point where the next card covers this one's tap target */
-    #my-hand { height:112px; padding-bottom:14px; --ml-base:-18px; --seam:11px; }
+    #my-hand { height:120px; padding:0 8px 22px; --ml-base:-18px; --seam:11px; }
     #my-hand .card { width:56px; height:80px; }
-    #my-hand .card .corner .r { font-size:16px; } #my-hand .card .corner .s { font-size:13px; } #my-hand .card .pip { font-size:32px; }
-    header .wide { display:none; } header .narrow { display:inline; }
+    header .wide { display:none; } header button { padding:9px 11px; }
     #table-wrap { padding:8px; }
-    .seat .nameplate { font-size:var(--t-sm); padding:3px 9px; } .seat .bidchip { font-size:var(--t-xs); padding:1px 7px; }
+    .seat .nameplate { font-size:var(--t-sm); padding:3px 10px 3px 3px; gap:6px; }
+    .seat .bidchip { font-size:var(--t-xs); padding:1px 8px; }
+    .avatar { width:24px; height:24px; font-size:var(--t-xs); }
+    .brand-fan { height:88px; } .brand-fan .card { width:60px; height:85px; margin-left:-26px; }
     .card-back { width:20px; height:29px; }
     .hand-backs .card-back:not(:first-child) { margin-left:-13px; } .hand-backs.vertical .card-back:not(:first-child) { margin-top:-22px; }
+    #trick { --reach-x:42px; --reach-y:37px; } #trick .card { width:52px; height:73px; }
     .act-btn { min-height:44px; } .mini-btn { min-height:40px; } .btn { min-height:46px; }
   }
   /* A landscape phone has ~115px of felt between the header and the hand. Nothing
@@ -434,7 +688,7 @@
     .btn { min-height:48px; }
     .emote-btn { min-width:44px; min-height:44px; }
     #chat-input, #chat-send { min-height:44px; }
-    .mini-card { width:44px; height:58px; }
+    .mini-card { width:44px; height:61px; }
   }
   /* Tablets only — phones already size the hand in the 900px block above. */
   @media (pointer:coarse) and (min-width:901px) {
@@ -448,37 +702,48 @@
 
 <!-- Join screen -->
 <div id="join-screen" class="screen show">
-  <h1>TRUMP<span class="suits">♠♥♦♣</span></h1>
-  <div class="muted" style="letter-spacing:1px;">Online 250-point bid &amp; capture · 2–4 players + AI</div>
+  <div class="brand">
+    <!-- the hero is the deck: three real card faces, drawn by the same renderer
+         the table uses, so the first thing you see is the thing you came for -->
+    <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
+    <h1>TRUMP</h1>
+    <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
+    <p class="lede">Bid for points, call a hidden partner, capture tricks. Two to four players — AI takes whatever seats are left.</p>
+  </div>
   <div class="panel slim">
-    <div class="field" style="margin-bottom:0;"><label for="join-name">Your name</label><input id="join-name" maxlength="16" placeholder="e.g. Alex" /></div>
+    <div class="field" style="margin-bottom:0;">
+      <label for="join-name">Your name</label>
+      <div class="name-row"><span class="avatar lg" id="join-avatar" aria-hidden="true"></span><input id="join-name" maxlength="16" placeholder="Alex" autocomplete="nickname" /></div>
+    </div>
     <div class="err" id="join-err"></div>
+    <div id="join-record"></div>
   </div>
   <div class="join-cards">
     <div class="panel">
-      <h2>🤖 PLAY SOLO</h2>
-      <p class="muted" style="margin:0 0 12px;">No friends around? Jump straight into a game against 3 AI bots.</p>
-      <button class="btn" id="btn-solo" style="width:100%;">Play vs 3 Bots</button>
+      <h2 data-ic="bot">Play solo</h2>
+      <p class="muted" style="margin:0 0 10px;">Straight into a deal against three AI opponents. No room, no waiting.</p>
+      <p class="muted" style="margin:0 0 14px;">They play easy, normal or hard — change it from the table settings whenever you like, even mid-match.</p>
+      <button class="btn" id="btn-solo" style="width:100%;">Deal me in</button>
     </div>
     <div class="panel">
-      <h2>👥 PLAY WITH FRIENDS</h2>
-      <p class="muted" style="margin:0 0 12px;">Start a room and share the code — friends join from any device. Empty seats are filled by AI, so a partial table still works.</p>
-      <button class="btn" id="btn-create" style="width:100%;margin-bottom:8px;">Create Room</button>
-      <label class="chk" for="join-private"><input type="checkbox" id="join-private" /> Private room — longer code nobody can stumble into</label>
+      <h2 data-ic="users">Play with friends</h2>
+      <p class="muted" style="margin:0 0 14px;">Start a table and share the code. Friends join from any device, and AI fills whatever seats are still empty.</p>
+      <button class="btn" id="btn-create" style="width:100%;">Create a table</button>
+      <label class="chk" for="join-private"><input type="checkbox" id="join-private" /><span>Private table — a longer code nobody can stumble into</span></label>
+      <div class="or">or join one</div>
       <div class="row">
-        <input id="join-code" maxlength="8" placeholder="ROOM CODE" style="flex:1;" />
+        <input id="join-code" maxlength="8" placeholder="CODE" style="flex:1;" />
         <button class="btn ghost" id="btn-join">Join</button>
       </div>
     </div>
   </div>
-  <div class="muted" id="join-record" style="text-align:center;"></div>
 </div>
 
 <!-- Lobby screen -->
 <div id="lobby-screen" class="screen">
-  <h1>TRUMP<span class="suits">♠♥♦♣</span></h1>
+  <div class="brand"><h1>TRUMP</h1><div class="colophon" id="lobby-colophon" aria-hidden="true"></div></div>
   <div class="panel">
-    <h2>ROOM</h2>
+    <h2 data-ic="table">Table</h2>
     <div class="code-ticket">
       <div><div class="lbl">ROOM CODE</div><div class="code-big" id="lobby-code">----</div></div>
       <div class="ticket-actions">
@@ -486,9 +751,9 @@
         <button class="btn ghost" id="btn-share" style="display:none;">Share…</button>
       </div>
     </div>
-    <p class="muted" style="text-align:center;margin-top:0;">Anyone with the link (or the code) can take a seat.</p>
+    <p class="muted" style="text-align:center;margin-top:0;">Anyone with the link — or the code — can take a seat.</p>
     <div class="seatlist" id="lobby-seats"></div>
-    <h2>TABLE SETTINGS</h2>
+    <h2 data-ic="gear">Table settings</h2>
     <div class="settings" id="lobby-settings"></div>
     <div id="lobby-controls"></div>
     <p class="muted" id="lobby-note"></p>
@@ -502,12 +767,13 @@
       <h1>TRUMP</h1>
       <div class="tagline" id="header-state">250-point bid &amp; capture</div>
     </div>
-    <!-- one label per width; aria-label keeps the accessible name stable across both -->
+    <!-- the icon carries the button on a phone, the label on a desktop;
+         aria-label keeps the accessible name stable across both -->
     <div class="hdr-actions">
-      <button id="btn-colors" aria-pressed="false" aria-label="Four-colour deck" title="Colour ♦ blue and ♣ green"><span class="wide">4-Color</span><span class="narrow">◆</span></button>
-      <button id="btn-help" aria-label="How to play"><span class="wide">How to Play</span><span class="narrow">?</span></button>
-      <button id="btn-stand" aria-label="Stand up" title="Give up your seat — an AI takes over"><span class="wide">Stand Up</span><span class="narrow">Stand</span></button>
-      <button class="danger" id="btn-leave">Leave</button>
+      <button id="btn-colors" data-ic="deck" aria-pressed="false" aria-label="Four-colour deck" title="Colour diamonds blue and clubs green"><span class="wide">4-Colour</span></button>
+      <button id="btn-help" data-ic="help" aria-label="How to play"><span class="wide">How to play</span></button>
+      <button id="btn-stand" data-ic="stand" aria-label="Stand up" title="Give up your seat — an AI takes over"><span class="wide">Stand up</span></button>
+      <button class="danger" id="btn-leave" data-ic="exit"><span class="wide">Leave</span></button>
     </div>
   </header>
   <div id="table-wrap">
@@ -520,20 +786,20 @@
         <div class="med-bar"><i></i></div>
         <div class="med-chips"></div>
       </div>
-      <div class="seat south" id="seat-south"><div class="nameplate"><span></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat west" id="seat-west"><div class="nameplate"><span></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
-      <div class="seat north" id="seat-north"><div class="nameplate"><span></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat east" id="seat-east"><div class="nameplate"><span></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
       <div id="trick"></div>
     </div>
   </div>
   <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
   <aside data-tab="score">
-    <div class="panel-section" id="sec-score"><h2 id="score-title">SCOREBOARD</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
-    <div class="panel-section" id="sec-log"><h2>TABLE LOG</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
+    <div class="panel-section" id="sec-score"><h2 id="score-title">Scoreboard</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
+    <div class="panel-section" id="sec-log"><h2>Table log</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
     <div id="chat-section" class="panel-section">
-      <h2 style="padding:0 14px;">CHAT</h2>
-      <div id="chat-empty" class="empty">No messages yet — say hi 👋</div>
+      <h2 style="padding:0 15px;">Chat</h2>
+      <div id="chat-empty">Nothing said yet. Say hello.</div>
       <div id="chat-log" aria-live="polite" aria-label="Chat messages"></div>
       <div id="emote-bar" aria-label="Reactions"></div>
       <form id="chat-form" autocomplete="off">
@@ -550,7 +816,7 @@
 </nav>
 
 <div id="awaybar">
-  <span>💤 You're away — an AI is playing your seat.</span>
+  <span class="msg" id="awaybar-msg">You're away — an AI is playing your seat.</span>
   <button id="btn-back">I'm back</button>
 </div>
 <div id="overlay"><div class="modal" id="modal"></div></div>
@@ -564,6 +830,57 @@ const POS_CLASS = ["south","west","north","east"]; // pos 0..3 relative to viewe
 const rankLabel = r => ({14:"A",13:"K",12:"Q",11:"J"})[r] || String(r);
 const cardStr = c => rankLabel(c.rank) + c.suit;
 const EMOTES = ["👏","😂","😱","🔥","🤝","💀"];                      // must match room.js EMOTES
+
+/* ---------- iconography ----------
+   Nothing in this interface is an emoji. An emoji is a font: it renders as a
+   different picture on every platform, it can't take the colour of the control
+   it sits in, and below 16px it is mud. These are paths on a 24-unit grid with
+   one stroke weight, so they read as one set. */
+const ICONS = {
+  bot:   '<rect x="4.2" y="8" width="15.6" height="12" rx="3.4"/><path d="M12 4.2V8M2.4 12.6v3.2M21.6 12.6v3.2"/><circle cx="9.4" cy="13.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="14.6" cy="13.4" r="1.15" fill="currentColor" stroke="none"/><path d="M9.8 16.9h4.4"/><circle cx="12" cy="3" r="1.3"/>',
+  users: '<path d="M15.6 20.4v-1.7a3.6 3.6 0 0 0-3.6-3.6H6.6A3.6 3.6 0 0 0 3 18.7v1.7"/><circle cx="9.3" cy="7.6" r="3.4"/><path d="M21 20.4v-1.7a3.6 3.6 0 0 0-2.7-3.48M15.4 4.3a3.6 3.6 0 0 1 0 6.6"/>',
+  table: '<ellipse cx="12" cy="11" rx="9" ry="5.4"/><path d="M3 11v2.2c0 3 4 5.4 9 5.4s9-2.4 9-5.4V11"/>',
+  gear:  '<circle cx="12" cy="12" r="3.1"/><path d="M19.2 14.6a1.5 1.5 0 0 0 .3 1.66l.06.05a1.82 1.82 0 1 1-2.58 2.58l-.05-.06a1.5 1.5 0 0 0-1.66-.3 1.5 1.5 0 0 0-.91 1.38v.15a1.82 1.82 0 0 1-3.64 0v-.08a1.5 1.5 0 0 0-.98-1.37 1.5 1.5 0 0 0-1.66.3l-.05.06A1.82 1.82 0 1 1 4.45 16.4l.06-.05a1.5 1.5 0 0 0 .3-1.66 1.5 1.5 0 0 0-1.38-.91h-.15a1.82 1.82 0 0 1 0-3.64h.08a1.5 1.5 0 0 0 1.37-.98 1.5 1.5 0 0 0-.3-1.66l-.06-.05A1.82 1.82 0 1 1 7.6 4.45l.05.06a1.5 1.5 0 0 0 1.66.3h.07a1.5 1.5 0 0 0 .91-1.38v-.15a1.82 1.82 0 0 1 3.64 0v.08a1.5 1.5 0 0 0 .91 1.37 1.5 1.5 0 0 0 1.66-.3l.05-.06a1.82 1.82 0 1 1 2.58 2.58l-.06.05a1.5 1.5 0 0 0-.3 1.66v.07a1.5 1.5 0 0 0 1.38.91h.15a1.82 1.82 0 0 1 0 3.64h-.08a1.5 1.5 0 0 0-1.37.91Z"/>',
+  help:  '<circle cx="12" cy="12" r="9"/><path d="M9.4 9.3a2.7 2.7 0 0 1 5.25.9c0 1.8-2.7 2.7-2.7 2.7"/><circle cx="12" cy="17" r="1.05" fill="currentColor" stroke="none"/>',
+  stand: '<path d="M12 3v9.5M8.6 6.4 12 3l3.4 3.4"/><path d="M4.6 14.4v3.4a2.6 2.6 0 0 0 2.6 2.6h9.6a2.6 2.6 0 0 0 2.6-2.6v-3.4"/>',
+  exit:  '<path d="M9.4 20.4H5.6A2.2 2.2 0 0 1 3.4 18.2V5.8a2.2 2.2 0 0 1 2.2-2.2h3.8"/><path d="m15.6 16.4 4.4-4.4-4.4-4.4M20 12H9.4"/>',
+  deck:  '<rect x="3.2" y="6.4" width="11.4" height="14.4" rx="2.2"/><path d="M8.4 3.4h9a3.4 3.4 0 0 1 3.4 3.4v9.4"/>',
+  star:  '<path d="m12 3.6 2.6 5.5 5.9.85-4.25 4.2 1 5.95L12 17.25 6.75 20.1l1-5.95L3.5 9.95l5.9-.85Z"/>',
+  copy:  '<rect x="8.4" y="8.4" width="12" height="12" rx="2.2"/><path d="M16 5.6a2.2 2.2 0 0 0-2.2-2.2H5.6a2.2 2.2 0 0 0-2.2 2.2v8.2A2.2 2.2 0 0 0 5.6 16"/>',
+  share: '<circle cx="18" cy="5.4" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="18.6" r="2.6"/><path d="m8.3 10.75 7.4-4.1M8.3 13.25l7.4 4.1"/>',
+  moon:  '<path d="M20.4 13.4A8.4 8.4 0 1 1 10.6 3.6a6.6 6.6 0 0 0 9.8 9.8Z"/>',
+  plug:  '<path d="M18.4 5.6 5.6 18.4M8.4 3.6v3.2M3.6 8.4h3.2M15.6 17.2v3.2M17.2 15.6h3.2"/><circle cx="12" cy="12" r="4.4"/>',
+  cup:   '<path d="M7.4 3.6h9.2v5.6a4.6 4.6 0 0 1-9.2 0Z"/><path d="M7.4 5.4H4.9a2.3 2.3 0 0 0 0 4.6h2.5M16.6 5.4h2.5a2.3 2.3 0 0 1 0 4.6h-2.5M9.6 13.6h4.8l-.6 4.4H10.2ZM7.6 20.4h8.8"/>',
+};
+function icon(name, cls) {
+  const d = ICONS[name]; if (!d) return "";
+  return `<svg class="ic ${cls || ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ` +
+         `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+/* Reactions. Filled marks rather than outlines — they float over the felt at
+   30px and need to hold their shape against a busy background. */
+const REACTIONS = {
+  "👏": { name: "applause", d: '<g fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9.4 20.9a5.9 5.9 0 0 1-4.2-1.75L2.6 16.6a1.45 1.45 0 0 1 2.05-2.05l1.5 1.5V8.5a1.4 1.4 0 0 1 2.8 0v3.9"/><path d="M8.95 12.4V7.2a1.4 1.4 0 0 1 2.8 0v5.1"/><path d="M11.75 12.3V8.1a1.4 1.4 0 0 1 2.8 0v4.3"/><path d="M14.55 12.5V9.9a1.4 1.4 0 0 1 2.8 0v5.3a5.7 5.7 0 0 1-5.7 5.7H9.4"/><path d="m18.6 3.9 1.5-1.5M20.1 7.3h2.1M16.9 5.9l1-1.9"/></g>' },
+  "😂": { name: "laughing", d: '<path fill-rule="evenodd" d="M12 2.3a9.7 9.7 0 1 0 0 19.4 9.7 9.7 0 0 0 0-19.4Zm-5.6 10.3h11.2a5.6 5.6 0 0 1-11.2 0ZM6.85 9.85c.95-1.5 2.65-1.5 3.6 0 .3.5-.45 1-.8.5-.5-.75-1.5-.75-2 0-.35.5-1.1 0-.8-.5Zm6.7 0c.95-1.5 2.65-1.5 3.6 0 .3.5-.45 1-.8.5-.5-.75-1.5-.75-2 0-.35.5-1.1 0-.8-.5Z"/>' },
+  "😱": { name: "shocked", d: '<path fill-rule="evenodd" d="M12 2.3a9.7 9.7 0 1 0 0 19.4 9.7 9.7 0 0 0 0-19.4ZM8.6 7.9a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5Zm6.8 0a1.75 1.75 0 1 1 0 3.5 1.75 1.75 0 0 1 0-3.5ZM12 13.1c1.45 0 2.6 1.55 2.6 3.45S13.45 20 12 20s-2.6-1.55-2.6-3.45S10.55 13.1 12 13.1Z"/>' },
+  "🔥": { name: "fire", d: '<path d="M12 22a6.9 6.9 0 0 0 6.9-6.9c0-4.8-4.3-6.6-4.3-11.1 0 0-3.3 2.1-3.3 5.9 0 1.7-1.1 2.6-2 1.9-.8-.6-.8-2.4-.8-2.4C6.8 11 5.1 12.8 5.1 15.1A6.9 6.9 0 0 0 12 22Z"/>' },
+  "🤝": { name: "good game", d: '<g fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M2.4 9.5 6.3 6l3.5 3h4.4l3.5-3 3.9 3.5"/><path d="M2.4 9.5 5.7 14.1l2.3-1.7 3.1 2.7a2.1 2.1 0 0 0 2.8 0l3.1-2.7 2.3 1.7 3.3-4.6"/></g>' },
+  "💀": { name: "oof", d: '<path fill-rule="evenodd" d="M12 2.2c-4.7 0-8.5 3.6-8.5 8.1 0 2.6 1.3 4.6 3 5.8.5.4.8 1 .8 1.6v1.1c0 .9.7 1.6 1.6 1.6h6.2c.9 0 1.6-.7 1.6-1.6v-1.1c0-.6.3-1.2.8-1.6 1.7-1.2 3-3.2 3-5.8 0-4.5-3.8-8.1-8.5-8.1Zm-3.4 6.9a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm6.8 0a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 13.9l1.1 2.2h-2.2Z"/><path d="M9.4 20.6v-2.2M12 20.6v-2.2M14.6 20.6v-2.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/>' },
+};
+function reactionIcon(e) {
+  const r = REACTIONS[e]; if (!r) return "";
+  return `<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">${r.d}</svg>`;
+}
+const reactionName = e => (REACTIONS[e] || { name: "reaction" }).name;
+/* Wire icons declared in the markup, so the HTML stays free of path data. */
+function paintIcons(root) {
+  (root || document).querySelectorAll("[data-ic]").forEach(el => {
+    if (el._ic) return;
+    el._ic = true;
+    el.insertAdjacentHTML("afterbegin", icon(el.dataset.ic));
+  });
+}
+
 const DIFF_OPTS = [["easy","Easy"],["normal","Normal"],["hard","Hard"]];
 const DEAL_OPTS = [3,5,7];
 const TIMER_OPTS = [0,15,30,45,60,90];
@@ -733,16 +1050,14 @@ function renderLobby() {
   view.seats.forEach(s => {
     const row = document.createElement("div");
     row.className = "seatrow" + (s.you ? " you" : "");
-    const host = view.room.hostSeat === s.seat ? ` <span class="pill on">HOST</span>` : "";
+    const host = view.room.hostSeat === s.seat ? ` <span class="pill ai">Host</span>` : "";
     const pill = s.isHuman
-      ? `<span class="pill ${s.connected ? "on" : "off"}">${s.you ? "YOU" : (s.connected ? "HERE" : "AWAY")}</span>`
-      : `<span class="pill open">OPEN → AI</span>`;
-    const initial = s.name ? s.name.trim().slice(0, 1).toUpperCase() : "·";
-    const avatar = `<span class="avatar${s.isHuman ? "" : " ai"}">${esc(initial)}</span>`;
-    row.innerHTML = `${avatar}<span class="tag">${s.label}</span><span class="who">${s.name ? esc(s.name) : "—"}</span>${host}<span class="spacer"></span>${pill}`;
-    if (s.you) row.appendChild(miniBtn("Stand", "", () => send({ type: "stand" })));
+      ? `<span class="pill ${s.connected ? "on" : "off"}">${s.you ? "You" : (s.connected ? "Here" : "Away")}</span>`
+      : `<span class="pill open">Open</span>`;
+    row.innerHTML = `${avatarHtml(s.name, !s.isHuman)}<span class="tag">${s.label}</span><span class="who">${s.name ? esc(s.name) : "Empty"}</span>${host}<span class="spacer"></span>${pill}`;
+    if (s.you) row.appendChild(miniBtn("Stand up", "", () => send({ type: "stand" }), "stand"));
     else if (!s.isHuman) row.appendChild(miniBtn("Sit here", "", () => send({ type: "sit", seat: s.seat })));
-    else if (isHost) row.appendChild(miniBtn("Kick", "danger", () => { if (confirm(`Remove ${s.name} from the table?`)) send({ type: "kick", seat: s.seat }); }));
+    else if (isHost) row.appendChild(miniBtn("Remove", "danger", () => { if (confirm(`Remove ${s.name} from the table?`)) send({ type: "kick", seat: s.seat }); }, "exit"));
     list.appendChild(row);
   });
   renderSettings($("lobby-settings"), isHost);
@@ -754,7 +1069,8 @@ function renderLobby() {
     ctrl.appendChild(p);
   }
   if (isHost) {
-    const b = document.createElement("button"); b.className = "btn"; b.style.width = "100%"; b.textContent = "Start Game (fill empty seats with AI)";
+    // the note below the button already explains what happens to empty seats
+    const b = document.createElement("button"); b.className = "btn"; b.style.width = "100%"; b.textContent = "Start the match";
     b.onclick = () => send({ type: "start" }); ctrl.appendChild(b);
   } else {
     const p = document.createElement("p"); p.className = "muted"; p.style.textAlign = "center";
@@ -764,9 +1080,11 @@ function renderLobby() {
   const spec = view.room.spectators;
   $("lobby-note").textContent = `${view.room.humans} seated${spec ? `, ${spec} spectating` : ""}. Empty seats become AI when the game starts.`;
 }
-function miniBtn(label, cls, fn) {
+function miniBtn(label, cls, fn, ic) {
   const b = document.createElement("button");
-  b.className = "mini-btn " + (cls || ""); b.textContent = label; b.onclick = fn;
+  b.className = "mini-btn " + (cls || "");
+  b.innerHTML = (ic ? icon(ic) : "") + `<span>${esc(label)}</span>`;
+  b.onclick = fn;
   return b;
 }
 /* Settings are host-driven; everyone else sees the same rows, read-only. */
@@ -796,16 +1114,132 @@ const SUIT_KEY = { "♠":"s", "♥":"h", "♦":"d", "♣":"c" };
 const SUIT_NAME = { "♠":"spades", "♥":"hearts", "♦":"diamonds", "♣":"clubs" };
 const RANK_NAME = { 14:"ace", 13:"king", 12:"queen", 11:"jack" };
 const cardName = c => `${RANK_NAME[c.rank] || c.rank} of ${SUIT_NAME[c.suit] || c.suit}`;
+
+/* ---------- the deck ----------
+   Suits are drawn, never typed. ♠♥♦♣ are font glyphs: every OS ships a
+   different one, none of them match the proportions of a real pip, and they
+   are the single biggest reason a web card game reads as clip-art.
+   Each path is authored in a 100×100 box and placed by transform. */
+const SUIT_PATH = {
+  "♠": "M50 6s-28 26-36 41c-8 15-3 30 12 32 10 2 18-3 22-11 0 0-2 14-14 24h32c-12-10-14-24-14-24 4 8 12 13 22 11 15-2 20-17 12-32C78 32 50 6 50 6Z",
+  "♥": "M50 90S10 62 10 36c0-15 11-25 23-25 9 0 15 5 17 11 2-6 8-11 17-11 12 0 23 10 23 25 0 26-40 54-40 54Z",
+  "♦": "M50 3 86 50 50 97 14 50Z",
+  "♣": "M50 4c-11 0-20 9-20 20 0 4 1 8 3 11-3-2-7-3-11-3C11 32 2 41 2 52s9 20 20 20c9 0 16-5 19-13 0 0 0 15-12 33h42c-12-18-12-33-12-33 3 8 10 13 19 13 11 0 20-9 20-20s-9-20-20-20c-4 0-8 1-11 3 2-3 3-7 3-11 0-11-9-20-20-20Z",
+};
+const suitPath = (s, cx, cy, size, flip) =>
+  `<path d="${SUIT_PATH[s]}" transform="translate(${cx} ${cy})${flip ? " rotate(180)" : ""} scale(${(size / 100).toFixed(4)}) translate(-50 -50)"/>`;
+/* A suit named inside a sentence, a chip, or a button. */
+function suitSvg(s) {
+  return SUIT_PATH[s] ? `<svg class="su" viewBox="0 0 100 100" aria-hidden="true"><path fill="currentColor" d="${SUIT_PATH[s]}"/></svg>` : "";
+}
+
+/* Pip layouts, normalised: column 0 = left, .5 = centre, 1 = right; row 0 = top,
+   1 = bottom. Anything below the midline prints upside down, as on a real card.
+   This table is the whole difference between a deck and 52 copies of one symbol. */
+const PIP_LAYOUT = {
+  2:  [[.5,0],[.5,1]],
+  3:  [[.5,0],[.5,.5],[.5,1]],
+  4:  [[0,0],[1,0],[0,1],[1,1]],
+  5:  [[0,0],[1,0],[.5,.5],[0,1],[1,1]],
+  6:  [[0,0],[1,0],[0,.5],[1,.5],[0,1],[1,1]],
+  7:  [[0,0],[1,0],[.5,.25],[0,.5],[1,.5],[0,1],[1,1]],
+  8:  [[0,0],[1,0],[.5,.25],[0,.5],[1,.5],[.5,.75],[0,1],[1,1]],
+  9:  [[0,0],[1,0],[0,1/3],[1,1/3],[.5,.5],[0,2/3],[1,2/3],[0,1],[1,1]],
+  10: [[0,0],[1,0],[.5,1/6],[0,1/3],[1,1/3],[0,2/3],[1,2/3],[.5,5/6],[0,1],[1,1]],
+};
+const COL = [78, 120, 162], ROW_TOP = 68, ROW_BOT = 268, PIP_SIZE = 46;
+
+/* Court cards. Stylised rather than a bad copy of the Rouen pattern, but built
+   the way a real court is: a framed panel, a half figure, and the same figure
+   rotated 180° about the middle — which is why you can hold the card either way up. */
+function courtFigure(rank) {
+  /* Mostly card stock with the suit's colour kept to the garment and the crown.
+     A court drawn as a solid silhouette turns into an ink blot at the 40px each
+     half actually gets in a hand. */
+  const robe = `<path class="cs" d="M58 168v-14c0-17 15-26 36-29h52c21 3 36 12 36 29v14Z"/>` +
+               `<path class="cl" d="M58 168v-14c0-17 15-26 36-29h52c21 3 36 12 36 29"/>`;
+  const mantle = `<path fill="currentColor" d="M94 125 120 150 146 125 154 168H86Z"/>` +
+                 `<path class="cl" d="M94 125 120 150 146 125"/>`;
+  const neck = `<path class="cs" d="M110 114h20v20h-20Z"/><path class="cl" d="M110 114v20M130 114v20"/>`;
+  const face = `<path class="cs" d="M98 76h44v26a22 22 0 0 1-44 0Z"/><path class="cl" d="M98 76h44v26a22 22 0 0 1-44 0Z"/>`;
+  const eyes = `<path class="cl" stroke-width="3.2" stroke-linecap="round" d="M107 92h9M124 92h9"/>`;
+  if (rank === 13) return (                                     // King — crown, beard, a raised sword
+    `<path class="ci" d="M66 134V83l6-13 6 13v51Z"/><rect class="ci" x="57" y="96" width="30" height="6" rx="3"/>` +
+    robe + mantle + neck + face + eyes +
+    `<path class="ci" d="M99 105c1 15 10 25 21 25s20-10 21-25c-5 7-12 11-21 11s-16-4-21-11Z"/>` +
+    `<path fill="currentColor" d="M96 76V47l13 12 11-18 11 18 13-12v29Z"/><path class="cl" d="M96 76V47l13 12 11-18 11 18 13-12v29Z"/>` +
+    `<rect class="ci" x="94" y="71" width="52" height="8" rx="4"/>` +
+    `<circle class="cs" cx="109" cy="58" r="3"/><circle class="cs" cx="120" cy="49" r="3"/><circle class="cs" cx="131" cy="58" r="3"/>`
+  );
+  if (rank === 12) return (                                     // Queen — coronet, long hair, a rose
+    `<path class="ci" d="M169 126h6v26h-6Z"/><circle fill="currentColor" cx="172" cy="118" r="11"/>` +
+    `<circle class="cs" cx="172" cy="118" r="4"/><path class="cl" d="M172 107a11 11 0 1 1 0 22 11 11 0 0 1 0-22Z"/>` +
+    robe + mantle + neck +
+    `<path class="ci" d="M97 82c-9 9-11 27-8 41l13 3c-4-14-6-30-5-44Z"/>` +
+    `<path class="ci" d="M143 82c9 9 11 27 8 41l-13 3c4-14 6-30 5-44Z"/>` + face + eyes +
+    `<path fill="currentColor" d="M98 76V53l11 10 11-15 11 15 11-10v23Z"/><path class="cl" d="M98 76V53l11 10 11-15 11 15 11-10v23Z"/>` +
+    `<rect class="ci" x="96" y="71" width="48" height="7" rx="3.5"/><circle class="cs" cx="120" cy="52" r="3"/>`
+  );
+  return (                                                      // Jack — plumed cap, halberd
+    `<path class="ci" d="M70 140V88h7v52Z"/><path class="ci" d="M62 74 86 81 73 94Z"/>` +
+    robe + mantle + neck + face + eyes +
+    `<path fill="currentColor" d="M144 60c15-9 20-5 28-17-2 19-13 30-28 30Z"/><path class="cl" d="M144 60c15-9 20-5 28-17-2 19-13 30-28 30"/>` +
+    `<path fill="currentColor" d="M96 76c0-21 10-31 24-31s24 10 24 31Z"/><path class="cl" d="M96 76c0-21 10-31 24-31s24 10 24 31"/>` +
+    `<rect class="ci" x="94" y="71" width="52" height="8" rx="4"/>`
+  );
+}
+
+/* `compact` is the 44px call-partner card: a full pip layout is illegible at
+   that size, so it gets the index and one centred pip — which is what a real
+   card shows through a fanned hand anyway. */
+function cardFace(card, compact) {
+  const s = card.suit, r = rankLabel(card.rank);
+  const idx = `<text x="32" y="60" text-anchor="middle" font-size="${r === "10" ? 39 : 48}">${r}</text>` +
+              suitPath(s, 32, 87, 30);
+  let body;
+  if (compact) body = suitPath(s, 120, 200, 96);
+  else if (card.rank >= 11 && card.rank <= 13) {
+    body = `<rect class="cfr" x="44" y="42" width="152" height="252" rx="10"/><path class="cfr" d="M44 168h152"/>` +
+           `<g>${courtFigure(card.rank)}</g>` +
+           `<g transform="rotate(180 120 168)">${courtFigure(card.rank)}</g>`;
+  } else if (card.rank === 14) {
+    body = (s === "♠" ? `<path class="cfr" d="M120 74 174 168 120 262 66 168Z"/>` : "") + suitPath(s, 120, 168, s === "♠" ? 112 : 104);
+  } else {
+    body = (PIP_LAYOUT[card.rank] || []).map(([cx, cy]) =>
+      suitPath(s, COL[cx * 2], ROW_TOP + cy * (ROW_BOT - ROW_TOP), PIP_SIZE, cy > .5)).join("");
+  }
+  return `<svg viewBox="0 0 240 336" fill="currentColor" aria-hidden="true">${idx}${body}` +
+         `<g transform="rotate(180 120 168)">${idx}</g></svg>`;
+}
+
 /* `asButton` gives keyboard users a real focusable control instead of a clickable div. */
 function cardEl(card, asButton) {
   const el = document.createElement(asButton ? "button" : "div");
   if (asButton) el.type = "button";
   el.className = "card s-" + SUIT_KEY[card.suit] + (RED.has(card.suit) ? " red" : "");
-  const r = rankLabel(card.rank);
-  el.innerHTML = `<div class="corner tl"><span class="r">${r}</span><span class="s">${card.suit}</span></div><div class="pip">${card.suit}</div><div class="corner br"><span class="r">${r}</span><span class="s">${card.suit}</span></div>`;
+  el.innerHTML = cardFace(card);
   if (!asButton) el.setAttribute("aria-hidden", "true"); // table furniture; the log narrates play
   return el;
 }
+
+/* ---------- who you are at this table ----------
+   A name is the one thing you bring, so it gets a face. The hue comes from the
+   name itself, so the same player is the same colour on everyone's screen. */
+function nameHue(name) {
+  let h = 0;
+  for (const ch of String(name || "")) h = (h * 31 + ch.codePointAt(0)) % 360;
+  return h;
+}
+function paintAvatar(el, name, isAI) {
+  el.className = "avatar" + (isAI ? " ai" : "") + (el.classList.contains("lg") ? " lg" : "");
+  if (isAI) { el.innerHTML = icon("bot"); el.style.removeProperty("--h"); return; }
+  const initial = (String(name || "").trim()[0] || "").toUpperCase();
+  el.style.setProperty("--h", nameHue(name));
+  el.textContent = initial || "·";
+}
+const avatarHtml = (name, isAI) => isAI
+  ? `<span class="avatar ai">${icon("bot")}</span>`
+  : `<span class="avatar" style="--h:${nameHue(name)}">${esc((String(name || "").trim()[0] || "·").toUpperCase())}</span>`;
 
 // ---------- game board ----------
 function sideOf(seat) { return (seat === view.declarer || seat === view.partner) ? "D" : "O"; }
@@ -843,18 +1277,27 @@ function renderGame() {
     el.classList.toggle("team-d", view.teamsRevealed && sideOf(seat) === "D");
     el.classList.toggle("team-o", view.teamsRevealed && sideOf(seat) === "O");
     const np = el.querySelector(".nameplate");
-    np.querySelector("span").textContent = info.name || info.label;
+    np.querySelector(".who").textContent = info.name || info.label;
+    paintAvatar(np.querySelector(".avatar"), info.name || info.label, !info.isHuman);
     np.querySelector(".role")?.remove();
-    np.querySelector(".ring")?.remove();
+    np.querySelector(".dealer-btn")?.remove();
     const role = roleOf(seat);
     if (role) { const r = document.createElement("span"); r.className = "role " + role.c; r.textContent = role.t; np.appendChild(r); }
-    if (seat === act && view.turnDeadline != null && info.isHuman && info.connected && !info.away) {
-      const ring = document.createElement("span"); ring.className = "ring"; ring.title = "Turn timer";
-      np.appendChild(ring); ringEl = ring;
+    /* The dealer button is a puck that travels round a real table, so it is one
+       here too — appended last, which is where it sits in front of the player. */
+    if (view.dealer === seat) {
+      const d = document.createElement("span"); d.className = "dealer-btn"; d.textContent = "D";
+      d.title = "Dealer"; np.appendChild(d);
     }
+    /* The countdown rings the player's own face — the one place on the plate the
+       eye is already looking — instead of adding a second disc beside it. */
+    const ava = np.querySelector(".avatar");
+    const onClock = seat === act && view.turnDeadline != null && info.isHuman && info.connected && !info.away;
+    ava.classList.toggle("ticking", onClock);
+    if (onClock) ringEl = ava; else ava.classList.remove("urgent");
     np.classList.toggle("off", info.isHuman && !info.connected);
     el.classList.toggle("away-seat", !!info.away);
-    const zzz = info.away ? ` · <span class="zzz">💤 autopilot</span>` : (info.isHuman && !info.connected ? ` · <span class="zzz">offline</span>` : "");
+    const zzz = info.away ? ` · <span class="zzz">on autopilot</span>` : (info.isHuman && !info.connected ? ` · <span class="zzz">offline</span>` : "");
     // tricks, not deals: deal-wins are in the scoreboard as pips, where "first to N" reads
     const tw = view.tricksWon[seat];
     el.querySelector(".meta").innerHTML = `<b>${view.capturedPoints[seat]}</b> pts · ${tw} ${tw === 1 ? "trick" : "tricks"}${zzz}`;
@@ -958,9 +1401,15 @@ function renderMedallion() {
   med.classList.toggle("has-bar", showBar);
   bar.style.width = (pct * 100).toFixed(1) + "%";
 }
+/* The hand always reads ♠ ♥ ♣ ♦, high to low, whatever order the wire used.
+   Alternating the colours is what makes a fanned hand scannable, and a fixed
+   order means your ace of hearts is in the same place every single deal —
+   the engine's habit of shuffling trump to the end moved it mid-hand. */
+const HAND_ORDER = { "♠":0, "♥":1, "♣":2, "♦":3 };
 function renderHand() {
   const wrap = $("my-hand");
-  const hand = (view.you && view.you.hand) || [];
+  const hand = ((view.you && view.you.hand) || []).slice()
+    .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank));
   const canPlay = view.you.toAct && view.you.actKind === "play";
   const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
 
@@ -1058,9 +1507,16 @@ function fitTable() {
   const t = $("table");
   const h = t ? t.getBoundingClientRect().height : 0;
   if (!h) return;
-  const s = Math.max(0.6, Math.min(1, (h / 2 - 110) / 106));   // lowest card sits at h/2 + 106s
+  /* How far the cross reaches below centre is (radius + half a card), and both
+     halve at the phone breakpoint — so measure them rather than keeping a second
+     copy of the numbers the stylesheet already owns. */
+  const tr = $("trick");
+  const probe = tr.querySelector(".card");
+  const reach = (parseFloat(getComputedStyle(tr).getPropertyValue("--reach-y")) || 47)
+              + (probe ? probe.offsetHeight : 93) / 2;
+  const s = Math.max(0.6, Math.min(1, (h / 2 - 108) / reach));
   t.style.setProperty("--trick-scale", s.toFixed(3));
-  const bandTop = h / 2 + 106 * s, bandBottom = h - 64;        // south seat starts ~64px off the bottom
+  const bandTop = h / 2 + reach * s, bandBottom = h - 66;      // south seat starts ~66px off the bottom
   t.style.setProperty("--strip-top", Math.round((bandTop + bandBottom) / 2) + "px");
 }
 /* both fits are measured, so a resize has to re-measure them */
@@ -1072,15 +1528,15 @@ function renderScoreboard() {
   /* Deal-wins as pips against the target — "2" never said how close anyone was.
      Seven of them don't fit the column, so "first to 7" falls back to n / K. */
   const deals = n => c.TARGET_GAMES <= 5
-    ? Array.from({ length: c.TARGET_GAMES }, (_, i) => `<i class="pip${i < n ? " on" : ""}"></i>`).join("")
+    ? Array.from({ length: c.TARGET_GAMES }, (_, i) => `<i class="tally${i < n ? " on" : ""}"></i>`).join("")
     : `${n} / ${c.TARGET_GAMES}`;
-  let html = "<tr><th>Player</th><th>Points</th><th>Deals</th></tr>";
+  let html = `<tr><th class="name">Player</th><th>Points</th><th class="deals">Deals</th></tr>`;
   for (let s = 0; s < 4; s++) {
     const cls = [];
     if (mySeat != null && s === mySeat) cls.push("you");
     if (view.teamsRevealed) cls.push(sideOf(s) === "D" ? "side-d" : "side-o");   // a rail on the row, not a dot in the cell
     html += `<tr class="${cls.join(" ")}"><td class="name">${esc(view.names[s] || view.seats[s].label)}${view.dealer === s ? " (D)" : ""}</td>` +
-            `<td><b>${view.capturedPoints[s]}</b></td><td>${deals(view.scores[s])}</td></tr>`;
+            `<td><b>${view.capturedPoints[s]}</b></td><td class="deals">${deals(view.scores[s])}</td></tr>`;
   }
   $("scoreboard").innerHTML = html;
 
@@ -1097,8 +1553,8 @@ function renderScoreboard() {
 
   const st = view.settings || {}, sl = $("settings-line");
   const diffName = (DIFF_OPTS.find(d => d[0] === st.difficulty) || ["", "?"])[1];
-  sl.innerHTML = `<span class="chip">AI <b>${diffName}</b></span><span class="chip">timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b></span> `;
-  if (view.room.isHost) sl.appendChild(miniBtn("⚙ Change", "", showSettingsModal));
+  sl.innerHTML = `<span class="chip">AI <b>${diffName}</b></span><span class="chip">Timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b></span> `;
+  if (view.room.isHost) sl.appendChild(miniBtn("Change", "", showSettingsModal, "gear"));
 }
 
 /* ---------- sliding-window lists (the table log and the chat) ----------
@@ -1142,8 +1598,9 @@ function renderChat() {
   if (!$("emote-bar").children.length) {
     EMOTES.forEach(e => {
       const b = document.createElement("button");
-      b.className = "emote-btn"; b.type = "button"; b.textContent = e;
-      b.setAttribute("aria-label", "Send " + e + " reaction");
+      b.className = "emote-btn"; b.type = "button"; b.innerHTML = reactionIcon(e);
+      b.title = reactionName(e);
+      b.setAttribute("aria-label", "Send " + reactionName(e) + " reaction");
       b.onclick = () => send({ type: "emote", e });
       $("emote-bar").appendChild(b);
     });
@@ -1156,7 +1613,7 @@ function showEmote(seat, e) {
   const host = $("seat-" + POS_CLASS[posOfSeat(seat)]);
   if (!host) return;
   const d = document.createElement("div");
-  d.className = "float-emote"; d.textContent = e;
+  d.className = "float-emote"; d.innerHTML = reactionIcon(e);
   host.appendChild(d);
   setTimeout(() => d.remove(), 2000);
 }
@@ -1199,8 +1656,11 @@ function renderLog() {
   const entries = view.log || [];
   const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
     const d = document.createElement("div");
-    d.className = "entry " + (entries[i].cls || "");
-    d.innerHTML = textWithCards(entries[i].text);
+    const cls = entries[i].cls || "";
+    d.className = "entry " + cls;
+    /* the core marks a won trick with a ★; draw it instead of printing a dingbat */
+    const text = entries[i].text.replace(/^★\s*/, "");
+    d.innerHTML = (cls === "win" ? icon("star") : "") + `<span>${textWithCards(text)}</span>`;
     return d;
   });
   if (added) el.scrollTop = el.scrollHeight;
@@ -1226,26 +1686,30 @@ function renderActionBar() {
       const ctxKey = view.roundNumber + "|" + (view.highBid || 0);
       if (bidCtxKey !== ctxKey) { bidCtxKey = ctxKey; humanBidValue = null; } // fresh bid context → start at the minimum
       const lo = view.you.minBid;
-      text("prompt", `Your bid — high: ${view.highBid ? "<b>" + view.highBid + "</b> (" + esc(view.names[view.highBidder]) + ")" : "none"} · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })}=30`);
+      text("prompt", `Your bid — highest so far ${view.highBid ? "<b>" + view.highBid + "</b> from " + esc(view.names[view.highBidder]) : "<b>none</b>"} · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })} is worth 30`);
       button("Pass", "pass", () => { humanBidValue = null; send({ type: "bid", value: null }); });
-      if (lo > c.MAX_BID) { text("status", "Bidding is maxed — you can only pass."); return; }
+      if (lo > c.MAX_BID) { text("status", "Bidding is maxed out — you can only pass."); return; }
       let v = humanBidValue; if (v == null || v < lo || v > c.MAX_BID) { v = lo; humanBidValue = v; }
-      button("−" + c.BID_STEP, "", () => { humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
-      const val = document.createElement("span"); val.className = "bidval"; val.innerHTML = `<b>${v}</b>`; bar.appendChild(val);
-      button("+" + c.BID_STEP, "", () => { humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
+      const dn = button("−" + c.BID_STEP, "step", () => { humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
+      dn.setAttribute("aria-label", "Lower the bid by " + c.BID_STEP);
+      dn.disabled = v <= lo;
+      const val = document.createElement("span"); val.className = "bidval"; val.textContent = v; bar.appendChild(val);
+      const up = button("+" + c.BID_STEP, "step", () => { humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
+      up.setAttribute("aria-label", "Raise the bid by " + c.BID_STEP);
+      up.disabled = v >= c.MAX_BID;
       button("Bid " + v, "", () => { humanBidValue = null; send({ type: "bid", value: v }); });
       return;
     }
     if (view.you.actKind === "trump") {
-      text("prompt", `You won the bid at ${view.bid} — choose the trump suit:`);
+      text("prompt", `You won the bid at <b>${view.bid}</b>. Choose the trump suit.`);
       SUITS.forEach(s => {
-        const b = button(`${s}<small>${SUIT_NAME[s]}</small>`, "suit s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s }));
+        const b = button(`${suitSvg(s)}<small>${SUIT_NAME[s]}</small>`, "suit s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s }));
         b.setAttribute("aria-label", "Choose " + SUIT_NAME[s] + " as trump");
       });
       return;
     }
     if (view.you.actKind === "call") {
-      text("prompt", `Trump is ${view.trump}. Call a card you DON'T hold — its holder is your partner:`);
+      text("prompt", `Trump is ${suitSpan(view.trump)}. Now name a card you <b>don't</b> hold — whoever has it is your partner.`);
       const grid = document.createElement("div"); grid.className = "call-grid";
       const byS = {}; SUITS.forEach(s => byS[s] = []);
       (view.you.callable || []).forEach(cd => byS[cd.suit].push(cd));
@@ -1253,13 +1717,13 @@ function renderActionBar() {
         if (!byS[s].length) return;
         const row = document.createElement("div"); row.className = "call-row";
         const lab = document.createElement("span");
-        lab.className = "call-suit sc s-" + SUIT_KEY[s]; lab.textContent = s; lab.setAttribute("aria-hidden", "true");
+        lab.className = "call-suit sc s-" + SUIT_KEY[s]; lab.innerHTML = suitSvg(s); lab.setAttribute("aria-hidden", "true");
         row.appendChild(lab);
         byS[s].sort((a, b) => b.rank - a.rank).forEach(cd => {
           const m = document.createElement("button");
           m.type = "button";
           m.className = "mini-card s-" + SUIT_KEY[cd.suit] + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === view.bonusSuit && cd.rank === 3 ? " bonus" : "");
-          m.innerHTML = `<span class="mr">${rankLabel(cd.rank)}</span><span class="ms">${cd.suit}</span>`;
+          m.innerHTML = cardFace(cd, true);
           m.setAttribute("aria-label", "Call " + cardName(cd) + (cd.suit === view.bonusSuit && cd.rank === 3 ? " (bonus 30 points)" : ""));
           m.onclick = () => send({ type: "call", card: { suit: cd.suit, rank: cd.rank } });
           row.appendChild(m);
@@ -1311,11 +1775,13 @@ function showMatchOver() {
   const max = Math.max(...view.scores);
   const champs = [0,1,2,3].filter(p => view.scores[p] === max);
   const youWon = mySeat != null && champs.includes(mySeat);
-  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p => `<div>${(mySeat!=null&&p===mySeat)?"<b style='color:var(--gold)'>"+esc(view.names[p])+" (you)</b>":esc(view.names[p])} — ${view.scores[p]} deal${view.scores[p]===1?"":"s"} won</div>`).join("");
-  let btn = view.room.isHost ? `<button id="btn-rematch">New Match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
+  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p =>
+    `<div class="${mySeat!=null&&p===mySeat?"me":""}"><span>${esc(view.names[p])}${mySeat!=null&&p===mySeat?" (you)":""}</span>` +
+    `<span>${view.scores[p]} deal${view.scores[p]===1?"":"s"}</span></div>`).join("");
+  let btn = view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
   setModal("match",
-    `<h2>Match Over</h2><p class="big">${youWon ? "🏆 You win the match!" : (champs.map(p=>esc(view.names[p])).join(" & ") + " win the match")}</p>` +
-    `<p>First to ${view.consts.TARGET_GAMES} deals won.</p><div class="standings">${standings}</div>${btn}`);
+    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>view.names[p]).join(" & ")) + " win the match"}</p>` +
+    `<p>First to ${view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
   if (view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
 }
 function showHelp() {
@@ -1338,9 +1804,13 @@ function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dat
 // a name landing in a single-quoted attribute must not be able to break out
 function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, ch => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[ch])); }
 // suit colours come from CSS classes (not inline styles) so the 4-colour deck can override them
-function suitSpan(s) { return s ? `<span class="sc s-${SUIT_KEY[s]}">${s}</span>` : ""; }
-function cardSpan(c) { return c ? `<span class="sc s-${SUIT_KEY[c.suit]}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }
-function textWithCards(t) { return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span class="sc s-${SUIT_KEY[s]}">${m}</span>`); }
+function suitSpan(s) { return s ? `<span class="sc s-${SUIT_KEY[s]}">${suitSvg(s)}</span>` : ""; }
+function cardSpan(c) { return c ? `<span class="sc s-${SUIT_KEY[c.suit]}">${rankLabel(c.rank)}${suitSvg(c.suit)}</span>` : ""; }
+/* The core writes card names as text ("plays K♦"); swap the glyph for the drawn
+   pip so a card reads the same in the log as it does on the felt. */
+function textWithCards(t) {
+  return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span class="sc s-${SUIT_KEY[s]}">${r}${suitSvg(s)}</span>`);
+}
 let toastT = null;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
 
@@ -1359,6 +1829,30 @@ if (navigator.share) {
     url: inviteUrl(),
   }).catch(() => {});
 }
+
+/* ---------- first paint ----------
+   Runs down here, not beside the join-screen handlers: it draws real cards, and
+   the deck's tables are `const`s further up the file — calling into them any
+   earlier throws on the temporal dead zone and takes the rest of the boot with it. */
+paintIcons(document);
+(function dressChrome() {
+  const fan = $("brand-fan");
+  [{ suit:"♠", rank:14 }, { suit:"♥", rank:12 }, { suit:"♦", rank:3 }].forEach((c, i) => {
+    const el = cardEl(c);
+    el.style.transform = `rotate(${(i - 1) * 9}deg) translateY(${Math.abs(i - 1) * 7}px)`;
+    el.style.animationDelay = (i * 70) + "ms";
+    fan.appendChild(el);
+  });
+  const pips = SUITS.map(s => `<span class="sc s-${SUIT_KEY[s]}">${suitSvg(s)}</span>`).join("");
+  for (const id of ["brand-colophon", "lobby-colophon"])
+    $(id).innerHTML = `<i class="bar"></i>${pips}<i class="bar"></i>`;
+  $("awaybar-msg").innerHTML = icon("moon") + "<span>You're away — an AI is playing your seat.</span>";
+  $("conn").innerHTML = icon("plug") + "<span>Disconnected — reconnecting…</span>";
+  const nameField = $("join-name"), face = $("join-avatar");
+  const syncFace = () => paintAvatar(face, nameField.value.trim(), false);
+  nameField.addEventListener("input", syncFace);
+  syncFace();
+})();
 
 // ---------- 4-colour deck (persisted) ----------
 function setFourColor(on) {

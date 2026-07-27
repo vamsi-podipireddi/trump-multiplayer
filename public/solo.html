@@ -5,20 +5,28 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>TRUMP — Bid · Call · Trick-Taking</title>
 <style>
+  /* Palette and deck are kept in step with public/index.html — this is the build
+     the service worker serves when there is no network, so it must not look like
+     a different, older game. */
   :root {
-    --felt-1: #1f7a4d; --felt-2: #0d4d2e;
-    --wood-1: #6b4423; --wood-2: #4a2e16;
-    --gold: #e8c45a; --ink: #1c1c1c; --red: #c52b2b;
-    --card-bg: #fbf8f0; --shadow: rgba(0,0,0,0.35);
-    --team-d: #e8c45a;   /* bidding side */
-    --team-o: #6fa8ff;   /* defenders */
+    --felt-1: #1f5741; --felt-2: #123a2c;
+    --wood-1: #33231a; --wood-2: #17100b;
+    --gold: #debd79; --gold-hi: #f2dca9; --ink: #15171a; --red: #b02a2e;
+    --card-bg: #f7f3e7; --stock: #f7f3e7; --stock-lo: #e6dfca; --shadow: rgba(0,0,0,0.45);
+    --on-gold: #1a1509;
+    --team-d: #debd79;   /* bidding side */
+    --team-o: #8bb0e0;   /* defenders */
+    --fu: system-ui, -apple-system, "Segoe UI Variable Text", "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --fd: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", Palatino, "Times New Roman", serif;
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; height: 100%;
-    font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
-    color: #f3f3f3; background: #0a1f14; overflow: hidden;
+    font-family: var(--fu);
+    color: #ecefea; background: #070c0a; overflow: hidden;
+    -webkit-font-smoothing: antialiased;
   }
+  b, strong, .card text { font-variant-numeric: tabular-nums lining-nums; }
   #app { height: 100vh; display: grid; grid-template-columns: 1fr 290px; grid-template-rows: auto 1fr; }
 
   header {
@@ -80,33 +88,52 @@
 
   .hand-backs { display: flex; }
   .hand-backs.vertical { flex-direction: column; }
+  /* A real back: a fine lattice inside a white margin, not a barber pole. */
   .card-back {
-    width: 28px; height: 40px; border-radius: 5px;
-    background: repeating-linear-gradient(45deg,#8d2b2b 0 6px,#6e1f1f 6px 12px);
-    border: 1.5px solid #f3eede; box-shadow: 0 2px 4px var(--shadow);
+    width: 27px; height: 39px; border-radius: 3px;
+    background:
+      repeating-linear-gradient(45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
+      repeating-linear-gradient(-45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
+      linear-gradient(155deg,#8d2f38,#5a1620);
+    box-shadow: 0 0 0 1.4px var(--stock), 0 0 0 2.2px rgba(0,0,0,.5), 0 2px 5px var(--shadow);
   }
   .hand-backs .card-back:not(:first-child) { margin-left: -19px; }
   .hand-backs.vertical .card-back:not(:first-child) { margin-left: 0; margin-top: -31px; }
 
-  #trick { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 220px; height: 200px; }
-  .trick-card { position: absolute; top: 50%; left: 50%; transition: all .25s ease-out; animation: dealIn .25s ease-out; }
-  @keyframes dealIn { from { opacity: 0; transform: translate(-50%,-50%) scale(0.6); } }
-  .trick-card.winner { filter: drop-shadow(0 0 12px var(--gold)); z-index: 5; }
-  .trick-card.pos-0 { transform: translate(-50%, 18px); }
-  .trick-card.pos-1 { transform: translate(-118px, -50%); }
-  .trick-card.pos-2 { transform: translate(-50%, -118px); }
-  .trick-card.pos-3 { transform: translate(18px, -50%); }
+  /* Four cards meeting in the middle, offset by one radius per axis. The old
+     layout used four hand-picked pixel offsets that disagreed with each other,
+     so the pile sat visibly off-centre. */
+  #trick { --reach-x: 54px; --reach-y: 47px;
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); width: 0; height: 0; }
+  .trick-card { --tx: 0px; --ty: 0px; --tr: 0deg; --ts: 1;
+    position: absolute; top: 0; left: 0;
+    transform: translate(-50%,-50%) translate(var(--tx),var(--ty)) rotate(var(--tr)) scale(var(--ts));
+    transition: transform .22s ease-out, filter .22s ease-out; animation: dealIn .28s cubic-bezier(.2,.85,.3,1); }
+  @keyframes dealIn { from { opacity: 0;
+    transform: translate(-50%,-50%) translate(calc(var(--tx) * 2.2),calc(var(--ty) * 2.2)) rotate(var(--tr)) scale(.9); } }
+  .trick-card.winner { --ts: 1.07; z-index: 5; filter: drop-shadow(0 0 14px rgba(222,189,121,.75)); }
+  .trick-card.pos-0 { --ty: var(--reach-y);            --tr: 1.4deg; }
+  .trick-card.pos-1 { --tx: calc(-1 * var(--reach-x)); --tr: -1.4deg; }
+  .trick-card.pos-2 { --ty: calc(-1 * var(--reach-y)); --tr: -1.4deg; }
+  .trick-card.pos-3 { --tx: var(--reach-x);            --tr: 1.4deg; }
   #trick .trick-card { position: absolute; } /* beat the later, equal-specificity .card{position:relative} so cards form the cross instead of stacking */
+  #trick .card { width: 66px; height: 93px; }
 
+  /* The element is the physical card; the SVG inside is the printing. The old
+     face drew one oversized suit glyph on every card in the deck, so a 2 and a
+     9 were indistinguishable and a King was just a crown-less pip. */
   .card {
-    width: 62px; height: 88px; border-radius: 7px; background: var(--card-bg); color: var(--ink);
-    position: relative; box-shadow: 0 3px 6px var(--shadow); user-select: none; font-family: "Georgia", serif;
+    width: 62px; height: 88px; border-radius: 4.5px; color: var(--ink);
+    background: linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
+    position: relative; user-select: none;
+    box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 0 0 1px rgba(21,23,26,.18), 0 3px 7px var(--shadow);
   }
   .card.red { color: var(--red); }
-  .card .corner { position: absolute; font-weight: 700; line-height: 0.9; text-align: center; }
-  .card .corner .r { font-size: 15px; display: block; } .card .corner .s { font-size: 13px; display: block; }
-  .card .corner.tl { top: 5px; left: 6px; } .card .corner.br { bottom: 5px; right: 6px; transform: rotate(180deg); }
-  .card .pip { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); font-size: 32px; opacity: 0.9; }
+  .card > svg { display: block; width: 100%; height: 100%; border-radius: inherit; }
+  .card text { font-family: var(--fu); font-weight: 800; letter-spacing: -.02em; }
+  .card .ci { fill: var(--ink); } .card .cs { fill: var(--stock); }
+  .card .cl { fill: none; stroke: var(--ink); stroke-width: 2.4; stroke-linejoin: round; }
+  .card .cfr { fill: none; stroke: rgba(21,23,26,.26); stroke-width: 2; }
 
   /* Bottom: action bar + hand */
   #bottom { grid-column: 1 / 2; position: relative; display: flex; flex-direction: column; justify-content: flex-end; }
@@ -132,28 +159,36 @@
   .call-grid { display: flex; flex-direction: column; gap: 4px; width: 100%; align-items: center; max-height: 150px; overflow-y: auto; }
   .call-row { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; }
   .mini-card {
-    width: 34px; height: 46px; border-radius: 5px; background: var(--card-bg); color: var(--ink);
-    position: relative; cursor: pointer; box-shadow: 0 2px 4px var(--shadow); font-family: "Georgia", serif;
-    display: flex; align-items: center; justify-content: center; flex-direction: column; line-height: 1; transition: transform .1s;
+    width: 36px; height: 50px; border-radius: 3.5px; color: var(--ink);
+    background: linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
+    position: relative; cursor: pointer; border: none; padding: 0;
+    box-shadow: 0 0 0 1px rgba(21,23,26,.16), 0 2px 5px var(--shadow); transition: transform .1s, box-shadow .1s;
   }
-  .mini-card:hover { transform: translateY(-4px); box-shadow: 0 6px 10px var(--shadow); }
+  .mini-card > svg { display: block; width: 100%; height: 100%; }
+  .mini-card text { font-family: var(--fu); font-weight: 800; }
+  .mini-card .ci { fill: var(--ink); }
+  .mini-card:hover { transform: translateY(-4px); box-shadow: 0 0 0 1px rgba(21,23,26,.16), 0 8px 14px var(--shadow); }
   .mini-card.red { color: var(--red); }
-  .mini-card .mr { font-size: 13px; font-weight: 700; } .mini-card .ms { font-size: 14px; }
-  .mini-card.ace { outline: 2px solid var(--gold); }
-  .mini-card.bonus { outline: 2px solid #ff5e9c; }
+  .mini-card.ace { box-shadow: 0 0 0 2px var(--gold), 0 2px 5px var(--shadow); }
+  .mini-card.bonus { box-shadow: 0 0 0 2px #e0679c, 0 2px 5px var(--shadow); }
 
   #my-hand { display: flex; justify-content: center; height: 120px; align-items: flex-end; padding-bottom: 8px; }
   #my-hand .card {
     width: 72px; height: 102px; margin-left: -22px; transition: transform .14s, box-shadow .14s; cursor: default;
   }
   #my-hand .card:first-child { margin-left: 0; }
-  #my-hand .card .corner .r { font-size: 18px; } #my-hand .card .corner .s { font-size: 15px; } #my-hand .card .pip { font-size: 38px; }
-  #my-hand .card.trumpcard { box-shadow: 0 0 0 2px var(--gold), 0 3px 6px var(--shadow); }
-  #my-hand .card.bonuscard { box-shadow: 0 0 0 2px #ff5e9c, 0 3px 6px var(--shadow); }
-  #my-hand .card.trumpcard.bonuscard { box-shadow: 0 0 0 2px var(--gold), 0 0 0 4px #ff5e9c, 0 3px 6px var(--shadow); }
-  #my-hand .card.playable { cursor: pointer; }
-  #my-hand .card.playable:hover { transform: translateY(-22px); box-shadow: 0 10px 18px var(--shadow); z-index: 10; }
-  #my-hand .card.illegal { filter: grayscale(0.7) brightness(0.78); }
+  #my-hand .card.trumpcard { box-shadow: 0 0 0 1.5px var(--gold), 0 3px 7px var(--shadow); }
+  #my-hand .card.trumpcard::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+    border-radius: 4.5px 4.5px 0 0; background: linear-gradient(90deg,#9c7a34,var(--gold-hi),#9c7a34); }
+  #my-hand .card.bonuscard::after { content: "30"; position: absolute; top: -7px; right: -6px; z-index: 2;
+    font-size: 9.5px; font-weight: 800; line-height: 1; color: #fff; background: #c9457f;
+    border: 1.5px solid var(--stock); border-radius: 999px; padding: 3px 5px; box-shadow: 0 2px 5px rgba(0,0,0,.5); }
+  #my-hand .card.playable { cursor: pointer; filter: drop-shadow(0 0 10px rgba(222,189,121,.55)); }
+  #my-hand .card.playable:hover { transform: translateY(-22px); z-index: 10;
+    filter: drop-shadow(0 6px 16px rgba(0,0,0,.5)) drop-shadow(0 0 14px rgba(222,189,121,.75)); }
+  /* An unplayable card must still be a card — never see-through, or the hand
+     looks like it failed to load. Darken it instead. */
+  #my-hand .card.illegal { filter: grayscale(0.9) brightness(0.55) contrast(1.05); }
 
   aside { grid-row: 2/3; grid-column: 2/3; background: linear-gradient(180deg,#102a1b,#0a1d12); border-left: 1px solid rgba(232,196,90,0.3); display: flex; flex-direction: column; min-height: 0; }
   .panel-section { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.07); }
@@ -202,7 +237,7 @@
 <div id="app">
   <header>
     <div>
-      <h1>TRUMP<span class="suits">♠♥♦♣</span></h1>
+      <h1>TRUMP<span class="suits" id="title-suits"></span></h1>
       <div class="tagline">Bid · choose trump · call a partner · take tricks</div>
     </div>
     <div class="contract-badge">
@@ -488,7 +523,7 @@ function finalizeDeclarer() {
   state.declarer = state.highBidder;
   state.bid = state.highBid;
   state.redealCount = 0;
-  log(`<span class="entry bid">★ ${PLAYER_NAMES[state.declarer]} win${state.declarer === 0 ? "" : "s"} the bid at <b>${state.bid}</b> — choosing trump…</span>`);
+  log(`<span class="entry bid">${PLAYER_NAMES[state.declarer]} win${state.declarer === 0 ? "" : "s"} the bid at <b>${state.bid}</b> — choosing trump…</span>`);
   enterTrumpSelect();
 }
 
@@ -598,7 +633,7 @@ function finishTrick() {
   state.tricksWon[winner]++;
   state.capturedPoints[winner] += tp;
   state.lastWinnerSlot = wIdx; state.lastWinner = winner;
-  log(`<span class="entry win">★ ${PLAYER_NAMES[winner]} win${winner === 0 ? "" : "s"} the trick (${cardSpan(state.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}</span>`);
+  log(`<span class="entry win">${PLAYER_NAMES[winner]} win${winner === 0 ? "" : "s"} the trick (${cardSpan(state.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}</span>`);
   playSound(winner === 0 ? "win" : "trick");
   render();
   later(advanceTrick, 1000);
@@ -711,14 +746,98 @@ function endRound() {
 // ============================================================
 //  Rendering
 // ============================================================
+/* ---------- the deck ----------
+   Kept identical to public/index.html. Suits are drawn, never typed: ♠♥♦♣ are
+   font glyphs and every OS ships a different one, which is most of why a web
+   card game reads as clip-art. Each path is authored in a 100×100 box. */
+const SUIT_PATH = {
+  "♠": "M50 6s-28 26-36 41c-8 15-3 30 12 32 10 2 18-3 22-11 0 0-2 14-14 24h32c-12-10-14-24-14-24 4 8 12 13 22 11 15-2 20-17 12-32C78 32 50 6 50 6Z",
+  "♥": "M50 90S10 62 10 36c0-15 11-25 23-25 9 0 15 5 17 11 2-6 8-11 17-11 12 0 23 10 23 25 0 26-40 54-40 54Z",
+  "♦": "M50 3 86 50 50 97 14 50Z",
+  "♣": "M50 4c-11 0-20 9-20 20 0 4 1 8 3 11-3-2-7-3-11-3C11 32 2 41 2 52s9 20 20 20c9 0 16-5 19-13 0 0 0 15-12 33h42c-12-18-12-33-12-33 3 8 10 13 19 13 11 0 20-9 20-20s-9-20-20-20c-4 0-8 1-11 3 2-3 3-7 3-11 0-11-9-20-20-20Z",
+};
+const suitPath = (s, cx, cy, size, flip) =>
+  `<path d="${SUIT_PATH[s]}" transform="translate(${cx} ${cy})${flip ? " rotate(180)" : ""} scale(${(size / 100).toFixed(4)}) translate(-50 -50)"/>`;
+const suitSvg = s => SUIT_PATH[s]
+  ? `<svg class="su" viewBox="0 0 100 100" aria-hidden="true" style="display:inline-block;vertical-align:-.1em;width:1em;height:1em"><path fill="currentColor" d="${SUIT_PATH[s]}"/></svg>` : "";
+
+/* Pip layouts, normalised: column 0 = left, .5 = centre, 1 = right; row 0 = top,
+   1 = bottom. Anything below the midline prints upside down, as on a real card. */
+const PIP_LAYOUT = {
+  2:  [[.5,0],[.5,1]],
+  3:  [[.5,0],[.5,.5],[.5,1]],
+  4:  [[0,0],[1,0],[0,1],[1,1]],
+  5:  [[0,0],[1,0],[.5,.5],[0,1],[1,1]],
+  6:  [[0,0],[1,0],[0,.5],[1,.5],[0,1],[1,1]],
+  7:  [[0,0],[1,0],[.5,.25],[0,.5],[1,.5],[0,1],[1,1]],
+  8:  [[0,0],[1,0],[.5,.25],[0,.5],[1,.5],[.5,.75],[0,1],[1,1]],
+  9:  [[0,0],[1,0],[0,1/3],[1,1/3],[.5,.5],[0,2/3],[1,2/3],[0,1],[1,1]],
+  10: [[0,0],[1,0],[.5,1/6],[0,1/3],[1,1/3],[0,2/3],[1,2/3],[.5,5/6],[0,1],[1,1]],
+};
+const COL = [78, 120, 162], ROW_TOP = 68, ROW_BOT = 268, PIP_SIZE = 46;
+
+/* A court is a framed panel holding a half figure and the same figure rotated
+   180° about the middle — which is why a real one works either way up. Mostly
+   card stock, with the suit colour kept to the garment and the crown. */
+function courtFigure(rank) {
+  const robe = `<path class="cs" d="M58 168v-14c0-17 15-26 36-29h52c21 3 36 12 36 29v14Z"/>` +
+               `<path class="cl" d="M58 168v-14c0-17 15-26 36-29h52c21 3 36 12 36 29"/>`;
+  const mantle = `<path fill="currentColor" d="M94 125 120 150 146 125 154 168H86Z"/>` +
+                 `<path class="cl" d="M94 125 120 150 146 125"/>`;
+  const neck = `<path class="cs" d="M110 114h20v20h-20Z"/><path class="cl" d="M110 114v20M130 114v20"/>`;
+  const face = `<path class="cs" d="M98 76h44v26a22 22 0 0 1-44 0Z"/><path class="cl" d="M98 76h44v26a22 22 0 0 1-44 0Z"/>`;
+  const eyes = `<path class="cl" stroke-width="3.2" stroke-linecap="round" d="M107 92h9M124 92h9"/>`;
+  if (rank === 13) return (
+    `<path class="ci" d="M66 134V83l6-13 6 13v51Z"/><rect class="ci" x="57" y="96" width="30" height="6" rx="3"/>` +
+    robe + mantle + neck + face + eyes +
+    `<path class="ci" d="M99 105c1 15 10 25 21 25s20-10 21-25c-5 7-12 11-21 11s-16-4-21-11Z"/>` +
+    `<path fill="currentColor" d="M96 76V47l13 12 11-18 11 18 13-12v29Z"/><path class="cl" d="M96 76V47l13 12 11-18 11 18 13-12v29Z"/>` +
+    `<rect class="ci" x="94" y="71" width="52" height="8" rx="4"/>` +
+    `<circle class="cs" cx="109" cy="58" r="3"/><circle class="cs" cx="120" cy="49" r="3"/><circle class="cs" cx="131" cy="58" r="3"/>`
+  );
+  if (rank === 12) return (
+    `<path class="ci" d="M169 126h6v26h-6Z"/><circle fill="currentColor" cx="172" cy="118" r="11"/>` +
+    `<circle class="cs" cx="172" cy="118" r="4"/><path class="cl" d="M172 107a11 11 0 1 1 0 22 11 11 0 0 1 0-22Z"/>` +
+    robe + mantle + neck +
+    `<path class="ci" d="M97 82c-9 9-11 27-8 41l13 3c-4-14-6-30-5-44Z"/>` +
+    `<path class="ci" d="M143 82c9 9 11 27 8 41l-13 3c4-14 6-30 5-44Z"/>` + face + eyes +
+    `<path fill="currentColor" d="M98 76V53l11 10 11-15 11 15 11-10v23Z"/><path class="cl" d="M98 76V53l11 10 11-15 11 15 11-10v23Z"/>` +
+    `<rect class="ci" x="96" y="71" width="48" height="7" rx="3.5"/><circle class="cs" cx="120" cy="52" r="3"/>`
+  );
+  return (
+    `<path class="ci" d="M70 140V88h7v52Z"/><path class="ci" d="M62 74 86 81 73 94Z"/>` +
+    robe + mantle + neck + face + eyes +
+    `<path fill="currentColor" d="M144 60c15-9 20-5 28-17-2 19-13 30-28 30Z"/><path class="cl" d="M144 60c15-9 20-5 28-17-2 19-13 30-28 30"/>` +
+    `<path fill="currentColor" d="M96 76c0-21 10-31 24-31s24 10 24 31Z"/><path class="cl" d="M96 76c0-21 10-31 24-31s24 10 24 31"/>` +
+    `<rect class="ci" x="94" y="71" width="52" height="8" rx="4"/>`
+  );
+}
+
+/* `compact` is the call-partner card: a full pip layout is illegible at 36px,
+   so it gets the index and one centred pip. */
+function cardFace(card, compact) {
+  const s = card.suit, r = rankLabel(card.rank);
+  const idx = `<text x="32" y="60" text-anchor="middle" font-size="${r === "10" ? 39 : 48}">${r}</text>` +
+              suitPath(s, 32, 87, 30);
+  let body;
+  if (compact) body = suitPath(s, 120, 200, 96);
+  else if (card.rank >= 11 && card.rank <= 13) {
+    body = `<rect class="cfr" x="44" y="42" width="152" height="252" rx="10"/><path class="cfr" d="M44 168h152"/>` +
+           `<g>${courtFigure(card.rank)}</g><g transform="rotate(180 120 168)">${courtFigure(card.rank)}</g>`;
+  } else if (card.rank === 14) {
+    body = (s === "♠" ? `<path class="cfr" d="M120 74 174 168 120 262 66 168Z"/>` : "") + suitPath(s, 120, 168, s === "♠" ? 112 : 104);
+  } else {
+    body = (PIP_LAYOUT[card.rank] || []).map(([cx, cy]) =>
+      suitPath(s, COL[cx * 2], ROW_TOP + cy * (ROW_BOT - ROW_TOP), PIP_SIZE, cy > .5)).join("");
+  }
+  return `<svg viewBox="0 0 240 336" fill="currentColor" aria-hidden="true">${idx}${body}` +
+         `<g transform="rotate(180 120 168)">${idx}</g></svg>`;
+}
+
 function cardEl(card) {
   const el = document.createElement("div");
   el.className = "card" + (RED.has(card.suit) ? " red" : "");
-  const r = rankLabel(card.rank);
-  el.innerHTML =
-    `<div class="corner tl"><span class="r">${r}</span><span class="s">${card.suit}</span></div>` +
-    `<div class="pip">${card.suit}</div>` +
-    `<div class="corner br"><span class="r">${r}</span><span class="s">${card.suit}</span></div>`;
+  el.innerHTML = cardFace(card);
   return el;
 }
 function roleOf(p) {
@@ -784,7 +903,14 @@ function renderHand() {
   wrap.innerHTML = "";
   const canPlay = state.awaitingHuman && state.phase === "playing" && state.turn === 0;
   const legalKey = new Set((canPlay ? legalCards(0) : []).map(c => c.suit + c.rank));
-  state.hands[0].forEach(card => {
+  /* The hand always reads ♠ ♥ ♣ ♦, high to low. Alternating the colours is what
+     makes a fanned hand scannable, and a fixed order keeps a given card in the
+     same place every deal — sortHand()'s habit of shuffling trump to the end
+     moved your ace mid-hand the moment trump was named. */
+  const HAND_ORDER = { "♠": 0, "♥": 1, "♣": 2, "♦": 3 };
+  state.hands[0].slice()
+    .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank))
+    .forEach(card => {
     const el = cardEl(card);
     if (state.trump && card.suit === state.trump) el.classList.add("trumpcard");
     if (state.bonusSuit && card.suit === state.bonusSuit && card.rank === 3) el.classList.add("bonuscard");
@@ -849,7 +975,7 @@ function renderActionBar() {
   }
   if (state.phase === "partnerSelect") {
     if (state.declarer === 0) {
-      add(text("prompt", `Trump is ${state.trump}. Call a card you DON'T hold — whoever has it is your partner:`));
+      add(text("prompt", `Trump is ${suitSpan(state.trump)}. Now name a card you <b>don't</b> hold — whoever has it is your partner.`));
       const grid = document.createElement("div"); grid.className = "call-grid";
       const have = new Set(state.hands[0].map(c => c.suit + c.rank));
       for (const s of SUITS) {
@@ -858,7 +984,7 @@ function renderActionBar() {
           if (have.has(s + r)) continue;
           const m = document.createElement("div");
           m.className = "mini-card" + (RED.has(s) ? " red" : "") + (r === 14 ? " ace" : "") + (s === state.bonusSuit && r === 3 ? " bonus" : "");
-          m.innerHTML = `<span class="mr">${rankLabel(r)}</span><span class="ms">${s}</span>`;
+          m.innerHTML = cardFace({ suit: s, rank: r }, true);
           m.addEventListener("click", () => setContract({ suit: s, rank: r }));
           row.appendChild(m);
         }
@@ -918,8 +1044,9 @@ function log(html) {
   } else { div.className = "entry"; div.innerHTML = html; }
   el.appendChild(div); el.scrollTop = el.scrollHeight;
 }
-function suitSpan(s) { return `<span class="pc ${RED.has(s) ? "red" : ""}">${s}</span>`; }
-function cardSpan(c) { return c ? `<span class="pc ${RED.has(c.suit) ? "red" : ""}">${rankLabel(c.rank)}${c.suit}</span>` : ""; }
+// suits in running text are drawn too, so a card reads the same in the log as on the felt
+function suitSpan(s) { return `<span class="pc ${RED.has(s) ? "red" : ""}">${suitSvg(s)}</span>`; }
+function cardSpan(c) { return c ? `<span class="pc ${RED.has(c.suit) ? "red" : ""}">${rankLabel(c.rank)}${suitSvg(c.suit)}</span>` : ""; }
 function pcSpan(p) { return `<b>${PLAYER_NAMES[p]}</b>`; }
 
 // ============================================================
@@ -937,7 +1064,7 @@ function showRoundOver(made, dPts, winners) {
     `<h2>Round ${state.roundNumber} Complete</h2>` +
     `<p class="big">${made ? "Contract made!" : "Contract set!"}</p>` +
     `<p>${dTeam} bid <b>${state.bid}</b> and captured <b>${dPts}</b> of ${TOTAL_POINTS} points.</p>` +
-    `<p>${youWon ? "🏆 Your side wins the deal" : winners.map(p => PLAYER_NAMES[p]).join(" & ") + " win the deal"}.</p>` +
+    `<p>${youWon ? "Your side wins the deal" : winners.map(p => PLAYER_NAMES[p]).join(" & ") + " win the deal"}.</p>` +
     `<div class="standings"><h2 style="font-size:11px;letter-spacing:2px;color:var(--gold)">STANDINGS</h2>${standingsHTML()}</div>` +
     `<button id="btn-next">Next Deal →</button>`;
   showOverlay();
@@ -951,7 +1078,7 @@ function showMatchOver() {
   modal.innerHTML =
     `<h2>Match Over</h2>` +
     `<p class="big">${youWon
-        ? (champs.length > 1 ? "🏆 You & " + champs.filter(p => p !== 0).map(p => PLAYER_NAMES[p]).join(" & ") + " win the match!" : "🏆 You win the match!")
+        ? (champs.length > 1 ? "You &amp; " + champs.filter(p => p !== 0).map(p => PLAYER_NAMES[p]).join(" & ") + " win the match!" : "You win the match!")
         : champs.map(p => PLAYER_NAMES[p]).join(" & ") + " win the match"}</p>` +
     `<p>First to ${TARGET_GAMES} deals won.</p>` +
     `<div class="standings"><h2 style="font-size:11px;letter-spacing:2px;color:var(--gold)">FINAL STANDINGS</h2>${standingsHTML()}</div>` +
@@ -1022,6 +1149,8 @@ function playSound(kind) {
 // ============================================================
 document.getElementById("btn-new").addEventListener("click", newMatch);
 document.getElementById("btn-help").addEventListener("click", showHelp);
+// the wordmark's suits are drawn too — they were the last four font glyphs left
+document.getElementById("title-suits").innerHTML = SUITS.map(suitSpan).join("");
 newMatch();
 </script>
 </body>
