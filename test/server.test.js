@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    node adapter (server.js) over real sockets.
 
@@ -7,11 +6,17 @@
    a socket could strand identities by joining repeatedly — the core never saw
    it, because from its side each join looked like a different player arriving.
    ============================================================ */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const WebSocket = require("ws");
-process.env.MAX_ROOMS = "3"; // set before requiring: makes the room cap reachable in a test
-const { httpServer, rooms } = require("../server");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import WebSocket from "ws";
+
+/* Static imports are hoisted — every imported module fully evaluates before
+   this file's own top-level statements run, no matter where the `import`
+   sits textually. That would read MAX_ROOMS before it is set below. A dynamic
+   import() runs exactly where it is written, so it still executes after the
+   env var — the same ordering CommonJS's synchronous loading used to give us. */
+process.env.MAX_ROOMS = "3"; // set before importing: makes the room cap reachable in a test
+const { httpServer, rooms } = await import("../server.js");
 
 let base = null;
 async function listening() {

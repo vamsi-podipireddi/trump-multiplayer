@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    TRUMP — authoritative game engine (server-side, no I/O)
    250-point bid/capture trick game. All functions operate on an
@@ -502,7 +501,7 @@ function publicView(G) {
   };
 }
 
-module.exports = {
+export {
   SUITS, RANKS, NUM_PLAYERS, MIN_BID, MAX_BID, BID_STEP, TOTAL_POINTS, TARGET_GAMES, MAX_REDEALS,
   createMatch, startMatch, nextDeal,
   applyBid, bidIsLegal, minNextBid, findBidActor,
@@ -510,5 +509,5 @@ module.exports = {
   applyPlay, playIsLegal, advanceTrick, legalCards,
   aiActionFor, requiredActor, publicView,
   cardPoints, sameCard, sideOf, defenders, cardStr, rankLabel,
-  choosePIMCCard, randomInt, _determinize: determinize,
+  choosePIMCCard, randomInt, determinize as _determinize,
 };

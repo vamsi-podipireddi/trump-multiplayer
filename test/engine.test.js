@@ -1,9 +1,9 @@
-"use strict";
 /* Engine invariants: random + AI-driven full-match playouts, rule edges.
    Pure engine, no I/O — every playout must satisfy the deck/trick/score laws. */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const E = require("../engine");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as E from "../engine.js";
+import * as R from "../room.js";
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];
@@ -114,7 +114,6 @@ test("dealing and token minting never draw on Math.random", () => {
     assert.ok(dealers.size > 1, "the opening dealer must not be predictable either");
     assert.ok(bonuses.size > 1, "nor the bonus suit");
 
-    const R = require("../room");
     const ids = new Set();
     for (let i = 0; i < 200; i++) ids.add(R.randId(16, false));
     assert.equal(ids.size, 200, "playerId is a bearer token — it must come off the CSPRNG");

@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    Client <-> core protocol contract.
 
@@ -7,13 +6,15 @@
    would fail silently at runtime (the server ignores unknown types).
    These tests read both files as text and compare the two vocabularies.
    ============================================================ */
-const test = require("node:test");
-const assert = require("node:assert");
-const fs = require("fs");
-const path = require("path");
-const vm = require("node:vm");
-const R = require("../room");
+import test from "node:test";
+import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import vm from "node:vm";
+import { fileURLToPath } from "node:url";
+import * as R from "../room.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
 const CORE = fs.readFileSync(path.join(__dirname, "..", "room.js"), "utf8");
 

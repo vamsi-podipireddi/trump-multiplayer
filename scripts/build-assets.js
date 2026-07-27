@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    Keeps two derived files honest:
 
@@ -14,10 +13,12 @@
    Run after touching the client:   npm run build:assets
    test/pwa.test.js fails if you forget.
    ============================================================ */
-const fs = require("fs");
-const path = require("path");
-const crypto = require("crypto");
+import fs from "node:fs";
+import path from "node:path";
+import crypto from "node:crypto";
+import { fileURLToPath } from "node:url";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const SOLO_SRC = path.join(ROOT, "index.html");
 const SOLO_DST = path.join(ROOT, "app", "solo.html");
@@ -63,9 +64,9 @@ function build() {
   return want;
 }
 
-module.exports = { shellVersion, check, build, SHELL };
+export { shellVersion, check, build, SHELL };
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.argv.includes("--check")) {
     const stale = check();
     if (stale.length) {

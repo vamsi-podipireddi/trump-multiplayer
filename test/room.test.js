@@ -1,10 +1,9 @@
-"use strict";
 /* Room-core tests: redaction property, message fuzzing, lifecycle flows.
    Everything runs on a simulated clock — the core never calls Date.now(). */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const R = require("../room");
-const E = require("../engine");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as R from "../room.js";
+import * as E from "../engine.js";
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];

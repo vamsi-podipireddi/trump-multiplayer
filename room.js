@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    TRUMP — shared room core (backend-agnostic, no I/O).
 
@@ -23,7 +22,7 @@
    Adapters own: sockets, rate limiting, persistence, Origin checks.
    ============================================================ */
 
-const E = require("./engine");
+import * as E from "./engine.js";
 
 const SEAT_LABEL = ["South", "West", "North", "East"];
 const EMOTES = ["👏", "😂", "😱", "🔥", "🤝", "💀"];
@@ -542,7 +541,7 @@ function buildView(room, pid, now) {
   return v;
 }
 
-module.exports = {
+export {
   createRoom, join, disconnect, message, fireTimers, nextTimerDue, buildView, reconcile,
   normCode, randId, cleanName,
   SEAT_LABEL, EMOTES, DIFFICULTIES, TARGET_DEAL_CHOICES, TURN_TIMER_CHOICES,

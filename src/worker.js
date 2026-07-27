@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    TRUMP — Cloudflare Worker + Durable Object adapter.
 
@@ -17,7 +16,7 @@
      for the earliest due timer. Alarms fire even while hibernated.
    ============================================================ */
 
-import R from "../room.js";
+import * as R from "../room.js";
 
 const MSG_RATE = 100; // msgs/sec per socket
 

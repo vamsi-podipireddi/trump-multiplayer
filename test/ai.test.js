@@ -1,8 +1,7 @@
-"use strict";
 /* PIMC hard-AI tests: legality, determinizer soundness, budget, strength sanity. */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const E = require("../engine");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as E from "../engine.js";
 
 const key = c => c.suit + c.rank;
 

@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    PWA + accessibility contract.
 
@@ -7,11 +6,14 @@
    the pieces exist and agree with each other: manifest ↔ icons on disk,
    service-worker precache ↔ real files, client ↔ manifest/sw wiring.
    ============================================================ */
-const test = require("node:test");
-const assert = require("node:assert");
-const fs = require("fs");
-const path = require("path");
+import test from "node:test";
+import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { check } from "../scripts/build-assets.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const PUB = path.join(ROOT, "app");
 const read = p => fs.readFileSync(path.join(PUB, p), "utf8");
@@ -254,7 +256,6 @@ test("generated assets are in sync with their sources", () => {
   /* solo.html is a copy and the service worker's cache VERSION is a hash of the
      shell; both used to be maintained by hand, so both could silently go stale.
      scripts/build-assets.js owns them now. */
-  const { check } = require("../scripts/build-assets");
   assert.deepStrictEqual(check(), [], "run: npm run build:assets");
   assert.ok(/const VERSION = "trump-[0-9a-f]{12}";/.test(SW),
     "sw VERSION must be the generated content hash, not a hand-edited constant");

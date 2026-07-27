@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    TRUMP — node adapter (HTTP static + WebSocket realtime).
    All room/game logic lives in room.js (shared with the Cloudflare
@@ -7,11 +6,14 @@
    Run:  npm install && node server.js   then open the printed URL.
    ============================================================ */
 
-const http = require("http");
-const fs = require("fs");
-const path = require("path");
-const { WebSocketServer } = require("ws");
-const R = require("./room");
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { WebSocketServer } from "ws";
+import * as R from "./room.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const PORT = process.env.PORT || 3000;
 const MAX_ROOMS = +process.env.MAX_ROOMS || 500;
@@ -231,9 +233,9 @@ setInterval(() => {
 }, 30000).unref();
 
 // Importable so test/server.test.js can drive the real adapter in-process.
-module.exports = { httpServer, wss, rooms };
+export { httpServer, wss, rooms };
 
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   httpServer.listen(PORT, () => {
     console.log(`\n  TRUMP multiplayer server running.`);
     console.log(`  Local:   http://localhost:${PORT}`);

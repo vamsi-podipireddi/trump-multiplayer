@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    Cloudflare Worker entry: routing, origin policy, optional stats.
 
@@ -7,8 +6,8 @@
    fetch handler is plain code — the parts that decide who gets in are
    testable here, with fetch/Request/Response from Node's undici.
    ============================================================ */
-const test = require("node:test");
-const assert = require("node:assert");
+import test from "node:test";
+import assert from "node:assert";
 
 const load = () => import("../src/worker.js");
 const req = (url, headers) => new Request(url, { headers: headers || {} });
