@@ -20,6 +20,7 @@
 - **No gameplay, protocol, or wire-format changes** in Tasks 1–20. The only intentional behaviour change in the whole plan is Task 21 (solo on the shared engine).
 - **Engine import discipline:** consumers outside `app/js/core/engine/` import the barrel `index.js`; modules inside the engine import leaf modules directly (importing the barrel from inside creates a cycle).
 - **Comments are load-bearing.** This codebase documents *why* in block comments above the code they explain. When moving code, move its comment with it. Never drop one.
+- **Line numbers in this plan are stale anchors, not addresses.** They were taken before Task 2, which removed `"use strict";` from `engine.js`, `room.js`, `server.js`, `src/worker.js` and both scripts — shifting everything below by one line. Treat every `file:line` reference as a hint about *where to look*; locate the code by **function or constant name** and move whatever the name resolves to. If a cited line does not contain what the plan says it contains, the name wins and the number is wrong. Do not report this as a blocker.
 - **Commit after every task**, using the message given in the task's final step.
 
 ---
