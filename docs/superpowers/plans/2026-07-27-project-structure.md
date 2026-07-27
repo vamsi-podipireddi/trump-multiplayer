@@ -16,6 +16,7 @@
 - **No new devDependencies.** `wrangler` stays the only one.
 - **ES modules everywhere.** Root `package.json` has `"type": "module"`. Every relative import carries an explicit `.js` extension — required by both Node's ESM resolver and browsers.
 - **`npm test` must pass at the end of every task.** A task is not done until it does.
+- **Leave the `test` script as `node --test`** (bare, no path argument). A path argument fails on Node 24 with `MODULE_NOT_FOUND` — it tries to `require()` the directory as an entry point. The bare form discovers the same 70 tests on Node 20, 22 and 24. Single test files still take an explicit path (`node --test test/engine.test.js`), which works on every version.
 - **No gameplay, protocol, or wire-format changes** in Tasks 1–20. The only intentional behaviour change in the whole plan is Task 21 (solo on the shared engine).
 - **Engine import discipline:** consumers outside `app/js/core/engine/` import the barrel `index.js`; modules inside the engine import leaf modules directly (importing the barrel from inside creates a cycle).
 - **Comments are load-bearing.** This codebase documents *why* in block comments above the code they explain. When moving code, move its comment with it. Never drop one.
@@ -260,7 +261,7 @@ Two call sites need care:
 No path change yet (that is Task 12), but confirm `package.json` scripts read:
 ```json
     "start": "node server.js",
-    "test": "node --test test/",
+    "test": "node --test",
 ```
 
 - [ ] **Step 10: Run the full suite**
@@ -2030,7 +2031,7 @@ inherits all three. Supersedes ROADMAP D12."
 
 - "Run it": `npm start` is unchanged, but note the entry is now `src/server/index.js`.
 - "How it works": replace references to `engine.js`, `room.js`, `server.js` and `src/worker.js` with the new directories.
-- "Tests": `node --test test/` is unchanged; mention `npm run build:assets` must run after touching anything under `app/`.
+- "Tests": `npm test` is unchanged; mention `npm run build:assets` must run after touching anything under `app/`.
 - Add a short repo-structure section pointing at `docs/STRUCTURE.md`.
 - Remove any claim that the solo game is a self-contained file openable from disk — it is not, as of Task 21.
 
