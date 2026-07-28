@@ -1,0 +1,49 @@
+/* ============================================================
+     "One lamp over the table."
+
+     The room is dark and a warm light hangs over the felt, so the cards
+     are the only bright objects on screen — which is right, because the
+     cards are what you are actually looking at. Everything else (rail,
+     panels, chrome) stays quiet and lets them carry the detail.
+
+     Two rules the old sheet broke, and the reason it read as clip-art:
+       · suits are drawn (SVG paths), never typed. ♠♥♦♣ are font glyphs
+         and every OS ships a different, flatter one.
+       · nothing in the interface is an emoji. Emoji can't take the
+         interface's colour and are mud below 16px.
+     ============================================================ */
+  :root {
+    /* the room */
+    --room-0:#070c0a; --room-1:#0d1613; --room-2:#14211b; --room-3:#1b2a23;
+    --felt-hi:#1f5741; --felt:#123a2c; --felt-lo:#091e17;
+    --rail-hi:#6a4b2e; --rail:#33231a; --rail-lo:#17100b;
+    /* card stock */
+    --stock:#f7f3e7; --stock-lo:#e6dfca; --ink:#15171a; --red:#b02a2e;
+    --dia-4c:#1b62c8; --club-4c:#0d7a47;
+    /* accents — brass is the lamp; slate is the defending side */
+    --gold:#debd79; --gold-hi:#f2dca9; --gold-dim:#9c7a34;
+    --team-d:#debd79; --team-o:#8bb0e0; --ok:#5fc495; --danger:#e4705e;
+    /* ink on brass — near-black with a warm cast, never pure #000 */
+    --on-gold:#1a1509;
+    --shadow:rgba(0,0,0,.45); --card-bg:#f7f3e7;
+    --kb:0px;   /* on-screen keyboard height, measured from visualViewport */
+    /* type scale — everything used to sit between 10 and 14px, so nothing read as primary */
+    --t-2xs:10px; --t-xs:11.5px; --t-sm:13px; --t-md:14.5px; --t-lg:17px; --t-xl:21px; --t-2xl:28px; --t-3xl:38px;
+    --txt:#ecefea; --txt-2:rgba(236,239,234,.70); --txt-3:rgba(236,239,234,.42);
+    --surface-1:#101b16; --surface-2:#0a120f; --surface-3:rgba(0,0,0,.3);
+    --line:rgba(255,255,255,.075); --line-2:rgba(255,255,255,.14); --line-gold:rgba(222,189,121,.26);
+    --r-xs:6px; --r-sm:9px; --r-md:13px; --r-lg:18px; --r-xl:26px; --r-pill:999px;
+    /* Two roles, and only two. The grotesk prints the interface (and the card
+       indices, which want lining figures Georgia doesn't have); the serif is
+       reserved for the wordmark and the engraved ace, where it earns its keep. */
+    --fu:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --fd:ui-serif,Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;
+  }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; font-family:var(--fu); color:var(--txt); background:var(--room-0); overflow:hidden;
+    -webkit-text-size-adjust:100%; text-size-adjust:100%; overscroll-behavior:none;
+    -webkit-font-smoothing:antialiased; }
+
+/* the shared icon size; individual call sites override */
+  .ic { width:16px; height:16px; flex:none; display:block; }
+  .su { display:inline-block; vertical-align:-.1em; width:1em; height:1em; }

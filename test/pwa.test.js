@@ -43,7 +43,10 @@ function pngSize(file) {
    formatting rather than behaviour: reformatting the file broke the build,
    while a genuinely wrong value still sailed through. Read the declarations
    and assert on what they mean instead. */
-const CSS = (CLIENT.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1].replace(/\/\*[\s\S]*?\*\//g, "");
+const CSS = ["tokens", "base", "table", "panels", "responsive"]
+  .map(n => read(path.join("css", n + ".css")))
+  .join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 function rules(css) {
   const out = [];
@@ -155,8 +158,8 @@ test("accessibility: keyboard-reachable cards, labelled controls, live regions",
   assert.ok(/RANK_NAME/.test(CLIENT) && /SUIT_NAME/.test(CLIENT), "labels should spell out rank and suit");
   assert.ok(/id="log" role="log" aria-live="polite"/.test(CLIENT), "table log must be a polite live region");
   assert.ok(/id="chat-log" aria-live="polite"/.test(CLIENT), "chat must be a polite live region");
-  assert.ok(/:focus-visible/.test(CLIENT), "focus styling missing");
-  assert.ok(/body\.fourcolor .card\.s-d/.test(CLIENT) && /localStorage\.setItem\("trump_4color"/.test(CLIENT),
+  assert.ok(/:focus-visible/.test(CSS), "focus styling missing");
+  assert.ok(/body\.fourcolor .card\.s-d/.test(CSS) && /localStorage\.setItem\("trump_4color"/.test(CLIENT),
     "4-colour deck toggle must exist and persist");
   // suit colours must be class-driven, otherwise the 4-colour deck can't override them
   assert.ok(!/style="color:\$\{RED\.has/.test(CLIENT), "suit colours must come from CSS classes, not inline styles");

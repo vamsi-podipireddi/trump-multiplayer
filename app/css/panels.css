@@ -1,0 +1,206 @@
+/* ---- Join / Lobby screens ---- */
+  /* justify-content:center would park content above the scroll origin once it
+     overflows a short viewport; auto margins centre it and still scroll. */
+  .screen { position:fixed; inset:0; display:none; flex-direction:column; align-items:center; justify-content:flex-start; gap:18px; z-index:50;
+    overflow-y:auto; padding:22px 16px; padding-top:calc(22px + env(safe-area-inset-top)); padding-bottom:calc(22px + env(safe-area-inset-bottom));
+    background:
+      radial-gradient(60% 46% at 50% 20%, rgba(255,235,190,.055), rgba(255,235,190,0) 70%),
+      radial-gradient(90% 70% at 50% 24%, #10231b, var(--room-0) 76%); }
+  .screen.show { display:flex; }
+  .screen > * { flex:none; max-width:100%; } .screen.show > :first-child { margin-top:auto; } .screen.show > :last-child { margin-bottom:auto; }
+
+  /* ---- the wordmark: a fan of real cards, then the name, then a ruled colophon.
+     The hero is the deck itself — the most characteristic object this game owns. ---- */
+  .brand { display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .brand-fan { display:flex; justify-content:center; height:104px; margin-bottom:18px; }
+  .brand-fan .card { width:70px; height:99px; margin-left:-30px; transform-origin:50% 130%;
+    animation:fanIn .5s cubic-bezier(.2,.9,.3,1) backwards; }
+  .brand-fan .card:first-child { margin-left:0; }
+  @keyframes fanIn { from { opacity:0; transform:translateY(16px) rotate(0deg) scale(.94); } }
+  .screen h1 { margin:0; font-family:var(--fd); font-weight:600; font-size:clamp(38px,10vw,54px); line-height:1;
+    letter-spacing:.18em; text-indent:.18em; color:var(--gold);
+    text-shadow:0 0 34px rgba(222,189,121,.22), 0 2px 0 rgba(0,0,0,.5); }
+  .colophon { display:flex; align-items:center; gap:12px; margin:12px 0 6px; color:var(--gold-dim); }
+  .colophon .bar { display:block; width:clamp(34px,9vw,64px); height:1px; background:linear-gradient(90deg,transparent,var(--line-gold)); }
+  .colophon .bar:last-child { background:linear-gradient(270deg,transparent,var(--line-gold)); }
+  .colophon .su { width:11px; height:11px; opacity:.85; }
+  .colophon .su + .su { margin-left:7px; }
+  .lede { margin:0; max-width:36ch; text-align:center; font-size:var(--t-md); line-height:1.6; color:var(--txt-2); }
+
+  .panel { background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line-2); border-radius:var(--r-lg);
+    padding:22px 24px; width:min(430px,92vw);
+    box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 22px 50px rgba(0,0,0,.5); }
+  /* two paths, two cards — they used to be two <h2>s and a hand-rolled divider in one panel */
+  .join-cards { display:flex; gap:14px; align-items:stretch; justify-content:center; flex-wrap:wrap; }
+  .join-cards .panel { width:min(324px,92vw); display:flex; flex-direction:column; padding:20px 22px; }
+  /* Bottom-align the two cards' final row so the panels agree, but take the
+     slack *after* the copy — putting flex:1 on the first paragraph blew a gap
+     into the middle of the sentence it was supposed to be part of. */
+  .join-cards .panel > :last-child { margin-top:auto; }
+  .panel.slim { padding:18px 20px; }
+  .code-ticket { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;
+    background:var(--surface-3); border:1px solid var(--line-gold); border-radius:var(--r-md); padding:13px 16px; margin-bottom:12px; }
+  .code-ticket .lbl { font-size:var(--t-2xs); letter-spacing:.18em; color:var(--txt-3); font-weight:700; }
+  .code-ticket .code-big { padding:2px 0 0; text-align:left; font-size:30px; letter-spacing:.22em; }
+  .ticket-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .ticket-actions .btn { font-size:var(--t-sm); padding:9px 14px; }
+
+  /* ---- identity: a name is the one thing you bring to the table, so it gets
+     a face. The disc takes a hue from the name itself, so the same person is
+     the same colour to everyone in the room. ---- */
+  .avatar { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; flex:none;
+    background:hsl(var(--h,42) 42% 24%); border:1px solid hsl(var(--h,42) 50% 46% / .55); color:hsl(var(--h,42) 70% 76%);
+    font-size:var(--t-sm); font-weight:700; letter-spacing:.02em; overflow:hidden; }
+  .avatar .ic { width:15px; height:15px; opacity:.9; }
+  .avatar.ai { background:rgba(139,176,224,.14); border-color:rgba(139,176,224,.38); color:var(--team-o); }
+  .avatar.lg { width:46px; height:46px; font-size:var(--t-lg); }
+  .avatar.lg .ic { width:22px; height:22px; }
+  .name-row { display:flex; align-items:center; gap:12px; }
+  .name-row input { flex:1; min-width:0; }
+
+  .panel h2 { margin:0 0 12px; display:flex; align-items:center; gap:9px; color:var(--gold);
+    letter-spacing:.11em; font-size:var(--t-sm); font-weight:700; text-transform:uppercase; }
+  .panel h2 .ic { width:17px; height:17px; opacity:.85; }
+  .field { display:flex; flex-direction:column; gap:7px; margin-bottom:14px; }
+  .field label { font-size:var(--t-2xs); letter-spacing:.16em; text-transform:uppercase; font-weight:700; color:var(--txt-3); }
+  .field input, .row input { font:inherit; font-size:16px; padding:11px 13px; border-radius:var(--r-sm);
+    border:1px solid var(--line-2); background:rgba(0,0,0,.34); color:var(--txt); text-transform:none;
+    transition:border-color .15s, box-shadow .15s; }
+  .field input::placeholder, .row input::placeholder { color:var(--txt-3); }
+  .field input:focus, .row input:focus { outline:none; border-color:var(--line-gold); box-shadow:0 0 0 3px rgba(222,189,121,.13); }
+  #join-code { text-transform:uppercase; letter-spacing:.24em; font-weight:700; }
+  .btn { font:inherit; font-size:var(--t-md); letter-spacing:.01em; cursor:pointer; color:var(--on-gold);
+    background:linear-gradient(180deg,var(--gold-hi),var(--gold)); border:none; border-radius:var(--r-sm); padding:12px 18px; font-weight:700;
+    box-shadow:0 1px 0 rgba(255,255,255,.4) inset, 0 6px 16px rgba(0,0,0,.35);
+    transition:transform .08s,filter .15s,box-shadow .15s; }
+  
+  .btn:active { transform:translateY(1px); }
+  .btn.ghost { background:transparent; color:var(--gold); border:1px solid var(--line-gold); box-shadow:none; }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  /* min-width:0 on both: a flex item's automatic minimum is its content, and an
+     <input>'s is ~20 characters wide — so the code field refused to shrink and
+     shoved the Join button out through the side of the panel. */
+  .row { display:flex; gap:9px; min-width:0; }
+  .row > input { min-width:0; }
+  .muted { font-size:var(--t-sm); color:var(--txt-2); line-height:1.55; }
+  .chk { display:flex; align-items:center; gap:10px; font-size:var(--t-sm); color:var(--txt-2); margin:12px 0 4px; cursor:pointer; min-height:40px; }
+  .chk input { width:17px; height:17px; flex:none; accent-color:var(--gold); }
+  /* a labelled hairline: "or join one" belongs to the divider, not above it */
+  .or { display:flex; align-items:center; gap:10px; margin:12px 0 10px;
+    font-size:var(--t-2xs); letter-spacing:.16em; text-transform:uppercase; font-weight:700; color:var(--txt-3); }
+  .or::before, .or::after { content:""; flex:1; height:1px; background:var(--line); }
+  #join-record { text-align:center; font-size:var(--t-sm); color:var(--txt-3); }
+  #join-record b { color:var(--gold); font-weight:700; }
+  .err { color:var(--danger); font-size:var(--t-sm); min-height:16px; }
+  .err:empty { min-height:0; }
+
+  .seatlist { display:flex; flex-direction:column; gap:8px; margin:6px 0 16px; }
+  /* wrap + min-width:0 — a flex item's automatic minimum is its content, so an
+     un-shrinkable seat row used to push the whole panel wider than a phone */
+  .seatrow { display:flex; align-items:center; flex-wrap:wrap; gap:8px 10px; background:var(--surface-3); border:1px solid var(--line);
+    border-radius:var(--r-md); padding:9px 12px; font-size:var(--t-md); }
+  /* the compass label is what the table calls this chair; it is data, not decoration */
+  .seatrow .tag { font-size:var(--t-2xs); letter-spacing:.14em; font-weight:700; color:var(--txt-3); min-width:44px; }
+  .seatrow .who { font-weight:600; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .seatrow.you { border-color:var(--line-gold); background:rgba(222,189,121,.06); }
+  .seatrow .pill { font-size:var(--t-2xs); letter-spacing:.1em; font-weight:700; padding:3px 9px; border-radius:var(--r-pill); }
+  .seatrow .spacer { margin-left:auto; }
+  .pill.open { background:rgba(255,255,255,.07); color:var(--txt-3); border:1px dashed var(--line-2); }
+  .pill.ai { background:rgba(139,176,224,.16); color:var(--team-o); }
+  .pill.on { background:rgba(95,196,149,.16); color:var(--ok); }
+  .pill.off { background:rgba(228,112,94,.15); color:var(--danger); }
+  .code-big { font-size:34px; letter-spacing:.24em; color:var(--gold); font-weight:700; text-align:center; padding:6px 0; }
+  .mini-btn { font:inherit; font-size:var(--t-xs); letter-spacing:.03em; cursor:pointer; border-radius:var(--r-xs); padding:6px 11px; min-height:32px; font-weight:700;
+    display:inline-flex; align-items:center; gap:6px;
+    background:rgba(255,255,255,.05); color:var(--txt-2); border:1px solid var(--line-2); transition:background .15s,color .15s,border-color .15s; }
+  .mini-btn .ic { width:13px; height:13px; }
+  .mini-btn.danger { color:var(--danger); border-color:rgba(228,112,94,.3); }
+  
+  .mini-btn:disabled { opacity:.4; cursor:not-allowed; }
+
+  /* ---- lobby settings ---- */
+  .settings { display:flex; flex-direction:column; gap:11px; margin:2px 0 16px; }
+  .setrow { display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .setrow > .lbl { font-size:var(--t-2xs); letter-spacing:.14em; text-transform:uppercase; font-weight:700; color:var(--txt-3); min-width:92px; }
+  /* one segmented control, not a row of loose buttons: the group is the choice */
+  .segbtn { font:inherit; font-size:var(--t-sm); cursor:pointer; border-radius:var(--r-xs); padding:6px 11px; min-height:32px; font-weight:600;
+    background:rgba(255,255,255,.05); color:var(--txt-2); border:1px solid var(--line); transition:background .15s,color .15s; }
+  .segbtn[aria-pressed="true"] { background:var(--gold); color:var(--on-gold); border-color:var(--gold); font-weight:700; }
+  
+  .segbtn:disabled { cursor:default; } .segbtn:disabled:not([aria-pressed="true"]) { opacity:.4; }
+  .setval { font-size:var(--t-sm); font-weight:700; color:var(--gold); }
+
+/* 2/4, not 2/3 — the grid has three rows now and the sidebar spans table + bottom */
+  aside { grid-row:2/4; grid-column:2/3; background:linear-gradient(180deg,var(--surface-1),var(--surface-2));
+    border-left:1px solid var(--line-2); display:flex; flex-direction:column; min-height:0; }
+  .panel-section { padding:13px 15px; border-bottom:1px solid var(--line); }
+  .panel-section h2 { margin:0 0 10px; font-size:var(--t-2xs); letter-spacing:.2em; text-transform:uppercase; color:var(--gold-dim); font-weight:700; }
+  table.score { width:100%; border-collapse:collapse; font-size:var(--t-md); } table.score th,table.score td { text-align:right; padding:6px 2px; }
+  table.score th { font-size:var(--t-2xs); letter-spacing:.13em; text-transform:uppercase; color:var(--txt-3); font-weight:700; padding-bottom:3px; }
+  table.score td.name, table.score th.name { text-align:left; font-weight:600; padding-left:10px; }
+  table.score tr.you td.name { color:var(--gold); } table.score td b { color:var(--txt); font-weight:700; }
+  table.score tr.you td b { color:var(--gold); }
+  table.score td.deals { padding-left:10px; white-space:nowrap; }
+  /* side is a rail on the row, not a dot in the cell — readable at a glance, one element fewer */
+  table.score tr.side-d td.name { box-shadow:inset 3px 0 0 var(--team-d); }
+  table.score tr.side-o td.name { box-shadow:inset 3px 0 0 var(--team-o); }
+  /* deals won against the target, as a row of counters you can read without arithmetic */
+  .tally { display:inline-block; width:7px; height:7px; border-radius:50%; background:rgba(255,255,255,.13); margin-left:4px; vertical-align:middle; }
+  .tally.on { background:var(--gold); box-shadow:0 0 7px rgba(222,189,121,.55); }
+  .contract-line { font-size:var(--t-sm); margin-top:11px; color:var(--txt-2); }
+  .cbar-top { display:flex; justify-content:space-between; gap:8px; margin-bottom:5px; align-items:baseline; }
+  .cbar-top b { color:var(--gold); font-weight:700; }
+  .cbar { height:5px; border-radius:var(--r-pill); background:rgba(0,0,0,.45); overflow:hidden; }
+  .cbar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi)); transition:width .35s ease-out; }
+  .chip { display:inline-flex; align-items:center; gap:5px; font-size:var(--t-xs); padding:3px 9px; margin-right:5px; border-radius:var(--r-pill);
+    background:rgba(0,0,0,.3); border:1px solid var(--line); color:var(--txt-3); }
+  .chip b { color:var(--txt-2); font-weight:700; }
+  #log { flex:1; overflow-y:auto; font-size:var(--t-sm); line-height:1.55; padding:10px 15px; }
+  #log .entry { color:var(--txt-3); margin-bottom:4px; padding-left:10px; border-left:2px solid transparent; }
+  #log .entry b { color:var(--txt-2); font-weight:600; }
+  #log .entry.win { color:var(--gold); font-weight:600; border-left-color:var(--gold); display:flex; gap:7px; align-items:flex-start; }
+  #log .entry.win .ic { width:13px; height:13px; margin-top:3px; opacity:.9; }
+  #log .entry.win b { color:var(--gold-hi); }
+  #log .entry.bid { color:var(--txt-2); border-left-color:rgba(139,176,224,.45); }
+  #log .entry.round { color:var(--ok); font-weight:600; border-top:1px solid var(--line); border-left-color:transparent;
+    padding-top:9px; margin-top:9px; }
+
+  /* ---- chat + emotes ---- */
+  /* the log earns more room than an empty chat box: 1.4 : 1, both floored */
+  #sec-log { flex:1.4 1 0; display:flex; flex-direction:column; min-height:140px; }
+  #chat-section { display:flex; flex-direction:column; min-height:180px; flex:1 1 0; padding:11px 0 0; border-top:1px solid rgba(255,255,255,.07); }
+  #chat-log { flex:1; overflow-y:auto; font-size:var(--t-sm); line-height:1.5; padding:8px 15px; min-height:60px; }
+  #chat-log .msg { margin-bottom:5px; word-break:break-word; color:var(--txt-2); }
+  #chat-log .msg .from { font-weight:700; color:var(--gold); } #chat-log .msg.you .from { color:var(--ok); }
+  /* the placeholder lives outside #chat-log so the live region only ever holds real messages */
+  #chat-empty { color:var(--txt-3); padding:6px 15px; font-size:var(--t-sm); }
+  #emote-bar { display:flex; gap:5px; padding:5px 11px 0; flex-wrap:wrap; }
+  /* Reactions are drawn, so they take the interface's colour and stay legible
+     at 20px — a platform emoji font does neither. */
+  .emote-btn { line-height:0; cursor:pointer; color:var(--txt-2); background:rgba(255,255,255,.05); border:1px solid var(--line);
+    border-radius:var(--r-sm); min-width:40px; min-height:40px; padding:4px; display:inline-flex; align-items:center; justify-content:center;
+    transition:background .13s,color .13s,transform .08s; }
+  .emote-btn svg { width:20px; height:20px; }
+  
+  .emote-btn:active { transform:scale(.94); background:rgba(222,189,121,.28); }
+  #chat-form { display:flex; gap:7px; padding:9px 11px 11px; }
+  #chat-input { flex:1; min-width:0; font:inherit; font-size:var(--t-sm); padding:9px 11px; min-height:40px; border-radius:var(--r-sm);
+    border:1px solid var(--line-2); background:rgba(0,0,0,.34); color:var(--txt); }
+  #chat-input::placeholder { color:var(--txt-3); }
+  #chat-input:focus { outline:none; border-color:var(--line-gold); }
+  #chat-send { font:inherit; font-size:var(--t-sm); font-weight:700; cursor:pointer; border:none; border-radius:var(--r-sm); padding:0 15px; min-height:40px;
+    background:var(--gold); color:var(--on-gold); }
+  .float-emote { position:absolute; bottom:100%; left:50%; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; color:var(--gold-hi); }
+  .float-emote svg { width:30px; height:30px; filter:drop-shadow(0 3px 8px rgba(0,0,0,.6)); }
+  @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
+    100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }
+
+/* ---- mobile: the sidebar becomes a bottom sheet with tabs (nothing is dropped) ---- */
+  #sheet-tabs { display:none; position:fixed; left:0; right:0; bottom:var(--kb); z-index:120; transition:bottom .15s;
+    background:var(--room-1); border-top:1px solid var(--line-2);
+    padding-bottom:env(safe-area-inset-bottom); padding-left:env(safe-area-inset-left); padding-right:env(safe-area-inset-right); }
+  #sheet-tabs button { flex:1; font:inherit; font-size:var(--t-xs); letter-spacing:.14em; text-transform:uppercase; font-weight:700; cursor:pointer;
+    background:transparent; color:var(--txt-3); border:none; padding:11px 4px; min-height:46px; transition:color .13s,background .13s; }
+  #sheet-tabs button[aria-expanded="true"] { color:var(--on-gold); background:var(--gold); }
+  #sheet-tabs .badge { display:inline-block; min-width:16px; margin-left:5px; border-radius:var(--r-pill); background:var(--danger); color:#2a0f0a;
+    font-size:var(--t-2xs); font-weight:800; padding:1px 5px; }
