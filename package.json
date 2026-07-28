@@ -5,7 +5,7 @@
   "description": "Online multiplayer TRUMP — a 250-point bid & capture trick-taking card game (2–4 humans + AI fill).",
   "type": "module",
   "scripts": {
-    "start": "node server.js",
+    "start": "node src/server/index.js",
     "build:assets": "node scripts/build-assets.js",
     "test": "node --test",
     "dev": "wrangler dev",

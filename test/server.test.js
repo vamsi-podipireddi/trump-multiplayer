@@ -1,5 +1,5 @@
 /* ============================================================
-   node adapter (server.js) over real sockets.
+   node adapter (src/server/) over real sockets.
 
    The room core is exercised in room.test.js; what is only testable here is
    the socket<->player bookkeeping the adapter owns. That bookkeeping is where
@@ -16,7 +16,7 @@ import WebSocket from "ws";
    import() runs exactly where it is written, so it still executes after the
    env var — the same ordering CommonJS's synchronous loading used to give us. */
 process.env.MAX_ROOMS = "3"; // set before importing: makes the room cap reachable in a test
-const { httpServer, rooms } = await import("../server.js");
+const { httpServer, rooms } = await import("../src/server/index.js");
 
 let base = null;
 async function listening() {
@@ -122,21 +122,23 @@ test("at the room cap, empty rooms are recycled but occupied ones are not", asyn
 
 test("static serving refuses to walk out of app/", async () => {
   const url = (await listening()).replace("ws://", "http://");
-  for (const bad of ["/../server.js", "/..%2fserver.js", "/%2e%2e/src/core/room/view.js", "//etc/passwd"]) {
+  for (const bad of ["/../src/server/sockets.js", "/..%2fsrc/server/sockets.js", "/%2e%2e/src/core/room/view.js", "//etc/passwd"]) {
     const res = await fetch(url + bad);
     assert.ok(res.status === 403 || res.status === 404, `${bad} must not be served (got ${res.status})`);
     const body = await res.text();
     /* Post-ESM, "require(" appears nowhere in the repo any more, so it quit
        being a canary at all — this assertion would pass no matter what
        leaked. Neither replacement is generic: "new WebSocketServer(" only
-       appears in server.js (the browser client uses the native WebSocket,
-       never the ws package), and the "../../../app/js/core/engine/index.js"
-       import line appears throughout src/core/room/ (server-only code,
-       including view.js — the file the traversal above targets) and nowhere
-       under app/. Two canaries, not one, because traversal above targets both
-       server.js and view.js, and each one's import line is distinct — a
-       single string shared by both would have to be vaguer, and vaguer is
-       how you end up matching an innocuous asset instead. */
+       appears in src/server/sockets.js (the browser client uses the native
+       WebSocket, never the ws package), and the "../../../app/js/core/engine/
+       index.js" import line appears throughout src/core/room/ (server-only
+       code, including view.js — the file the traversal above targets) and
+       nowhere under app/. Two canaries, not one, because traversal above
+       targets both sockets.js and view.js (server.js is gone post-split, so
+       probing for it would match nothing and pass vacuously), and each
+       target's import line is distinct — a single string shared by both
+       would have to be vaguer, and vaguer is how you end up matching an
+       innocuous asset instead. */
     assert.ok(!body.includes("new WebSocketServer(") && !body.includes('import * as E from "../../../app/js/core/engine/index.js"'),
       `${bad} leaked source`);
   }
