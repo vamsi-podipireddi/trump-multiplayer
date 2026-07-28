@@ -2,7 +2,7 @@
 # serves the static client (./app) AND the realtime backend (Durable Objects),
 # all on one origin. `npm run deploy`.
 name = "trump-multiplayer"
-main = "src/worker.js"
+main = "src/worker/index.js"
 compatibility_date = "2025-09-01"
 
 # Static client served from the same origin as the /ws WebSocket.

@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert";
 
-const load = () => import("../src/worker.js");
+const load = () => import("../src/worker/index.js");
 const req = (url, headers) => new Request(url, { headers: headers || {} });
 
 test("/ws requires an upgrade header", async () => {
