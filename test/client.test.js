@@ -1,19 +1,24 @@
 /* ============================================================
    Client <-> core protocol contract.
 
-   The client is a single hand-written HTML file, so nothing but a test
-   stops it drifting from the room core: a renamed message type or a new
-   emote would fail silently at runtime (the server ignores unknown types).
-   These tests read the client and the room core as text and compare the
-   two vocabularies.
+   Nothing but a test stops the client drifting from the room core: a renamed
+   message type or a new emote would fail silently at runtime (the server
+   ignores unknown types). The client and the room core are both real,
+   importable modules now, but the vocabularies compared below — message
+   types sent vs. handled, option lists, error codes — never meet as values
+   at runtime, so there is nothing to import and compare directly; these
+   tests read both sides as text instead.
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert";
 import fs from "node:fs";
 import path from "node:path";
-import vm from "node:vm";
 import { fileURLToPath } from "node:url";
 import * as R from "../src/core/room/index.js";
+import { syncWindow } from "../app/js/ui/log.js";
+import { esc } from "../app/js/util/dom.js";
+import { EMOTES } from "../app/js/cards/icons.js";
+import { DIFF_OPTS, DEAL_OPTS, TIMER_OPTS } from "../app/js/screens/lobby.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,12 +28,13 @@ const jsFiles = (function walk(dir) {
 })(path.join(__dirname, "..", "app", "js"))
   .filter(f => f.endsWith(".js") && !f.includes(`${path.sep}core${path.sep}`));
 
-// The client used to be one hand-written HTML file; it is now that file plus a
-// tree of leaf modules under app/js/ (core/ excluded — that's the engine, not
-// client code). CLIENT spans both, so text-scanning assertions below still see
-// symbols (EMOTES, esc, cardEl, ...) that have moved out of index.html itself.
-const CLIENT = [fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8"),
-                ...jsFiles.map(f => fs.readFileSync(f, "utf8"))].join("\n");
+// The client is index.html (markup only) plus a tree of leaf modules under
+// app/js/ (core/ excluded — that's the shared engine, not client code). CLIENT
+// is the JS side: the protocol, option-list and error-code scans below read
+// it. MARKUP is index.html itself, kept separate so a scan for markup (an id,
+// a data- attribute) can never accidentally match against JS source instead.
+const CLIENT = jsFiles.map(f => fs.readFileSync(f, "utf8")).join("\n");
+const MARKUP = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
 const CORE = fs.readdirSync(path.join(__dirname, "..", "src", "core", "room"))
   .filter(f => f.endsWith(".js"))
   .map(f => fs.readFileSync(path.join(__dirname, "..", "src", "core", "room", f), "utf8"))
@@ -57,41 +63,18 @@ test("client covers every server->client message kind", () => {
 });
 
 test("client option lists match the core's validated choices", () => {
-  const clientEmotes = matchAll(
-    (CLIENT.match(/const EMOTES = \[([^\]]+)\]/) || [, ""])[1], /"([^"]+)"/, 1);
-  assert.deepStrictEqual(clientEmotes, R.EMOTES, "emote bar must match the room core's EMOTES exactly");
-
-  const diffs = matchAll((CLIENT.match(/const DIFF_OPTS = (\[.*\]);/) || [, ""])[1], /\["([a-z]+)",/, 1);
-  assert.deepStrictEqual(diffs, R.DIFFICULTIES);
-
-  const deals = (CLIENT.match(/const DEAL_OPTS = \[([^\]]+)\]/) || [, ""])[1].split(",").map(Number);
-  assert.deepStrictEqual(deals, R.TARGET_DEAL_CHOICES);
-
-  const timers = (CLIENT.match(/const TIMER_OPTS = \[([^\]]+)\]/) || [, ""])[1].split(",").map(Number);
-  assert.deepStrictEqual(timers, R.TURN_TIMER_CHOICES);
+  assert.deepStrictEqual(EMOTES, R.EMOTES, "emote bar must match room constants exactly");
+  assert.deepStrictEqual(DIFF_OPTS.map(o => o[0]), R.DIFFICULTIES);
+  assert.deepStrictEqual(DEAL_OPTS, R.TARGET_DEAL_CHOICES);
+  assert.deepStrictEqual(TIMER_OPTS, R.TURN_TIMER_CHOICES);
 });
 
 /* ------------------------------------------------------------------
-   Behavioural tests. The client is one hand-written HTML file, so there
-   is no module to import — but a self-contained function can be lifted
-   out of the <script> by name and run for real in a vm with a toy DOM.
-   That beats asserting on its source text, which proves nothing.
+   Behavioural tests. syncWindow and esc are real exports now (imported
+   above), so they run for real here instead of being lifted out of source
+   text and sandboxed in a vm — that beats asserting on source text, which
+   proves nothing about whether the code actually works.
    ------------------------------------------------------------------ */
-function lift(name) {
-  const at = CLIENT.indexOf(`function ${name}(`);
-  assert.ok(at > 0, `client has no function ${name}`);
-  let depth = 0, i = CLIENT.indexOf("{", at);
-  const start = i;
-  for (; i < CLIENT.length; i++) {
-    if (CLIENT[i] === "{") depth++;
-    else if (CLIENT[i] === "}" && --depth === 0) break;
-  }
-  const src = CLIENT.slice(at, i + 1);
-  assert.ok(src.length > start - at, "extracted a body");
-  const ctx = { module: {} };
-  vm.runInNewContext(`${src}; module.fn = ${name};`, ctx);
-  return ctx.module.fn;
-}
 
 /* Minimal stand-in for the handful of node operations syncWindow touches. */
 function fakeBox() {
@@ -107,7 +90,6 @@ function fakeBox() {
 }
 
 test("syncWindow appends only what is new (aria-live must not re-announce the backlog)", () => {
-  const syncWindow = lift("syncWindow");
   const box = fakeBox();
   const build = keys => i => ({ v: keys[i] });
 
@@ -147,7 +129,6 @@ test("syncWindow appends only what is new (aria-live must not re-announce the ba
 });
 
 test("syncWindow survives a whole match's worth of log windows", () => {
-  const syncWindow = lift("syncWindow");
   const box = fakeBox();
   const all = [];
   for (let i = 0; i < 500; i++) {
@@ -159,7 +140,6 @@ test("syncWindow survives a whole match's worth of log windows", () => {
 });
 
 test("esc() neutralises every character that can break out of markup", () => {
-  const esc = lift("esc");
   assert.equal(esc(`<script>alert(1)</script>`), "&lt;script&gt;alert(1)&lt;/script&gt;");
   assert.equal(esc(`" onerror="x`), "&quot; onerror=&quot;x");
   assert.equal(esc(`' onerror='x`), "&#39; onerror=&#39;x", "single quotes matter: names land in attributes");
