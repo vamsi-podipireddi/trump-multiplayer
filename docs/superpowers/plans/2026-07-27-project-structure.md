@@ -1864,8 +1864,16 @@ test("client option lists match the core's validated choices", () => {
 ```js
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { rankLabel, cardStr, cardName, SUIT_KEY } from "../app/js/cards/labels.js";
+import { rankLabel, cardStr, cardName, SUIT_KEY, SUIT_PATH } from "../app/js/cards/labels.js";
 import { cardFace } from "../app/js/cards/deck.js";
+
+/* Oracles declared HERE, not imported. Building the expected value from
+   labels.js's own SUIT_NAME/RANK_NAME/SUIT_KEY would be tautological: both
+   sides of the assertion would read the same broken entry if the table were
+   wrong. */
+const SUIT_WORD  = { "♠": "spades", "♥": "hearts", "♦": "diamonds", "♣": "clubs" };
+const RANK_WORD  = { 14: "ace", 13: "king", 12: "queen", 11: "jack" };
+const SUIT_CLASS = { "♠": "s", "♥": "h", "♦": "d", "♣": "c" };
 
 test("rank labels cover courts and pips", () => {
   assert.equal(rankLabel(14), "A");
@@ -1877,11 +1885,12 @@ test("rank labels cover courts and pips", () => {
 
 test("cardStr and cardName agree on every card in the deck", () => {
   for (const suit of ["♠", "♥", "♦", "♣"]) {
-    assert.ok(SUIT_KEY[suit], `no CSS key for ${suit}`);
+    assert.equal(SUIT_KEY[suit], SUIT_CLASS[suit], `wrong CSS key for ${suit}`);
     for (let rank = 2; rank <= 14; rank++) {
       assert.equal(cardStr({ suit, rank }), rankLabel(rank) + suit);
       const name = cardName({ suit, rank });
-      assert.ok(/ of /.test(name), `unreadable screen-reader name: ${name}`);
+      assert.equal(name, `${RANK_WORD[rank] || rank} of ${SUIT_WORD[suit]}`,
+        `wrong screen-reader name for ${rank}${suit}: ${name}`);
     }
   }
 });
@@ -1891,7 +1900,7 @@ test("cardFace draws every card without throwing, and marks its suit", () => {
     for (let rank = 2; rank <= 14; rank++) {
       const svg = cardFace({ suit, rank });
       assert.ok(typeof svg === "string" && svg.length > 0, `empty face for ${rank}${suit}`);
-      assert.ok(svg.includes(SUIT_KEY[suit]), `${rank}${suit} carries no suit class`);
+      assert.ok(svg.includes(SUIT_PATH[suit]), `${rank}${suit} does not draw the ${suit} pip shape`);
     }
   }
 });
