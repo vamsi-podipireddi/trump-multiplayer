@@ -4,10 +4,13 @@ import { SUITS, RED, SUIT_NAME, SUIT_KEY, cardName, suitSvg, suitSpan, cardSpan 
 import { cardFace } from "../cards/deck.js";
 import { send } from "../net.js";
 
-/* Private mirrors of index.html's activeSeat()/sideOf(seat) — both pure functions
-   of S.view that index.html's renderGame()/renderScoreboard() also use. Duplicated
-   rather than shared: index.html isn't an importable module, so there is no way to
-   export these from here and have index.html reach back in. */
+/* Private mirrors of screens/game.js's activeSeat()/sideOf(seat) — both pure
+   functions of S.view that game.js's renderGame()/renderScoreboard() also use.
+   Duplicated rather than imported: game.js already imports renderActionBar from
+   this file, so importing activeSeat/sideOf back from game.js would make the
+   two files import each other: screens/game.js -> ui/actionbar.js ->
+   screens/game.js. Small, pure, S-only functions; two copies are cheaper than
+   a cycle. */
 function activeSeat() {
   if (S.view.phase === "playing") return S.view.turn;
   if (S.view.phase === "bidding") return S.view.bidTurn;

@@ -1,13 +1,18 @@
 import { S, myUid, mintCode, leaveRoom } from "./session.js";
 import { $, toast } from "./util/dom.js";
 
-/* `render()` is a UI function that still lives in the inline script and is not
-   a module (a later task may change that). `showEmote()` did become a module
-   (ui/chat.js), but net.js still can't import it directly: chat.js imports
-   send() from net.js, so the reverse import would be a cycle. Either way, net.js
-   cannot reach these without the page registering them. The inline script
-   registers the real functions once at boot; until then these are no-ops,
-   so a message arriving before that registration is inert, not a crash. */
+/* render() (screens/game.js) and showEmote() (ui/chat.js) are both real
+   modules now, but net.js still can't import either directly without becoming
+   part of a cycle. showEmote() is the simpler case: ui/chat.js imports send()
+   from here directly, so the reverse import would be net.js -> ui/chat.js ->
+   net.js. render()'s case is the same shape reached a longer way: game.js's
+   renderGame()/render() call into ui/actionbar.js, ui/hand.js, ui/layout.js,
+   screens/lobby.js and ui/modals.js, every one of which imports send() or
+   serverNow() from here, so net.js -> screens/game.js -> any of those ->
+   net.js. Either way, net.js cannot reach these without the page registering
+   them. main.js registers the real functions once at boot; until then these
+   are no-ops, so a message arriving before that registration is inert, not a
+   crash. */
 let onView = () => {};
 function setViewHandler(fn) { onView = fn; }
 let onEmote = () => {};

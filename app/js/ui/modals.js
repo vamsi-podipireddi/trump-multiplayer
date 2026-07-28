@@ -2,16 +2,20 @@ import { S } from "../session.js";
 import { $, esc } from "../util/dom.js";
 import { icon } from "../cards/icons.js";
 import { send } from "../net.js";
+import { renderSettings } from "../screens/lobby.js";
 
-/* showHelp() and showSettingsModal() close by calling back into render() and
-   renderSettings(), two functions that still live in index.html and are not
-   modules (a later task may change that). Same registration seam net.js uses
-   for render()/showEmote(): index.html wires the real functions once at boot;
-   until then these are safe no-ops. */
+/* showHelp() and showSettingsModal() close by calling back into render(),
+   which now lives in screens/game.js. It still needs the same registration
+   seam net.js uses (see net.js): game.js already imports showMatchOver/
+   hideOverlay/showSettingsModal from this file (render() and renderScoreboard()
+   both call into ui/modals.js), so importing render() back here would make the
+   two files import each other. main.js registers the real render() once at
+   boot; until then this is a safe no-op.
+   renderSettings() (screens/lobby.js) needs no such seam and is imported
+   directly above: lobby.js never imports this file, or anything that does, so
+   there is no cycle to close. */
 let onRender = () => {};
 function setRenderHandler(fn) { onRender = fn; }
-let onRenderSettings = () => {};
-function setRenderSettingsHandler(fn) { onRenderSettings = fn; }
 
 function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").dataset.kind = kind; $("overlay").classList.add("show"); }
 function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
@@ -44,8 +48,8 @@ function showHelp() {
 }
 function showSettingsModal() {
   setModal("settings", `<h2>Table Settings</h2><div id="modal-settings" style="text-align:left;"></div><button id="btn-close-set">Done</button>`);
-  onRenderSettings($("modal-settings"), !!S.view.room.isHost);
+  renderSettings($("modal-settings"), !!S.view.room.isHost);
   $("btn-close-set").onclick = () => { hideOverlay(); onRender(); };
 }
 
-export { setModal, hideOverlay, showMatchOver, showHelp, showSettingsModal, setRenderHandler, setRenderSettingsHandler };
+export { setModal, hideOverlay, showMatchOver, showHelp, showSettingsModal, setRenderHandler };
