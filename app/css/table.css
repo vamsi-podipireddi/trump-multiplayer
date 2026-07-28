@@ -185,16 +185,22 @@
      across a file boundary. Only --dia-4c/--club-4c themselves are tokens. */
   body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:var(--dia-4c); }
   body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:var(--club-4c); }
-  /* .colophon .su and .colophon .su + .su (its sibling-spacing rule) are
-     order-dependent with .sc .su just below: all three are specificity (0,2,0)
-     and the wordmark's suit glyphs are literally .colophon > .sc > svg.su, so
-     they compete for the exact same <svg class="su"> and whichever comes LAST
-     wins. Moved here from panels.css (where the rest of .colophon still lives —
-     see the wordmark section there) purely to keep this trio in its original
-     relative order across the file split: in the one stylesheet, .colophon .su
-     preceded .sc .su, so .sc .su's .82em size (~13.1px) won over this rule's
-     fixed 11px. Keep these two rules directly before .sc .su; do not separate
-     or reorder any of the three. */
+  /* .colophon .su and .sc .su (just below) are the order-dependent pair: both
+     are specificity (0,2,0) — one class from the ancestor, one from .su itself
+     — and both size the exact same element (the wordmark's suit glyphs are
+     literally .colophon > .sc > svg.su), so whichever comes LAST wins
+     width/height. Moved here from panels.css (where the rest of .colophon
+     still lives — see the wordmark section there) purely to keep this pair in
+     its original relative order across the file split: in the one stylesheet,
+     .colophon .su preceded .sc .su, so .sc .su's .82em size (~13.1px) won over
+     this rule's fixed 11px. Keep .colophon .su directly before .sc .su; do not
+     separate or reorder the two.
+     .colophon .su + .su, just below, is NOT part of that dependency: it's
+     (0,3,0) — three class selectors (.colophon, the first .su, the subject
+     .su); the + combinator itself adds nothing — so it outranks both of the
+     above regardless of position and needs no particular order to win. It
+     sets only margin-left and sits here as .colophon .su's sibling-spacing
+     companion (same component), not for any cascade reason. */
   .colophon .su { width:11px; height:11px; opacity:.85; }
   .colophon .su + .su { margin-left:7px; }
   /* a suit named inside a sentence: the log, the medallion, a chip */

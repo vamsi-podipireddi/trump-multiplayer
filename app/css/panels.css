@@ -23,10 +23,11 @@
   .colophon { display:flex; align-items:center; gap:12px; margin:12px 0 6px; color:var(--gold-dim); }
   .colophon .bar { display:block; width:clamp(34px,9vw,64px); height:1px; background:linear-gradient(90deg,transparent,var(--line-gold)); }
   .colophon .bar:last-child { background:linear-gradient(270deg,transparent,var(--line-gold)); }
-  /* .colophon .su and .colophon .su + .su (suit-glyph sizing) now live in
-     table.css, directly before .sc .su — the three rules are order-dependent
-     at equal specificity (all match .colophon > .sc > svg.su) and must stay
-     together in that order; see the comment there. */
+  /* .colophon .su (suit-glyph sizing) now lives in table.css, directly before
+     .sc .su — the two are order-dependent at equal specificity (0,2,0) and
+     must stay in that order; see the comment there. .colophon .su + .su
+     moved alongside it too (same component), but at (0,3,0) it isn't part of
+     that cascade dependency. */
   .lede { margin:0; max-width:36ch; text-align:center; font-size:var(--t-md); line-height:1.6; color:var(--txt-2); }
 
   .panel { background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line-2); border-radius:var(--r-lg);
