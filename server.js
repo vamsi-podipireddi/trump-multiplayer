@@ -1,6 +1,6 @@
 /* ============================================================
    TRUMP — node adapter (HTTP static + WebSocket realtime).
-   All room/game logic lives in room.js (shared with the Cloudflare
+   All room/game logic lives in src/core/room/ (shared with the Cloudflare
    Durable Object adapter). This file owns: sockets, timers, static
    files, rate limits, Origin checks, per-IP caps, room registry.
    Run:  npm install && node server.js   then open the printed URL.
@@ -11,7 +11,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
-import * as R from "./room.js";
+import * as R from "./src/core/room/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

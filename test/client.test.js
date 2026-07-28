@@ -2,9 +2,10 @@
    Client <-> core protocol contract.
 
    The client is a single hand-written HTML file, so nothing but a test
-   stops it drifting from room.js: a renamed message type or a new emote
-   would fail silently at runtime (the server ignores unknown types).
-   These tests read both files as text and compare the two vocabularies.
+   stops it drifting from the room core: a renamed message type or a new
+   emote would fail silently at runtime (the server ignores unknown types).
+   These tests read the client and the room core as text and compare the
+   two vocabularies.
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert";
@@ -12,11 +13,14 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 import { fileURLToPath } from "node:url";
-import * as R from "../room.js";
+import * as R from "../src/core/room/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
-const CORE = fs.readFileSync(path.join(__dirname, "..", "room.js"), "utf8");
+const CORE = fs.readdirSync(path.join(__dirname, "..", "src", "core", "room"))
+  .filter(f => f.endsWith(".js"))
+  .map(f => fs.readFileSync(path.join(__dirname, "..", "src", "core", "room", f), "utf8"))
+  .join("\n");
 
 const uniq = a => [...new Set(a)].sort();
 function matchAll(text, re, group) {
@@ -31,11 +35,11 @@ test("every message type the client sends is handled by the room core", () => {
     .concat(matchAll(CLIENT, /ws\.send\(JSON\.stringify\(\{\s*type:\s*"([a-zA-Z]+)"/, 1)));
   const handled = new Set(matchAll(CORE, /case "([a-zA-Z]+)":/, 1).concat(["join"]));
   assert.ok(sent.length >= 12, `expected the client to speak the full protocol, saw: ${sent.join(",")}`);
-  for (const t of sent) assert.ok(handled.has(t), `client sends "${t}" but room.js has no handler`);
+  for (const t of sent) assert.ok(handled.has(t), `client sends "${t}" but the room core has no handler`);
 });
 
 test("client covers every server->client message kind", () => {
-  // room.js/adapters only ever push these four shapes
+  // the room core/adapters only ever push these four shapes
   for (const kind of ["joined", "state", "emote", "error"])
     assert.ok(new RegExp(`m\\.type === "${kind}"`).test(CLIENT), `client onMsg ignores "${kind}"`);
 });
@@ -43,7 +47,7 @@ test("client covers every server->client message kind", () => {
 test("client option lists match the core's validated choices", () => {
   const clientEmotes = matchAll(
     (CLIENT.match(/const EMOTES = \[([^\]]+)\]/) || [, ""])[1], /"([^"]+)"/, 1);
-  assert.deepStrictEqual(clientEmotes, R.EMOTES, "emote bar must match room.js EMOTES exactly");
+  assert.deepStrictEqual(clientEmotes, R.EMOTES, "emote bar must match the room core's EMOTES exactly");
 
   const diffs = matchAll((CLIENT.match(/const DIFF_OPTS = (\[.*\]);/) || [, ""])[1], /\["([a-z]+)",/, 1);
   assert.deepStrictEqual(diffs, R.DIFFICULTIES);
@@ -178,7 +182,10 @@ test("client only reads view fields the core actually publishes", () => {
 
 test("client handles every error code the core can send", () => {
   const codes = matchAll(
-    fs.readFileSync(path.join(__dirname, "..", "room.js"), "utf8"),
+    fs.readdirSync(path.join(__dirname, "..", "src", "core", "room"))
+      .filter(f => f.endsWith(".js"))
+      .map(f => fs.readFileSync(path.join(__dirname, "..", "src", "core", "room", f), "utf8"))
+      .join("\n"),
     /code: "([a-z-]+)"/, 1);
   assert.ok(codes.length >= 2, "expected the core to define error codes");
   for (const c of uniq(codes))

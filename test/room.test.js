@@ -2,7 +2,7 @@
    Everything runs on a simulated clock — the core never calls Date.now(). */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as R from "../room.js";
+import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 
 const rnd = (n) => Math.floor(Math.random() * n);

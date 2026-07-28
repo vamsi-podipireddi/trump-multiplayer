@@ -2,7 +2,7 @@
    TRUMP — Cloudflare Worker + Durable Object adapter.
 
    One Durable Object per room (addressed by room code via idFromName).
-   Room/game logic lives in room.js (shared with server.js); this file
+   Room/game logic lives in src/core/room/ (shared with server.js); this file
    owns the platform bits:
 
    - WebSocket HIBERNATION API (ctx.acceptWebSocket + webSocketMessage/
@@ -12,11 +12,11 @@
    - PERSISTENCE: the whole room state (pure JSON) is written to
      ctx.storage after every event and restored on wake — matches
      survive deploys, evictions, and restarts.
-   - ALARMS: room.js models timers as data; we arm one storage alarm
+   - ALARMS: the room core models timers as data; we arm one storage alarm
      for the earliest due timer. Alarms fire even while hibernated.
    ============================================================ */
 
-import * as R from "../room.js";
+import * as R from "./core/room/index.js";
 
 const MSG_RATE = 100; // msgs/sec per socket
 

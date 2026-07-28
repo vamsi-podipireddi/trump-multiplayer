@@ -6,7 +6,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as E from "../app/js/core/engine/index.js";
-import * as R from "../room.js";
+import * as R from "../src/core/room/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -100,7 +100,7 @@ function playMatch(chooser, maxSteps = 200000) {
 /* The deal must not come off Math.random. V8's generator is xorshift128+ and its
    state is recoverable from a handful of outputs — and a player observes plenty
    of them, since the cards they are dealt *are* the output. Sharing that stream
-   would leak future deals and (via room.js) other players' session tokens.
+   would leak future deals and (via the room core) other players' session tokens.
    Pinning Math.random to a constant is the sharpest test available: anything
    still drawing from it degenerates, anything on the CSPRNG is unaffected. */
 test("dealing and token minting never draw on Math.random", () => {

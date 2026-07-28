@@ -2,7 +2,7 @@
    The deal must not come off the same stream as anything an opponent can
    observe. V8's Math.random is xorshift128+, and its state is recoverable from
    a handful of outputs — i.e. from the cards a player is dealt — which would
-   leak both future deals and room.js's session tokens. Dealing therefore uses
+   leak both future deals and the room core's session tokens. Dealing therefore uses
    the platform CSPRNG (present in node >=19 and in Workers), with rejection
    sampling so the modulo is unbiased. AI-internal randomness has nothing to
    protect and stays on the cheap generator. */
