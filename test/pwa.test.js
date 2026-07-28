@@ -262,10 +262,25 @@ test("the hand keeps keyboard focus across re-renders", () => {
 });
 
 test("generated assets are in sync with their sources", () => {
-  /* solo.html is a copy and the service worker's cache VERSION is a hash of the
-     shell; both used to be maintained by hand, so both could silently go stale.
-     scripts/build-assets.js owns them now. */
+  /* the service worker's precache SHELL and its cache VERSION are both derived
+     from app/'s own contents; either used to be maintained by hand, so either
+     could silently go stale. scripts/build-assets.js owns them now. */
   assert.deepStrictEqual(check(), [], "run: npm run build:assets");
   assert.ok(/const VERSION = "trump-[0-9a-f]{12}";/.test(SW),
     "sw VERSION must be the generated content hash, not a hand-edited constant");
+});
+
+test("every shipped js and css file is precached", () => {
+  const shell = (SW.match(/const SHELL = \[([\s\S]*?)\];/) || [, ""])[1]
+    .match(/"([^"]+)"/g).map(s => s.slice(1, -1));
+  // app/css doesn't exist yet (a later task creates it) and app/js keeps
+  // growing (later tasks add to it) — walk tolerates a missing directory so
+  // this test needs no changes when either lands.
+  const walk = (dir, base = "") => fs.existsSync(path.join(PUB, dir))
+    ? fs.readdirSync(path.join(PUB, dir), { withFileTypes: true }).flatMap(e => e.isDirectory()
+        ? walk(path.join(dir, e.name), base + e.name + "/")
+        : [base + e.name])
+    : [];
+  for (const rel of [...walk("js").map(f => "/js/" + f), ...walk("css").map(f => "/css/" + f)])
+    assert.ok(shell.includes(rel), `sw does not precache ${rel}`);
 });
