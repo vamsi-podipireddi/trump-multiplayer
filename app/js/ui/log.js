@@ -25,9 +25,13 @@ function syncWindow(box, keys, build) {
   box._winKeys = keys;
   return keys.length - keep; // rows actually added
 }
-function renderLog() {
+/* view defaults to the multiplayer session so screens/game.js's call site (no
+   arguments) is unchanged; solo.js passes it explicitly instead of populating
+   S — see app/js/solo.js. */
+function renderLog(view) {
+  view = view || S.view;
   const el = $("log");
-  const entries = S.view.log || [];
+  const entries = view.log || [];
   const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
     const d = document.createElement("div");
     const cls = entries[i].cls || "";

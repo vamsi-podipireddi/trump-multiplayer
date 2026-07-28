@@ -9,12 +9,18 @@ import { send } from "../net.js";
    order means your ace of hearts is in the same place every single deal —
    the engine's habit of shuffling trump to the end moved it mid-hand. */
 const HAND_ORDER = { "♠":0, "♥":1, "♣":2, "♦":3 };
-function renderHand() {
+/* view/onPlay default to the multiplayer session/socket so screens/game.js's
+   call site (no arguments) is unchanged; solo.js passes both explicitly
+   instead of populating S — solo has no session, and writing to S from there
+   would couple the two clients (see app/js/solo.js). */
+function renderHand(view, onPlay) {
+  view = view || S.view;
+  onPlay = onPlay || (card => send({ type: "play", card }));
   const wrap = $("my-hand");
-  const hand = ((S.view.you && S.view.you.hand) || []).slice()
+  const hand = ((view.you && view.you.hand) || []).slice()
     .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank));
-  const canPlay = S.view.you.toAct && S.view.you.actKind === "play";
-  const legalKey = new Set((canPlay ? (S.view.you.legal || []) : []).map(x => x.suit + x.rank));
+  const canPlay = view.you.toAct && view.you.actKind === "play";
+  const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
 
   /* Rebuilding the hand blows away keyboard focus, and a state message arrives
      for every action at the table — including other people's chat. Skip the
@@ -22,7 +28,7 @@ function renderHand() {
      focus back on the same card (or its position) instead of dropping the user
      out to <body> mid-turn. */
   const sig = JSON.stringify([hand.map(c => c.suit + c.rank), canPlay, [...legalKey].sort(),
-                              S.view.trump, S.view.bonusSuit, S.view.leadSuit]);
+                              view.trump, view.bonusSuit, view.leadSuit]);
   if (wrap._sig === sig) return;
   wrap._sig = sig;
   const active = document.activeElement;
@@ -35,17 +41,17 @@ function renderHand() {
     const el = cardEl(card, true);              // real <button>: Tab to reach it, Enter/Space to play
     if (i > 0 && hand[i - 1].suit !== card.suit) el.classList.add("suit-start"); // seam between suits
     const notes = [];
-    if (S.view.trump && card.suit === S.view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
-    if (S.view.bonusSuit && card.suit === S.view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
+    if (view.trump && card.suit === view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
+    if (view.bonusSuit && card.suit === view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
     let label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
     if (canPlay) {
       if (legalKey.has(card.suit + card.rank)) {
-        el.classList.add("playable"); el.onclick = () => send({ type: "play", card });
+        el.classList.add("playable"); el.onclick = () => onPlay(card);
         label = "Play " + label;
       } else {
         el.classList.add("illegal");
         el.setAttribute("aria-disabled", "true");
-        el.title = label = `${label} — you must follow ${SUIT_NAME[S.view.leadSuit] || S.view.leadSuit}`;
+        el.title = label = `${label} — you must follow ${SUIT_NAME[view.leadSuit] || view.leadSuit}`;
       }
     } else {
       // still focusable (so the hand can be read out) but inert

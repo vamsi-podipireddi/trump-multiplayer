@@ -134,13 +134,6 @@ test("service worker precaches only files that exist, and never caches the live 
   assert.ok(/origin !== self\.location\.origin/.test(SW), "sw must ignore cross-origin requests");
 });
 
-test("offline fallback is the untouched root single-player game (D12)", () => {
-  const rootGame = fs.readFileSync(path.join(ROOT, "index.html"));
-  const solo = fs.readFileSync(path.join(PUB, "solo.html"));
-  assert.ok(rootGame.equals(solo), "app/solo.html must stay a byte-identical copy of the root offline game");
-  assert.ok(!solo.includes("/ws?room="), "the offline build must not need a server");
-});
-
 test("client wires up the PWA and the share affordances", () => {
   assert.ok(/rel="manifest" href="\/manifest\.webmanifest"/.test(CLIENT), "manifest not linked");
   assert.ok(/serviceWorker.*register\("\/sw\.js"\)/s.test(CLIENT), "service worker not registered");

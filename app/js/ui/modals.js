@@ -21,21 +21,32 @@ function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").datase
 function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
 
 // ---------- modals ----------
-function showMatchOver() {
-  const max = Math.max(...S.view.scores);
-  const champs = [0,1,2,3].filter(p => S.view.scores[p] === max);
-  const youWon = S.mySeat != null && champs.includes(S.mySeat);
-  const standings = [0,1,2,3].slice().sort((a,b)=>S.view.scores[b]-S.view.scores[a]).map(p =>
-    `<div class="${S.mySeat!=null&&p===S.mySeat?"me":""}"><span>${esc(S.view.names[p])}${S.mySeat!=null&&p===S.mySeat?" (you)":""}</span>` +
-    `<span>${S.view.scores[p]} deal${S.view.scores[p]===1?"":"s"}</span></div>`).join("");
-  let btn = S.view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(S.view.room.hostName||"host")} to start a new match…</p>`;
+/* view/onRematch default to the multiplayer session/socket so screens/game.js's
+   call site (no arguments) is unchanged; solo.js passes both explicitly
+   instead of populating S — solo has no session, and writing to S from there
+   would couple the two clients (see app/js/solo.js). */
+function showMatchOver(view, onRematch) {
+  view = view || S.view;
+  onRematch = onRematch || (() => send({ type: "newMatch" }));
+  const mySeat = view.you ? view.you.seat : null;
+  const max = Math.max(...view.scores);
+  const champs = [0,1,2,3].filter(p => view.scores[p] === max);
+  const youWon = mySeat != null && champs.includes(mySeat);
+  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p =>
+    `<div class="${mySeat!=null&&p===mySeat?"me":""}"><span>${esc(view.names[p])}${mySeat!=null&&p===mySeat?" (you)":""}</span>` +
+    `<span>${view.scores[p]} deal${view.scores[p]===1?"":"s"}</span></div>`).join("");
+  let btn = view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
   setModal("match",
-    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>S.view.names[p]).join(" & ")) + " win the match"}</p>` +
-    `<p>First to ${S.view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
-  if (S.view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
+    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>view.names[p]).join(" & ")) + " win the match"}</p>` +
+    `<p>First to ${view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
+  if (view.room.isHost) $("btn-rematch").onclick = onRematch;
 }
-function showHelp() {
-  const c = (S.view && S.view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
+/* view likewise defaults to S.view; solo.js passes its own instead (see
+   app/js/solo.js), so the TARGET_GAMES/MIN_BID copy below matches whatever
+   targetDeals the player actually picked rather than this hardcoded fallback. */
+function showHelp(view) {
+  view = view || S.view;
+  const c = (view && view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
   setModal("help",
     `<h2>How to Play TRUMP</h2><ul class="how">` +
     `<li>4 seats; you take an open one and any empty seats are AI. The deck holds <b>${c.TOTAL_POINTS} points</b>: A/K/Q/J/10 = 10 each, every 5 = 5, one random suit's <b>3 = 30</b> (announced before bidding).</li>` +
