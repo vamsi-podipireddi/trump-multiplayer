@@ -23,36 +23,13 @@
    ============================================================ */
 
 import * as E from "./app/js/core/engine/index.js";
-
-const SEAT_LABEL = ["South", "West", "North", "East"];
-const EMOTES = ["👏", "😂", "😱", "🔥", "🤝", "💀"];
-const DIFFICULTIES = ["easy", "normal", "hard"];
-const TARGET_DEAL_CHOICES = [3, 5, 7];
-const TURN_TIMER_CHOICES = [0, 15, 30, 45, 60, 90];
-const MAX_PLAYERS_PER_ROOM = 12;
-const CHAT_MAX_LEN = 200, CHAT_RING = 50, NAME_MAX = 16, MAX_KICKED = 64;
-
-const DEFAULT_DELAYS = {
-  ai: 800,          // AI "thinking" pause
-  trick: 1600,      // show a completed trick
-  round: 30000,     // roundEnd fallback when not everyone clicks ready
-  drop: 15000,      // hold a lobby seat through a brief disconnect
-  expire: 30 * 60 * 1000, // delete a room this long after it empties
-};
-
-// ---- small helpers ----
-function codePoints(s, n) { return [...String(s)].slice(0, n).join(""); } // don't split emoji
-function cleanName(s) { return codePoints(String(s || "").trim(), NAME_MAX) || "Player"; }
-function normCode(s) { return String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8); }
-/* playerId is a bearer token and a private room code is a secret, so both come
-   off the CSPRNG (E.randomInt) rather than Math.random — see the note there.
-   `rng` stays available for tests that need a reproducible sequence. */
-function randId(n, alpha, rng) {
-  const chars = alpha ? "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" : "abcdefghijklmnopqrstuvwxyz0123456789";
-  const pick = rng ? () => Math.floor(rng() * chars.length) : () => E.randomInt(chars.length);
-  let out = ""; for (let i = 0; i < n; i++) out += chars[pick()];
-  return out;
-}
+import { SEAT_LABEL, EMOTES, DIFFICULTIES, TARGET_DEAL_CHOICES, TURN_TIMER_CHOICES,
+         MAX_PLAYERS_PER_ROOM, CHAT_MAX_LEN, CHAT_RING, MAX_KICKED,
+         DEFAULT_DELAYS } from "./src/core/room/constants.js";
+import { codePoints, cleanName, normCode, randId } from "./src/core/room/ids.js";
+import { playerList, connectedCount, seatIsLiveHuman, seatedHumans, reassignHost,
+         promoteSpectators, releaseSeat, resetReady, freeSeatFor,
+         applyPendingSeats } from "./src/core/room/seats.js";
 
 function createRoom(code, opts) {
   return {
@@ -70,62 +47,6 @@ function createRoom(code, opts) {
   };
 }
 
-function playerList(room) { return Object.entries(room.players); }
-function connectedCount(room) { let n = 0; for (const [, p] of playerList(room)) if (p.connected) n++; return n; }
-function seatIsLiveHuman(room, seat) {
-  const owner = room.seatOwner[seat];
-  const p = owner != null ? room.players[owner] : null;
-  return !!(p && p.connected && !p.away);
-}
-function seatedHumans(room) {
-  return playerList(room).filter(([, p]) => p.seat != null);
-}
-
-function reassignHost(room) {
-  const cur = room.host != null ? room.players[room.host] : null;
-  if (cur && cur.connected) return;
-  let next = null;
-  for (const [pid, p] of playerList(room)) if (p.connected && p.seat != null) { next = pid; break; }
-  if (!next) for (const [pid, p] of playerList(room)) if (p.connected) { next = pid; break; }
-  room.host = next;
-}
-function promoteSpectators(room, excludePid) {
-  if (room.started) return;
-  for (let s = 0; s < 4; s++) if (room.seatOwner[s] == null) {
-    for (const [pid, p] of playerList(room))
-      if (p.connected && p.seat == null && pid !== excludePid) { room.seatOwner[s] = pid; p.seat = s; break; }
-  }
-}
-function releaseSeat(room, pid) {
-  const p = room.players[pid];
-  if (!p || p.seat == null) return;
-  const seat = p.seat;
-  room.seatOwner[seat] = null;
-  p.seat = null; p.ready = false;
-  if (room.started) room.G.names[seat] = `Bot-${SEAT_LABEL[seat][0]}`;
-}
-function resetReady(room) { for (const [, p] of playerList(room)) p.ready = false; }
-
-/* ---- deferred seating (the hand-secrecy boundary) ----
-   Sitting down reveals that seat's hand. Mid-match that has to wait for a deal
-   boundary: otherwise one player can stand, sit somewhere else, and read a
-   second hand — repeat and they see the whole table. Joiners and sitters are
-   parked in `wantSeat` and dealt in by applyPendingSeats() on the next deal. */
-function freeSeatFor(room) {
-  const wanted = new Set(playerList(room).map(([, p]) => p.wantSeat).filter(s => s != null));
-  for (let s = 0; s < 4; s++) if (room.seatOwner[s] == null && !wanted.has(s)) return s;
-  return null;
-}
-function applyPendingSeats(room) {
-  for (const [pid, p] of playerList(room)) {
-    if (p.wantSeat == null) continue;
-    const seat = p.wantSeat;
-    p.wantSeat = null;
-    if (p.seat != null || !p.connected || room.seatOwner[seat] != null) continue; // lost the race
-    room.seatOwner[seat] = pid; p.seat = seat; p.ready = false;
-    if (room.started) room.G.names[seat] = p.name;
-  }
-}
 /* Everything that starts a new deal must hand out the parked seats with it. */
 function dealNext(room) { E.nextDeal(room.G); resetReady(room); applyPendingSeats(room); }
 
