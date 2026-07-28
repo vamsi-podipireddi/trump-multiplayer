@@ -15,6 +15,11 @@
 - **No new runtime dependencies.** `ws` stays the only one. No bundler, no transpiler, no framework.
 - **No new devDependencies.** `wrangler` stays the only one.
 - **ES modules everywhere.** Root `package.json` has `"type": "module"`. Every relative import carries an explicit `.js` extension — required by both Node's ESM resolver and browsers.
+- **Client module-to-module imports use RELATIVE specifiers** (`./labels.js`, `../core/engine/index.js`), never absolute `/js/...`. Absolute paths appear in exactly one place: the `<script type="module" src="/js/main.js">` tag in each HTML shell.
+
+  This is not style. A browser resolves both forms identically — relative resolves against the *importing module's* URL, which is depth-stable no matter which HTML page loaded it. But Node resolves `/js/...` against the **filesystem root**, so a single absolute specifier anywhere in the graph makes the whole module tree unimportable from a test. That is why the client tests are text scans, and it is how a missing `SUIT_PATH` export shipped past all 72 tests in Task 13 and surfaced only on a browser load. Relative specifiers make the client modules genuinely importable in `node --test`, which is what lets Task 20 unit-test them for real.
+
+  **Compute the depth from the importing file, not from this plan.** The sample import lines below name the right *target module*, but their `./` vs `../` prefixes were written for one directory level and are not correct from every location — `app/js/main.js` reaches `util/dom.js` as `./util/dom.js`, while `app/js/cards/deck.js` reaches it as `../util/dom.js`. Treat every sample's path prefix as a placeholder to recompute. The `test/client-modules.test.js` load check added in Task 14 catches a wrong depth immediately, so run it after any import edit.
 - **`npm test` must pass at the end of every task.** A task is not done until it does.
 - **Leave the `test` script as `node --test`** (bare, no path argument). A path argument fails on Node 24 with `MODULE_NOT_FOUND` — it tries to `require()` the directory as an entry point. The bare form discovers the same 70 tests on Node 20, 22 and 24. Single test files still take an explicit path (`node --test test/engine.test.js`), which works on every version.
 - **No gameplay, protocol, or wire-format changes** in Tasks 1–20. The only intentional behaviour change in the whole plan is Task 21 (solo on the shared engine).
@@ -1152,7 +1157,7 @@ Move `$` and `esc` from the helpers section (~lines 1802-1816), `toast` and its 
 /* A card's name has one definition, shared with the server and the solo game.
    The rest of this file is display-layer only: markup, CSS keys, and the
    screen-reader spellings the engine has no reason to know about. */
-export { SUITS, rankLabel, cardStr } from "/js/core/engine/index.js";
+export { SUITS, rankLabel, cardStr } from "../core/engine/index.js";
 ```
 
 Then move only the display-layer pieces: `RED` (828), `RANK_NAME`/`SUIT_NAME`/`SUIT_KEY`/`cardName` (~1112-1116), `suitSvg` (~1132), `suitSpan`/`cardSpan`/`textWithCards` (~1807-1814). Delete the client's own `SUITS`/`rankLabel`/`cardStr` definitions at lines 828-831.
@@ -1193,12 +1198,12 @@ Move `setFourColor` (~1857-1865) and the localStorage read that applies it at bo
 
 At the very top of the `<script type="module">` block:
 ```js
-import { $, esc, toast, nameHue, paintAvatar, avatarHtml } from "/js/util/dom.js";
-import { setFourColor, initPrefs } from "/js/util/prefs.js";
+import { $, esc, toast, nameHue, paintAvatar, avatarHtml } from "../util/dom.js";
+import { setFourColor, initPrefs } from "../util/prefs.js";
 import { SUITS, RED, RANK_NAME, SUIT_NAME, SUIT_KEY, rankLabel, cardStr, cardName,
-         suitSvg, suitSpan, cardSpan, textWithCards } from "/js/cards/labels.js";
-import { ICONS, REACTIONS, EMOTES, icon, reactionIcon, reactionName, paintIcons } from "/js/cards/icons.js";
-import { suitPath, courtFigure, cardFace, cardEl } from "/js/cards/deck.js";
+         suitSvg, suitSpan, cardSpan, textWithCards } from "../cards/labels.js";
+import { ICONS, REACTIONS, EMOTES, icon, reactionIcon, reactionName, paintIcons } from "../cards/icons.js";
+import { suitPath, courtFigure, cardFace, cardEl } from "../cards/deck.js";
 ```
 
 Absolute `/js/...` paths, not relative — both shells live at the root, and `solo.html` will use the same specifiers.
@@ -1255,6 +1260,54 @@ git commit -m "refactor: extract client leaf modules (dom, prefs, labels, icons,
 - Consumes: `util/dom.js` (Task 13)
 - Produces: `session.js` → `S` (mutable state object), `myUid(): string`, `leaveRoom(reason?: string): void`, `mintCode(len?: number): string`, `takeNotice(): string|null`
 
+- [ ] **Step 0: Convert the existing client modules to relative specifiers, and add the load smoke test**
+
+Task 13 shipped the five leaf modules using absolute `/js/...` specifiers. Node resolves those against the filesystem root, so the whole client tree is unimportable from a test — which is why a missing `SUIT_PATH` export passed all 72 tests there and surfaced only in a browser. Fix it before adding more modules on top.
+
+Rewrite every **module-to-module** import under `app/js/` to a relative specifier. The HTML keeps its absolute `<script type="module" src="...">`. For the five existing files that means, for example, `"/js/core/engine/index.js"` → `"../core/engine/index.js"` in `cards/labels.js`, and `"/js/cards/icons.js"` → `"../cards/icons.js"` in `util/dom.js`. Then create `test/client-modules.test.js`:
+
+```js
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const JS = path.join(__dirname, "..", "app", "js");
+
+const walk = d => fs.readdirSync(d, { withFileTypes: true })
+  .flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+
+/* Every client module must load as a real ES module. Without this the suite only
+   ever reads these files as text, so a missing export — or an import naming a
+   symbol its target does not export — throws in the browser while every test
+   stays green. That exact bug shipped once. */
+test("every client module loads, and its imports resolve to real exports", async () => {
+  const files = walk(JS).filter(f => f.endsWith(".js"));
+  assert.ok(files.length >= 5, `expected client modules, found ${files.length}`);
+
+  for (const f of files) {
+    const mod = await import(f);                       // throws on a bad specifier or missing binding
+    assert.ok(Object.keys(mod).length > 0 || /export\s*\{\s*\}/.test(fs.readFileSync(f, "utf8")),
+      `${path.relative(JS, f)} exports nothing`);
+  }
+
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    for (const m of src.matchAll(/from\s+"([^"]+)"/g))
+      assert.ok(!m[1].startsWith("/"),
+        `${path.relative(JS, f)} imports "${m[1]}" — absolute specifiers break node's resolver; use a relative path`);
+  }
+});
+```
+
+The `await import(f)` is the load check: a bad specifier or a named import the target does not export throws right there. The second loop is the guard that keeps absolute specifiers from creeping back in.
+
+Modules that touch `document` at import time will fail this test. That is a finding, not a reason to weaken it — module top level must stay side-effect free, and any DOM access belongs inside a function. Fix the module.
+
+Run it, confirm it passes, and commit before starting Step 1.
+
 - [ ] **Step 1: Create `session.js` with the state object**
 
 ```js
@@ -1281,7 +1334,7 @@ Keep the comments on both: the uid is random with no account and never leaves as
 
 Delete lines 888-892 from the inline script. Add:
 ```js
-import { S, myUid, leaveRoom, mintCode, takeNotice } from "/js/session.js";
+import { S, myUid, leaveRoom, mintCode, takeNotice } from "./session.js";
 ```
 
 Then rewrite every read and write of the 16 names to go through `S.`. This is mechanical but must be exhaustive — a missed one becomes an implicit global that silently works until two modules disagree.
@@ -1355,9 +1408,9 @@ Move the service worker registration and install-prompt block (~1915-1919).
 
 In the inline script:
 ```js
-import { connect, send, serverNow, scheduleReconnect, setViewHandler } from "/js/net.js";
-import { inviteUrl, copyInvite } from "/js/share.js";
-import { registerServiceWorker, initInstallPrompt } from "/js/pwa.js";
+import { connect, send, serverNow, scheduleReconnect, setViewHandler } from "./net.js";
+import { inviteUrl, copyInvite } from "./share.js";
+import { registerServiceWorker, initInstallPrompt } from "./pwa.js";
 
 setViewHandler(render);
 ```
@@ -1433,12 +1486,12 @@ Move `fitTable` (~1501-1521) with its fixed-pixel trick-cross comment, the "both
 - [ ] **Step 7: Import them all in the inline script**
 
 ```js
-import { syncWindow, renderLog } from "/js/ui/log.js";
-import { renderChat, showEmote, noteChatActivity, updateChatBadge, openSheet, closeSheet } from "/js/ui/chat.js";
-import { setModal, hideOverlay, showMatchOver, showHelp, showSettingsModal } from "/js/ui/modals.js";
-import { renderActionBar, bannerForPlay, addBanner, divStatus, phaseLabel } from "/js/ui/actionbar.js";
-import { renderHand, fitHand } from "/js/ui/hand.js";
-import { fitTable, tickTimers, startTicking } from "/js/ui/layout.js";
+import { syncWindow, renderLog } from "../ui/log.js";
+import { renderChat, showEmote, noteChatActivity, updateChatBadge, openSheet, closeSheet } from "../ui/chat.js";
+import { setModal, hideOverlay, showMatchOver, showHelp, showSettingsModal } from "../ui/modals.js";
+import { renderActionBar, bannerForPlay, addBanner, divStatus, phaseLabel } from "../ui/actionbar.js";
+import { renderHand, fitHand } from "../ui/hand.js";
+import { fitTable, tickTimers, startTicking } from "../ui/layout.js";
 ```
 
 - [ ] **Step 8: Add to `SHELL`, rebuild, run the suite**
@@ -1920,7 +1973,7 @@ The controller drives the engine directly, with no server. It replaces the old m
 ```js
 /* Single-player: the same engine the server runs, driven in-page. There is no
    room, no socket and no redaction — the local player is always seat 0. */
-import * as E from "/js/core/engine/index.js";
+import * as E from "../core/engine/index.js";
 
 let G = null, difficulty = "normal";
 const ME = 0;
