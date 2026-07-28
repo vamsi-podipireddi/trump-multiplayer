@@ -1,5 +1,9 @@
 import * as E from "../../../app/js/core/engine/index.js";
 import { releaseSeat, promoteSpectators, reassignHost, connectedCount, seatIsLiveHuman } from "./seats.js";
+/* Cyclic with drive.js: fireTimers below calls drive/dealNext/aiAct, and
+   drive.js calls back here for setTimer/clearTimersOfKind/GAME_TIMER_KINDS/
+   sameData. Safe only because every such reference, on both sides, is read
+   inside a function body — never at either file's top level. */
 import { drive, dealNext, aiAct } from "./drive.js";
 
 // ---- timers ----

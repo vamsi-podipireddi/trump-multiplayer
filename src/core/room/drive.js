@@ -1,5 +1,9 @@
 import * as E from "../../../app/js/core/engine/index.js";
 import { resetReady, applyPendingSeats, seatIsLiveHuman, connectedCount, seatedHumans } from "./seats.js";
+/* Cyclic with timers.js: this file reads setTimer/clearTimersOfKind/
+   GAME_TIMER_KINDS/sameData from there; timers.js's fireTimers calls back
+   into drive/dealNext/aiAct here. Safe only because every such reference is
+   read inside a function body — never at either file's top level. */
 import { setTimer, clearTimersOfKind, GAME_TIMER_KINDS, sameData } from "./timers.js";
 
 /* Everything that starts a new deal must hand out the parked seats with it. */
