@@ -62,7 +62,7 @@ spec for the detailed argument.
 
 The room core (`src/core/room/`) has the same shape at smaller scale: leaf modules `constants.js
 ids.js seats.js timers.js drive.js membership.js handlers.js view.js` behind one barrel `index.js`
-(550-line `room.js`, split the same way).
+exporting 18 names (550-line `room.js`, split the same way).
 
 ## Rules
 
@@ -89,6 +89,13 @@ ids.js seats.js timers.js drive.js membership.js handlers.js view.js` behind one
 4. **Run `npm run build:assets` after touching anything under `app/`.** It walks `app/` to regenerate
    `app/sw.js`'s precache list and cache-busting `VERSION`. `npm run build:assets -- --check` (which
    `test/pwa.test.js` calls) fails the suite if you forget.
+5. **A client module may not touch `document`, `window`, `navigator` or `localStorage` at module top
+   level — only from inside a function.** `test/client-modules.test.js` `import()`s every file under
+   `app/js/` under plain Node, with no DOM, so a top-level reference throws immediately and fails the
+   whole suite (confusingly — the stack trace points at the test, not at the module that did it). An
+   entry point that must run something on load still can: guard the call behind a `typeof` check rather
+   than a direct reference, so the check itself doesn't throw where the global is never declared.
+   `app/js/main.js:110` is the worked example: `if (typeof document !== "undefined") boot();`.
 
 ## Entry points
 

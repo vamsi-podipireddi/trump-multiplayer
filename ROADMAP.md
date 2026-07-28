@@ -43,8 +43,12 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D10. Stats (CF only, optional)**: client sends stable `uid` (localStorage `trump_uid`, minted once) in join.
   At `matchOver` the DO writes one row per human seat into D1 `matches` (schema.sql) IF `env.DB` bound;
   silently skipped otherwise. `GET /stats?uid=` returns `{games, wins, bidsWon, bidsMade}`. Node backend: no stats.
-- **D11. Tests**: `node --test test/`. Engine invariant playouts + rule edges; room-core redaction property
-  (serialized view for seat A never contains seat B's hand), message fuzzing, flow tests. CI = GitHub Actions.
+- **D11. Tests**: ~~`node --test test/`~~ — CORRECTED 2026-07-28: that path-argument form fails on Node 24
+  with `MODULE_NOT_FOUND` (it tries to `require()` the directory as an entry point). The form that
+  actually works, and what `package.json`'s `test` script runs, is the bare `node --test` — no path
+  argument — which discovers the same suite on Node 20, 22 and 24. Engine invariant playouts + rule
+  edges; room-core redaction property (serialized view for seat A never contains seat B's hand), message
+  fuzzing, flow tests. CI = GitHub Actions.
 - **D12. ~~Root `index.html` (offline game) stays untouched~~** — SUPERSEDED 2026-07-27 by
   `docs/superpowers/specs/2026-07-27-project-structure-design.md`. The copy had drifted from the
   engine (`Math.random` deals instead of the CSPRNG, no hard AI, no `targetDeals`), so it was deleted and the solo game
