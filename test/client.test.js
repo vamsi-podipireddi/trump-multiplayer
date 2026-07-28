@@ -16,7 +16,19 @@ import { fileURLToPath } from "node:url";
 import * as R from "../src/core/room/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLIENT = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
+
+const jsFiles = (function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
+})(path.join(__dirname, "..", "app", "js"))
+  .filter(f => f.endsWith(".js") && !f.includes(`${path.sep}core${path.sep}`));
+
+// The client used to be one hand-written HTML file; it is now that file plus a
+// tree of leaf modules under app/js/ (core/ excluded — that's the engine, not
+// client code). CLIENT spans both, so text-scanning assertions below still see
+// symbols (EMOTES, esc, cardEl, ...) that have moved out of index.html itself.
+const CLIENT = [fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8"),
+                ...jsFiles.map(f => fs.readFileSync(f, "utf8"))].join("\n");
 const CORE = fs.readdirSync(path.join(__dirname, "..", "src", "core", "room"))
   .filter(f => f.endsWith(".js"))
   .map(f => fs.readFileSync(path.join(__dirname, "..", "src", "core", "room", f), "utf8"))

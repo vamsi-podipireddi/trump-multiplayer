@@ -17,7 +17,16 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
 const PUB = path.join(ROOT, "app");
 const read = p => fs.readFileSync(path.join(PUB, p), "utf8");
-const CLIENT = read("index.html");
+// The client is index.html plus its leaf modules under app/js/ (core/ is the
+// engine, not client code — same split client.test.js uses). Several checks
+// below scan CLIENT as text for symbols (cardEl, RANK_NAME, ...) that now live
+// in those modules instead of inline.
+const jsFiles = (function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
+})(path.join(PUB, "js"))
+  .filter(f => f.endsWith(".js") && !f.includes(`${path.sep}core${path.sep}`));
+const CLIENT = [read("index.html"), ...jsFiles.map(f => fs.readFileSync(f, "utf8"))].join("\n");
 const SW = read("sw.js");
 const MANIFEST = JSON.parse(read("manifest.webmanifest"));
 

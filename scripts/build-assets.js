@@ -30,6 +30,8 @@ const SHELL = [
   "app/index.html", "app/solo.html", "app/manifest.webmanifest",
   "app/icon-192.png", "app/icon-512.png", "app/icon-maskable-512.png",
   "app/apple-touch-icon.png", "app/favicon-32.png",
+  "app/js/util/dom.js", "app/js/util/prefs.js", "app/js/cards/labels.js",
+  "app/js/cards/icons.js", "app/js/cards/deck.js",
 ];
 
 function shellVersion() {
