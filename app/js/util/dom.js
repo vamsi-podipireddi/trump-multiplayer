@@ -1,7 +1,7 @@
 /* DOM helpers shared across the client: element lookup, HTML escaping, the
    toast, and the per-player avatar (a coloured disc whose hue comes from the
    name itself, so the same player reads as the same colour to everyone). */
-import { icon } from "/js/cards/icons.js";
+import { icon } from "../cards/icons.js";
 
 const $ = id => document.getElementById(id);
 

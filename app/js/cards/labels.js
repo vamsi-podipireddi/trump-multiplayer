@@ -1,10 +1,10 @@
 /* A card's name has one definition, shared with the server and the solo game.
    The rest of this file is display-layer only: markup, CSS keys, and the
    screen-reader spellings the engine has no reason to know about. */
-import { SUITS, rankLabel, cardStr } from "/js/core/engine/index.js";
+import { SUITS, rankLabel, cardStr } from "../core/engine/index.js";
 export { SUITS, rankLabel, cardStr };
 
-import { esc } from "/js/util/dom.js";
+import { esc } from "../util/dom.js";
 
 const RED = new Set(["♥","♦"]);
 
