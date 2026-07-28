@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    PWA + accessibility contract.
 
@@ -7,15 +6,27 @@
    the pieces exist and agree with each other: manifest ↔ icons on disk,
    service-worker precache ↔ real files, client ↔ manifest/sw wiring.
    ============================================================ */
-const test = require("node:test");
-const assert = require("node:assert");
-const fs = require("fs");
-const path = require("path");
+import test from "node:test";
+import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { check } from "../scripts/build-assets.js";
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, "..");
-const PUB = path.join(ROOT, "public");
+const PUB = path.join(ROOT, "app");
 const read = p => fs.readFileSync(path.join(PUB, p), "utf8");
-const CLIENT = read("index.html");
+// The client is index.html plus its leaf modules under app/js/ (core/ is the
+// engine, not client code — same split client.test.js uses). Several checks
+// below scan CLIENT as text for symbols (cardEl, RANK_NAME, ...) that now live
+// in those modules instead of inline.
+const jsFiles = (function walk(dir) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]);
+})(path.join(PUB, "js"))
+  .filter(f => f.endsWith(".js") && !f.includes(`${path.sep}core${path.sep}`));
+const CLIENT = [read("index.html"), ...jsFiles.map(f => fs.readFileSync(f, "utf8"))].join("\n");
 const SW = read("sw.js");
 const MANIFEST = JSON.parse(read("manifest.webmanifest"));
 
@@ -32,7 +43,10 @@ function pngSize(file) {
    formatting rather than behaviour: reformatting the file broke the build,
    while a genuinely wrong value still sailed through. Read the declarations
    and assert on what they mean instead. */
-const CSS = (CLIENT.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1].replace(/\/\*[\s\S]*?\*\//g, "");
+const CSS = ["tokens", "base", "table", "panels", "responsive"]
+  .map(n => read(path.join("css", n + ".css")))
+  .join("\n")
+  .replace(/\/\*[\s\S]*?\*\//g, "");
 
 function rules(css) {
   const out = [];
@@ -92,6 +106,18 @@ const PHONE = splitMedia(CSS, "(max-width:900px)").inside;
 const COARSE = splitMedia(CSS, "(pointer:coarse)").inside;
 const BASE = splitMedia(splitMedia(CSS, "(max-width:900px)").outside, "(pointer:coarse)").outside;
 
+/* The exact source of a top-level `function name(...) { ... }`, brace-matched
+   rather than sliced to a fixed-size window — a fixed window either spills
+   into whatever function follows a short one, or truncates one that outgrew
+   it, missing exactly the content past the cut. */
+function functionSource(src, name) {
+  const at = src.indexOf(`function ${name}(`);
+  assert.ok(at !== -1, `function ${name} not found in client source`);
+  let depth = 0, j = src.indexOf("{", at);
+  for (; j < src.length; j++) { if (src[j] === "{") depth++; else if (src[j] === "}" && --depth === 0) break; }
+  return src.slice(at, j + 1);
+}
+
 test("manifest is installable: required fields + icons that exist at the declared size", () => {
   for (const f of ["name", "short_name", "start_url", "scope", "display", "background_color", "theme_color", "icons"])
     assert.ok(MANIFEST[f], `manifest is missing ${f}`);
@@ -103,7 +129,12 @@ test("manifest is installable: required fields + icons that exist at the declare
     assert.deepStrictEqual(got, { w, h }, `${icon.src} is ${got.w}x${got.h}, manifest says ${icon.sizes}`);
   }
   assert.ok(MANIFEST.icons.some(i => i.purpose === "maskable"), "need a maskable icon for adaptive launchers");
-  for (const s of MANIFEST.shortcuts || [])
+  // Asserted to exist, not treated as optional: `MANIFEST.shortcuts || []`
+  // asserts nothing at all once the key is gone, and the solo-play shortcut
+  // below is a deliberate, shipped feature, not incidental.
+  assert.ok(Array.isArray(MANIFEST.shortcuts) && MANIFEST.shortcuts.length,
+    "manifest should declare at least one shortcut (e.g. the solo-play jump)");
+  for (const s of MANIFEST.shortcuts)
     assert.ok(fs.existsSync(path.join(PUB, s.url.replace(/^\//, ""))), `shortcut target ${s.url} does not exist`);
 });
 
@@ -118,13 +149,6 @@ test("service worker precaches only files that exist, and never caches the live 
     assert.ok(new RegExp(`"${live}"`).test(SW.match(/const NEVER = \[[^\]]*\]/)[0]), `${live} must bypass the cache`);
   assert.ok(/req\.method !== "GET"/.test(SW), "sw must ignore non-GET");
   assert.ok(/origin !== self\.location\.origin/.test(SW), "sw must ignore cross-origin requests");
-});
-
-test("offline fallback is the untouched root single-player game (D12)", () => {
-  const rootGame = fs.readFileSync(path.join(ROOT, "index.html"));
-  const solo = fs.readFileSync(path.join(PUB, "solo.html"));
-  assert.ok(rootGame.equals(solo), "public/solo.html must stay a byte-identical copy of the root offline game");
-  assert.ok(!solo.includes("/ws?room="), "the offline build must not need a server");
 });
 
 test("client wires up the PWA and the share affordances", () => {
@@ -144,8 +168,8 @@ test("accessibility: keyboard-reachable cards, labelled controls, live regions",
   assert.ok(/RANK_NAME/.test(CLIENT) && /SUIT_NAME/.test(CLIENT), "labels should spell out rank and suit");
   assert.ok(/id="log" role="log" aria-live="polite"/.test(CLIENT), "table log must be a polite live region");
   assert.ok(/id="chat-log" aria-live="polite"/.test(CLIENT), "chat must be a polite live region");
-  assert.ok(/:focus-visible/.test(CLIENT), "focus styling missing");
-  assert.ok(/body\.fourcolor .card\.s-d/.test(CLIENT) && /localStorage\.setItem\("trump_4color"/.test(CLIENT),
+  assert.ok(/:focus-visible/.test(CSS), "focus styling missing");
+  assert.ok(/body\.fourcolor .card\.s-d/.test(CSS) && /localStorage\.setItem\("trump_4color"/.test(CLIENT),
     "4-colour deck toggle must exist and persist");
   // suit colours must be class-driven, otherwise the 4-colour deck can't override them
   assert.ok(!/style="color:\$\{RED\.has/.test(CLIENT), "suit colours must come from CSS classes, not inline styles");
@@ -156,7 +180,15 @@ test("mobile: the sidebar survives as a bottom sheet instead of being hidden", (
   for (const tab of ["score", "log", "chat"])
     assert.ok(new RegExp(`data-tab="${tab}"`).test(CLIENT), `mobile tab "${tab}" missing`);
   const phone = mediaBlock(CSS, "(max-width:900px)");
-  assert.ok(!declared(phone, "aside", "display").includes("none"),
+  // declared() returns [] when nothing matches `sel`/`prop` at all, and
+  // [].includes(x) is false — so the old check passed just as well when the
+  // rule was flat-out missing (rename `aside` and it never fails again) as
+  // when the rule genuinely said something other than none. Assert the rule
+  // exists (base display:flex, or an override in the phone block) before
+  // asserting what it says.
+  const asideDisplay = [...declared(BASE, "aside", "display"), ...declared(phone, "aside", "display")];
+  assert.ok(asideDisplay.length, "aside declares no display rule to check on mobile");
+  assert.ok(!asideDisplay.includes("none"),
     "the sidebar must not be display:none on mobile — that drops score/log/chat");
   // every interactive control clears the 40px touch-target floor at phone width
   for (const sel of [".act-btn", ".mini-btn", "#sheet-tabs button", ".emote-btn", "#chat-input"]) {
@@ -194,11 +226,17 @@ test("iOS/iPad: dynamic viewport, safe areas, and touch-only pointers are handle
   assert.ok(!/height:\s*min\(\s*\d+vh/.test(CSS), "sheet heights should use dvh too");
 
   // anything pinned to a screen edge has to respect the notch / home indicator
-  for (const [sel, prop] of [["header", "padding"], ["#awaybar", "padding"],
-                             ["#conn", "padding"], ["#sheet-tabs", "padding-bottom"]]) {
-    const vals = rules(CSS).filter(r => r.sels.includes(sel)).map(r => r.body).join(";");
-    assert.ok(/env\(\s*safe-area-inset/.test(vals),
-      `${sel} ignores the safe-area inset it overlaps (checked ${prop} and friends)`);
+  // — checked on the exact property that abuts that edge, not "does
+  // env(safe-area-inset) appear anywhere in this selector's whole body":
+  // #sheet-tabs used to pass on padding-top alone (inherited from nowhere —
+  // it doesn't even declare one), which does nothing for the home indicator
+  // it actually overlaps at the bottom, the exact gap this test names.
+  for (const [sel, prop] of [["header", "padding-top"], ["#awaybar", "padding-top"],
+                             ["#conn", "padding-top"], ["#sheet-tabs", "padding-bottom"]]) {
+    const vals = declared(CSS, sel, prop);
+    assert.ok(vals.length, `${sel} declares no ${prop}`);
+    assert.ok(vals.some(v => /env\(\s*safe-area-inset/.test(v)),
+      `${sel}'s ${prop} ignores the safe-area inset it overlaps (declares ${JSON.stringify(vals)})`);
   }
   const sheetBottom = declared(mediaBlock(CSS, "(max-width:900px)"), "aside", "bottom").join(" ");
   for (const need of ["safe-area-inset-bottom", "--kb"])
@@ -232,9 +270,13 @@ test("live regions are updated incrementally, not rebuilt", () => {
      message — one per card played. syncWindow's behaviour is tested for real in
      client.test.js; this pins that the log and chat actually route through it. */
   for (const fn of ["renderLog", "renderChat"]) {
-    const body = CLIENT.slice(CLIENT.indexOf(`function ${fn}(`), CLIENT.indexOf(`function ${fn}(`) + 900);
+    // Whole (brace-matched) function body, checked in full — not just the
+    // text before the first "syncWindow" substring inside an arbitrary
+    // 900-character window, which could miss a clear placed after that
+    // point (or after a comment merely mentioning syncWindow) entirely.
+    const body = functionSource(CLIENT, fn);
     assert.ok(/syncWindow\(/.test(body), `${fn} must diff its window instead of redrawing`);
-    assert.ok(!/\.innerHTML\s*=\s*""/.test(body.split("syncWindow")[0]),
+    assert.ok(!/\.innerHTML\s*=\s*""/.test(body),
       `${fn} still clears the live region before rendering`);
   }
   assert.ok(/id="chat-empty"/.test(CLIENT) && !/#chat-log .empty/.test(CSS),
@@ -251,11 +293,31 @@ test("the hand keeps keyboard focus across re-renders", () => {
 });
 
 test("generated assets are in sync with their sources", () => {
-  /* solo.html is a copy and the service worker's cache VERSION is a hash of the
-     shell; both used to be maintained by hand, so both could silently go stale.
-     scripts/build-assets.js owns them now. */
-  const { check } = require("../scripts/build-assets");
+  /* the service worker's precache SHELL and its cache VERSION are both derived
+     from app/'s own contents; either used to be maintained by hand, so either
+     could silently go stale. scripts/build-assets.js owns them now. */
   assert.deepStrictEqual(check(), [], "run: npm run build:assets");
   assert.ok(/const VERSION = "trump-[0-9a-f]{12}";/.test(SW),
     "sw VERSION must be the generated content hash, not a hand-edited constant");
+});
+
+test("every shipped js and css file is precached", () => {
+  const shell = (SW.match(/const SHELL = \[([\s\S]*?)\];/) || [, ""])[1]
+    .match(/"([^"]+)"/g).map(s => s.slice(1, -1));
+  // app/css doesn't exist yet (a later task creates it) and app/js keeps
+  // growing (later tasks add to it) — walk tolerates a missing directory so
+  // this test needs no changes when either lands.
+  const walk = (dir, base = "") => fs.existsSync(path.join(PUB, dir))
+    ? fs.readdirSync(path.join(PUB, dir), { withFileTypes: true }).flatMap(e => e.isDirectory()
+        ? walk(path.join(dir, e.name), base + e.name + "/")
+        : [base + e.name])
+    : [];
+  const shipped = [...walk("js").map(f => "/js/" + f), ...walk("css").map(f => "/css/" + f)];
+  // A measured floor, the way test/client-modules.test.js:13 floors its file
+  // count: 39 js+css files ship today. Without this, walk()'s existsSync(...)
+  // ? … : [] means a moved/renamed app/js silently walks nothing, the loop
+  // below iterates zero entries, and the whole test stays green.
+  assert.ok(shipped.length >= 30, `expected shipped js+css files, found ${shipped.length}`);
+  for (const rel of shipped)
+    assert.ok(shell.includes(rel), `sw does not precache ${rel}`);
 });

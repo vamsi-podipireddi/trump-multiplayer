@@ -1,17 +1,29 @@
-"use strict";
 /* ============================================================
-   node adapter (server.js) over real sockets.
+   node adapter (src/server/) over real sockets.
 
    The room core is exercised in room.test.js; what is only testable here is
    the socket<->player bookkeeping the adapter owns. That bookkeeping is where
    a socket could strand identities by joining repeatedly — the core never saw
    it, because from its side each join looked like a different player arriving.
    ============================================================ */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const WebSocket = require("ws");
-process.env.MAX_ROOMS = "3"; // set before requiring: makes the room cap reachable in a test
-const { httpServer, rooms } = require("../server");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import WebSocket from "ws";
+import net from "node:net";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, "..");
+
+/* Static imports are hoisted — every imported module fully evaluates before
+   this file's own top-level statements run, no matter where the `import`
+   sits textually. That would read MAX_ROOMS before it is set below. A dynamic
+   import() runs exactly where it is written, so it still executes after the
+   env var — the same ordering CommonJS's synchronous loading used to give us. */
+process.env.MAX_ROOMS = "3"; // set before importing: makes the room cap reachable in a test
+const { httpServer, rooms } = await import("../src/server/index.js");
 
 let base = null;
 async function listening() {
@@ -115,17 +127,66 @@ test("at the room cap, empty rooms are recycled but occupied ones are not", asyn
   live.close(); fresh.close();
 });
 
-test("static serving refuses to walk out of public/", async () => {
-  const url = (await listening()).replace("ws://", "http://");
-  for (const bad of ["/../server.js", "/..%2fserver.js", "/%2e%2e/room.js", "//etc/passwd"]) {
-    const res = await fetch(url + bad);
-    assert.ok(res.status === 403 || res.status === 404, `${bad} must not be served (got ${res.status})`);
-    const body = await res.text();
-    assert.ok(!body.includes("require("), `${bad} leaked source`);
+/* fetch()/undici runs every request through the WHATWG URL parser before it
+   ever leaves the process, and that parser collapses "/../" dot-segments and
+   percent-decodes some paths — so most of the traversal probes below never
+   reach the guard at src/server/http.js:27 through fetch() at all (measured
+   against a raw echo server: fetch turns "/../src/server/sockets.js" into a
+   normalised "GET /src/server/sockets.js" on the wire, and "/%2e%2e/..." the
+   same way; only "/..%2fsrc/..." and "//etc/passwd" survive fetch() intact).
+   Writing the request line ourselves over a bare socket guarantees the guard
+   actually sees the bytes it is supposed to defend against. */
+const raw = (port, target) => new Promise(res => {
+  const s = net.connect(port, "127.0.0.1", () =>
+    s.write(`GET ${target} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n`));
+  let buf = ""; s.on("data", d => { buf += d; });
+  s.on("close", () => res(buf));
+  s.on("error", () => res(""));
+});
+function parseRaw(resp) {
+  const sep = resp.indexOf("\r\n\r\n");
+  if (sep === -1) return { status: 0, body: "" };
+  const status = Number((/^HTTP\/1\.[01] (\d{3})/.exec(resp) || [, "0"])[1]);
+  return { status, body: resp.slice(sep + 4) };
+}
+
+test("static serving refuses to walk out of app/", async () => {
+  const port = Number((await listening()).match(/:(\d+)$/)[1]);
+
+  /* A marker read out of the real target file rather than hardcoded, so a
+     future refactor that changes src/core/room/'s relative import depth (it
+     has moved before) can't silently turn this into a string nothing will
+     ever match again — a hardcoded path literal here degraded this exact
+     canary to always-true four times, because "the string isn't in the body"
+     is indistinguishable from "the guard is doing its job" once the string
+     can no longer appear at all. */
+  const viewSrc = fs.readFileSync(path.join(ROOT, "src/core/room/view.js"), "utf8");
+  const viewCanary = viewSrc.split("\n").find(l => l.includes("core/engine/index.js")).trim();
+
+  // Statuses measured over this same raw transport against the real server —
+  // fetch() cannot reproduce these probes faithfully (see the comment on
+  // raw() above), so this is the only way to exercise the guard end to end.
+  const probes = [
+    ["/../src/server/sockets.js", 403],
+    ["/..%2fsrc/server/sockets.js", 403],
+    ["/%2e%2e/src/core/room/view.js", 404],
+    ["//etc/passwd", 404],
+  ];
+  for (const [bad, want] of probes) {
+    const { status, body } = parseRaw(await raw(port, bad));
+    assert.equal(status, want, `${bad} must get ${want} over raw HTTP (got ${status})`);
+    assert.ok(!body.includes("new WebSocketServer(") && !body.includes(viewCanary), `${bad} leaked source`);
   }
-  const ok = await fetch(url + "/");
-  assert.equal(ok.status, 200);
-  assert.match(ok.headers.get("content-type"), /text\/html/);
+
+  // Positive control: the same raw transport must still serve a real file.
+  // Without this, a harness that silently failed to connect (wrong port, a
+  // dropped socket, ...) would return status 0 for every probe above — which
+  // is not 200 or 403, so it would *fail* the loop rather than pass it
+  // vacuously, except the failure would look like a broken test, not a
+  // broken guard. This pins that raw() actually talks to the server.
+  const { status: okStatus, body: okBody } = parseRaw(await raw(port, "/index.html"));
+  assert.equal(okStatus, 200, "a real file under app/ must be served over the same raw transport");
+  assert.match(okBody, /<!doctype html>|<html/i, "expected the app shell's markup, not an empty/failed response");
 });
 
 test.after(() => {

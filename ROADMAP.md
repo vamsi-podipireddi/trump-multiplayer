@@ -43,9 +43,51 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D10. Stats (CF only, optional)**: client sends stable `uid` (localStorage `trump_uid`, minted once) in join.
   At `matchOver` the DO writes one row per human seat into D1 `matches` (schema.sql) IF `env.DB` bound;
   silently skipped otherwise. `GET /stats?uid=` returns `{games, wins, bidsWon, bidsMade}`. Node backend: no stats.
-- **D11. Tests**: `node --test test/`. Engine invariant playouts + rule edges; room-core redaction property
-  (serialized view for seat A never contains seat B's hand), message fuzzing, flow tests. CI = GitHub Actions.
-- **D12. Root `index.html` (offline game) stays untouched**; copied to `public/solo.html` as the PWA offline fallback.
+- **D11. Tests**: ~~`node --test test/`~~ — CORRECTED 2026-07-28: that path-argument form fails on Node 24
+  with `MODULE_NOT_FOUND` (it tries to `require()` the directory as an entry point). The form that
+  actually works, and what `package.json`'s `test` script runs, is the bare `node --test` — no path
+  argument — which discovers the same suite on Node 20, 22 and 24. Engine invariant playouts + rule
+  edges; room-core redaction property (serialized view for seat A never contains seat B's hand), message
+  fuzzing, flow tests. CI = GitHub Actions.
+- **D12. ~~Root `index.html` (offline game) stays untouched~~** — SUPERSEDED 2026-07-27 by
+  `docs/superpowers/specs/2026-07-27-project-structure-design.md`. The copy had drifted from the
+  engine (`Math.random` deals instead of the CSPRNG, no hard AI, no `targetDeals`), so it was deleted and the solo game
+  rebuilt on the shared engine at `app/js/core/engine/`. `app/solo.html` is precached by
+  the service worker and playable offline when navigated to directly; the generic
+  offline-navigation fallback is the precached app shell (`index.html`), not solo.html.
+- **D13. Native ES modules, no bundler.** ~1100 lines of client JS doesn't need one; keeps edit-and-reload
+  dev and a zero-build deploy; HTTP/2 makes ~19 small files free, and the service worker precaches them
+  on first visit anyway. Rejected: an esbuild bundle to a single `public/app.js` — adds a devDependency, a
+  mandatory pre-deploy build step, and generated files inside the deploy directory.
+- **D14. The engine lives inside the served directory** (`app/js/core/engine/`), not in `src/`. Without a
+  bundler, anything the browser imports must be served, so one file on disk makes drift structurally
+  impossible. Rejected: an authoritative copy under `src/` plus a generated copy in `app/` —
+  reintroduces the two-copies-drift problem this whole restructure exists to remove.
+- **D15. `public/` renamed to `app/`.** It now holds real application source (the shared engine), not
+  static junk. Rejected: keeping the name `public/` — misleading once game logic lives there.
+- **D16. Whole repo goes ESM** (root `package.json` `"type": "module"`; `src/package.json` marker
+  deleted). Forced, not chosen: the browser needs the engine as ESM, and CommonJS cannot reliably
+  `require()` ESM on Node 20, which the CI matrix still tests. Rejected: dual CJS/ESM via the
+  `src/package.json` marker — the old hack, and it doesn't scale to a browser consumer.
+- **D17. Shared client state lives in one exported mutable object, `S`** (`app/js/session.js`). ESM `let`
+  exports are live but read-only for importers, so they can't be reassigned across module boundaries; an
+  object keeps the diff mechanical and state ownership explicit. Rejected: getter/setter pairs per field
+  (ceremony), or a full store/observer layer (over-engineered at this size).
+- **D18. `src/core/room/` stays out of `app/`.** Room logic — every seat's hand, host/kick/settings — is
+  server-only and must never ship to a client. Rejected: putting all core state machines under `app/` for
+  symmetry with the engine.
+- **D19. Five ordered `<link>` stylesheets** (cascade `tokens → base → table → panels → responsive`),
+  not one block or `@import`. Rejected: `@import` — it serialises requests, the same problem the original
+  ~675-line stylesheet had.
+- **D20. The service worker's precache `SHELL` is auto-generated** by `scripts/build-assets.js` walking
+  `app/`, rather than hand-maintained. Rejected: a hand-maintained array — it silently omits new modules,
+  and an omitted module is a broken offline load.
+- **D21. Root `index.html` deleted; solo now served from `app/solo.html`.** Removes the duplicated engine
+  while offline play keeps working via the service worker. Rejected: keeping it as a self-contained file
+  — that self-containment *is* the duplication this work removes.
+- **D22. D12 ("root `index.html` stays untouched") superseded**, not deleted from this list — see the
+  amendment above. The duplicate had already drifted (`Math.random()` deals, no hard AI, no
+  `targetDeals`); leaving D12 in force would have left a known-drifted rules copy in the repo.
 
 ## Milestones
 

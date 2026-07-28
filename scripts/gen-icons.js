@@ -1,4 +1,3 @@
-"use strict";
 /* ============================================================
    PWA icon generator — no dependencies.
 
@@ -7,9 +6,12 @@
    the only thing needed: PNG = signature + IHDR + deflated scanlines).
    Run:  node scripts/gen-icons.js
    ============================================================ */
-const zlib = require("zlib");
-const fs = require("fs");
-const path = require("path");
+import zlib from "node:zlib";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---- minimal PNG encoder (8-bit RGBA, no interlace) ----
 const CRC_TABLE = (() => {
@@ -97,7 +99,7 @@ function draw(size, pad) {
   return encodePNG(size, size, buf);
 }
 
-const OUT = path.join(__dirname, "..", "public");
+const OUT = path.join(__dirname, "..", "app");
 const files = [
   ["icon-192.png", 192, 0],       // any: fills the tile
   ["icon-512.png", 512, 0],
@@ -105,10 +107,10 @@ const files = [
   ["apple-touch-icon.png", 180, 0],
   ["favicon-32.png", 32, 0],
 ];
-if (require.main === module) {
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const [name, size, pad] of files) {
     fs.writeFileSync(path.join(OUT, name), draw(size, pad));
-    console.log("wrote public/" + name);
+    console.log("wrote app/" + name);
   }
 }
-module.exports = { encodePNG, draw, files };
+export { encodePNG, draw, files };

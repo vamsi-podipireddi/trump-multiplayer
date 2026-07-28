@@ -1,73 +1,7 @@
-"use strict";
-/* ============================================================
-   TRUMP — Cloudflare Worker + Durable Object adapter.
-
-   One Durable Object per room (addressed by room code via idFromName).
-   Room/game logic lives in room.js (shared with server.js); this file
-   owns the platform bits:
-
-   - WebSocket HIBERNATION API (ctx.acceptWebSocket + webSocketMessage/
-     Close/Error handlers): the DO is evicted between events instead of
-     burning duration for a whole match. Each socket carries its pid in
-     a serialized attachment, so identity survives hibernation.
-   - PERSISTENCE: the whole room state (pure JSON) is written to
-     ctx.storage after every event and restored on wake — matches
-     survive deploys, evictions, and restarts.
-   - ALARMS: room.js models timers as data; we arm one storage alarm
-     for the earliest due timer. Alarms fire even while hibernated.
-   ============================================================ */
-
-import R from "../room.js";
+import * as R from "../core/room/index.js";
+import { writeMatchStats } from "./stats.js";
 
 const MSG_RATE = 100; // msgs/sec per socket
-
-function okOrigin(request, url, env) {
-  const origin = request.headers.get("Origin");
-  if (!origin) return true; // non-browser client
-  try { if (new URL(origin).host === url.host) return true; } catch {}
-  const allow = (env && env.ALLOW_ORIGIN ? String(env.ALLOW_ORIGIN) : "").split(",").map(s => s.trim()).filter(Boolean);
-  return allow.includes(origin);
-}
-
-// ============================================================
-//  Worker entry: static assets + WebSocket routing (+ /stats in M8)
-// ============================================================
-export default {
-  async fetch(request, env) {
-    const url = new URL(request.url);
-    if (url.pathname === "/ws") {
-      if (request.headers.get("Upgrade") !== "websocket")
-        return new Response("expected websocket", { status: 426 });
-      if (!okOrigin(request, url, env))
-        return new Response("forbidden origin", { status: 403 });
-      const code = R.normCode(url.searchParams.get("room"));
-      if (!code) return new Response("missing room code", { status: 400 });
-      const id = env.ROOMS.idFromName(code);
-      return env.ROOMS.get(id).fetch(request);
-    }
-    if (url.pathname === "/health")
-      return new Response(JSON.stringify({ ok: true }), { headers: { "content-type": "application/json" } });
-    if (url.pathname === "/stats") return statsResponse(url, env);
-    if (env.ASSETS) return env.ASSETS.fetch(request); // single-Worker deploy serves the client
-    return new Response("not found", { status: 404 });
-  },
-};
-
-/* Optional player stats, backed by D1 when a DB binding exists (see schema.sql). */
-async function statsResponse(url, env) {
-  const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { "content-type": "application/json" } });
-  if (!env.DB) return json({ available: false });
-  const uid = String(url.searchParams.get("uid") || "").slice(0, 32);
-  if (!uid) return json({ error: "missing uid" }, 400);
-  try {
-    const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS games, SUM(won) AS wins, SUM(was_declarer) AS bidsWon, SUM(bid_made) AS bidsMade FROM matches WHERE uid = ?"
-    ).bind(uid).first();
-    return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0 });
-  } catch {
-    return json({ available: false });
-  }
-}
 
 // ============================================================
 //  RoomDO — hibernating, persistent room
@@ -158,12 +92,12 @@ export class RoomDO {
   }
 
   /* `phaseBefore` opts this event into the end-of-match stats write. It has to
-     happen before persist(), because recordStats() stamps its own idempotency
+     happen before persist(), because writeMatchStats() stamps its own idempotency
      flag onto G — written afterwards it would never reach storage. */
   async afterEvent(fx, ws, phaseBefore) {
     await this.applyFx(fx, ws);
     if (phaseBefore !== undefined && this.room && this.room.started &&
-        this.room.G.phase === "matchOver" && phaseBefore !== "matchOver") await this.recordStats();
+        this.room.G.phase === "matchOver" && phaseBefore !== "matchOver") await writeMatchStats(this.env, this.room);
     if (this.room) { await this.persist(); await this.armAlarm(); }
   }
 
@@ -230,28 +164,5 @@ export class RoomDO {
     const before = this.room.started ? this.room.G.phase : null;
     const fx = R.fireTimers(this.room, Date.now());
     await this.afterEvent(fx, null, before);
-  }
-
-  /* One row per human seat at matchOver, when a D1 binding exists (M8/D10). */
-  async recordStats() {
-    if (!this.env.DB || !this.room || this.room.G.phase !== "matchOver") return;
-    if (this.room.G._statsRecorded) return;
-    this.room.G._statsRecorded = true; // lives on G: a rematch swaps in a fresh G, clearing it
-    const G = this.room.G;
-    const max = Math.max(...G.scores);
-    try {
-      const stmts = [];
-      for (let seat = 0; seat < 4; seat++) {
-        const owner = this.room.seatOwner[seat];
-        const p = owner != null ? this.room.players[owner] : null;
-        if (!p || !p.uid) continue;
-        const r = G.lastResult || {};
-        stmts.push(this.env.DB.prepare(
-          "INSERT INTO matches (uid, name, room, won, was_declarer, bid_made, ts) VALUES (?, ?, ?, ?, ?, ?, ?)"
-        ).bind(p.uid, p.name, this.room.code, G.scores[seat] === max ? 1 : 0,
-               r.declarer === seat ? 1 : 0, r.declarer === seat && r.made ? 1 : 0, Date.now()));
-      }
-      if (stmts.length) await this.env.DB.batch(stmts);
-    } catch { /* stats are best-effort */ }
   }
 }

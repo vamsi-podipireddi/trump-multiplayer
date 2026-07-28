@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>TRUMP — Multiplayer</title>
+<meta name="description" content="Online multiplayer TRUMP: bid for points, call a hidden partner, capture tricks. 2–4 players plus AI, no signup." />
+<meta name="theme-color" content="#0d4d2e" />
+<meta name="color-scheme" content="dark" />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="TRUMP — online 250-point bid &amp; capture" />
+<meta property="og:description" content="Bid for points, call a hidden partner, capture tricks. Share a room code and play with 2–4 friends; AI fills the empty seats." />
+<meta property="og:image" content="/icon-512.png" />
+<meta name="twitter:card" content="summary" />
+<meta name="twitter:title" content="TRUMP — online 250-point bid &amp; capture" />
+<meta name="twitter:description" content="Bid, call a hidden partner, capture tricks. 2–4 friends + AI, no signup." />
+<link rel="manifest" href="/manifest.webmanifest" />
+<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="TRUMP" />
+<link rel="stylesheet" href="/css/tokens.css" />
+<link rel="stylesheet" href="/css/base.css" />
+<link rel="stylesheet" href="/css/table.css" />
+<link rel="stylesheet" href="/css/panels.css" />
+<link rel="stylesheet" href="/css/responsive.css" />
+</head>
+<body>
+<div id="conn">Disconnected — reconnecting…</div>
+
+<!-- Join screen -->
+<div id="join-screen" class="screen show">
+  <div class="brand">
+    <!-- the hero is the deck: three real card faces, drawn by the same renderer
+         the table uses, so the first thing you see is the thing you came for -->
+    <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
+    <h1>TRUMP</h1>
+    <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
+    <p class="lede">Bid for points, call a hidden partner, capture tricks. Two to four players — AI takes whatever seats are left.</p>
+  </div>
+  <div class="panel slim">
+    <div class="field" style="margin-bottom:0;">
+      <label for="join-name">Your name</label>
+      <div class="name-row"><span class="avatar lg" id="join-avatar" aria-hidden="true"></span><input id="join-name" maxlength="16" placeholder="Alex" autocomplete="nickname" /></div>
+    </div>
+    <div class="err" id="join-err"></div>
+    <div id="join-record"></div>
+  </div>
+  <div class="join-cards">
+    <div class="panel">
+      <h2 data-ic="bot">Play solo</h2>
+      <p class="muted" style="margin:0 0 10px;">Straight into a deal against three AI opponents. No room, no waiting.</p>
+      <p class="muted" style="margin:0 0 14px;">They play easy, normal or hard — change it from the table settings whenever you like, even mid-match.</p>
+      <button class="btn" id="btn-solo" style="width:100%;">Deal me in</button>
+    </div>
+    <div class="panel">
+      <h2 data-ic="users">Play with friends</h2>
+      <p class="muted" style="margin:0 0 14px;">Start a table and share the code. Friends join from any device, and AI fills whatever seats are still empty.</p>
+      <button class="btn" id="btn-create" style="width:100%;">Create a table</button>
+      <label class="chk" for="join-private"><input type="checkbox" id="join-private" /><span>Private table — a longer code nobody can stumble into</span></label>
+      <div class="or">or join one</div>
+      <div class="row">
+        <input id="join-code" maxlength="8" placeholder="CODE" style="flex:1;" />
+        <button class="btn ghost" id="btn-join">Join</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lobby screen -->
+<div id="lobby-screen" class="screen">
+  <div class="brand"><h1>TRUMP</h1><div class="colophon" id="lobby-colophon" aria-hidden="true"></div></div>
+  <div class="panel">
+    <h2 data-ic="table">Table</h2>
+    <div class="code-ticket">
+      <div><div class="lbl">ROOM CODE</div><div class="code-big" id="lobby-code">----</div></div>
+      <div class="ticket-actions">
+        <button class="btn ghost" id="btn-copy">Copy invite link</button>
+        <button class="btn ghost" id="btn-share" style="display:none;">Share…</button>
+      </div>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:0;">Anyone with the link — or the code — can take a seat.</p>
+    <div class="seatlist" id="lobby-seats"></div>
+    <h2 data-ic="gear">Table settings</h2>
+    <div class="settings" id="lobby-settings"></div>
+    <div id="lobby-controls"></div>
+    <p class="muted" id="lobby-note"></p>
+  </div>
+</div>
+
+<!-- Game -->
+<div id="game">
+  <header>
+    <div>
+      <h1>TRUMP</h1>
+      <div class="tagline" id="header-state">250-point bid &amp; capture</div>
+    </div>
+    <!-- the icon carries the button on a phone, the label on a desktop;
+         aria-label keeps the accessible name stable across both -->
+    <div class="hdr-actions">
+      <button id="btn-colors" data-ic="deck" aria-pressed="false" aria-label="Four-colour deck" title="Colour diamonds blue and clubs green"><span class="wide">4-Colour</span></button>
+      <button id="btn-help" data-ic="help" aria-label="How to play"><span class="wide">How to play</span></button>
+      <button id="btn-stand" data-ic="stand" aria-label="Stand up" title="Give up your seat — an AI takes over"><span class="wide">Stand up</span></button>
+      <button class="danger" id="btn-leave" data-ic="exit"><span class="wide">Leave</span></button>
+    </div>
+  </header>
+  <div id="table-wrap">
+    <div id="table">
+      <!-- medallion before #trick: played cards must stack above it -->
+      <div id="medallion" data-mode="full" aria-hidden="true">
+        <div class="med-label"></div>
+        <div class="med-main"></div>
+        <div class="med-sub"></div>
+        <div class="med-bar"><i></i></div>
+        <div class="med-chips"></div>
+      </div>
+      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
+      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
+      <div id="trick"></div>
+    </div>
+  </div>
+  <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
+  <aside data-tab="score">
+    <div class="panel-section" id="sec-score"><h2 id="score-title">Scoreboard</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
+    <div class="panel-section" id="sec-log"><h2>Table log</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
+    <div id="chat-section" class="panel-section">
+      <h2 style="padding:0 15px;">Chat</h2>
+      <div id="chat-empty">Nothing said yet. Say hello.</div>
+      <div id="chat-log" aria-live="polite" aria-label="Chat messages"></div>
+      <div id="emote-bar" aria-label="Reactions"></div>
+      <form id="chat-form" autocomplete="off">
+        <input id="chat-input" maxlength="200" placeholder="Say something…" aria-label="Chat message" />
+        <button id="chat-send" type="submit">Send</button>
+      </form>
+    </div>
+  </aside>
+</div>
+<nav id="sheet-tabs" aria-label="Table panels">
+  <button type="button" data-tab="score" aria-expanded="false">SCORE</button>
+  <button type="button" data-tab="log" aria-expanded="false">LOG</button>
+  <button type="button" data-tab="chat" aria-expanded="false">CHAT<span class="badge" id="chat-badge" style="display:none">0</span></button>
+</nav>
+
+<div id="awaybar">
+  <span class="msg" id="awaybar-msg">You're away — an AI is playing your seat.</span>
+  <button id="btn-back">I'm back</button>
+</div>
+<div id="overlay"><div class="modal" id="modal"></div></div>
+<div id="toast"></div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>

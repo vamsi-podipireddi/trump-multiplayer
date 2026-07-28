@@ -1,9 +1,14 @@
-"use strict";
 /* Engine invariants: random + AI-driven full-match playouts, rule edges.
    Pure engine, no I/O — every playout must satisfy the deck/trick/score laws. */
-const { test } = require("node:test");
-const assert = require("node:assert/strict");
-const E = require("../engine");
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import * as E from "../app/js/core/engine/index.js";
+import * as R from "../src/core/room/index.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];
@@ -95,7 +100,7 @@ function playMatch(chooser, maxSteps = 200000) {
 /* The deal must not come off Math.random. V8's generator is xorshift128+ and its
    state is recoverable from a handful of outputs — and a player observes plenty
    of them, since the cards they are dealt *are* the output. Sharing that stream
-   would leak future deals and (via room.js) other players' session tokens.
+   would leak future deals and (via the room core) other players' session tokens.
    Pinning Math.random to a constant is the sharpest test available: anything
    still drawing from it degenerates, anything on the CSPRNG is unaffected. */
 test("dealing and token minting never draw on Math.random", () => {
@@ -114,7 +119,6 @@ test("dealing and token minting never draw on Math.random", () => {
     assert.ok(dealers.size > 1, "the opening dealer must not be predictable either");
     assert.ok(bonuses.size > 1, "nor the bonus suit");
 
-    const R = require("../room");
     const ids = new Set();
     for (let i = 0; i < 200; i++) ids.add(R.randId(16, false));
     assert.equal(ids.size, 200, "playerId is a bearer token — it must come off the CSPRNG");
@@ -286,4 +290,30 @@ test("AI-driven matches produce only legal actions (normal + easy)", () => {
         assert.ok(act, "AI produced an action");
         return act;
       });
+});
+
+test("the engine tree imports nothing the browser cannot resolve", () => {
+  const dir = path.join(__dirname, "..", "app", "js", "core", "engine");
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  for (const f of walk(dir).filter(f => f.endsWith(".js"))) {
+    const src = fs.readFileSync(f, "utf8");
+    assert.ok(!/from\s+["']node:|require\(/.test(src),
+      `${path.relative(dir, f)} imports a node-only module — the browser serves this file`);
+    for (const m of src.matchAll(/from\s+["'](\.[^"']*)["']/g))
+      assert.ok(m[1].endsWith(".js"),
+        `${path.relative(dir, f)} imports "${m[1]}" without a .js extension — browsers do not guess`);
+  }
+});
+
+test("randomInt is uniform over [0,n)", () => {
+  const counts = new Array(6).fill(0);
+  for (let i = 0; i < 60000; i++) counts[E.randomInt(6)]++;
+  for (const c of counts) assert.ok(c > 9000 && c < 11000, `skewed bucket: ${counts}`);
+  for (let i = 0; i < 1000; i++) assert.strictEqual(E.randomInt(1), 0);
+  for (const n of [2, 3, 4, 13, 52])
+    for (let i = 0; i < 500; i++) {
+      const v = E.randomInt(n);
+      assert.ok(Number.isInteger(v) && v >= 0 && v < n, `randomInt(${n}) returned ${v}`);
+    }
 });

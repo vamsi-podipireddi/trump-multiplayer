@@ -1,0 +1,106 @@
+import { S } from "../session.js";
+import { $, esc } from "../util/dom.js";
+import { EMOTES, reactionIcon, reactionName } from "../cards/icons.js";
+import { send } from "../net.js";
+import { syncWindow } from "./log.js";
+
+// ---------- chat + emotes ----------
+function renderChat() {
+  const box = $("chat-log");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  const msgs = S.view.chat || [];
+  $("chat-empty").style.display = msgs.length ? "none" : "";
+  const added = syncWindow(box, msgs.map(m => `${m.ts}\u0000${m.from}\u0000${m.text}`), i => {
+    const m = msgs[i];
+    const d = document.createElement("div");
+    d.className = "msg" + (m.seat != null && m.seat === S.mySeat ? " you" : "");
+    d.innerHTML = `<span class="from">${esc(m.from)}:</span> ${esc(m.text)}`;
+    return d;
+  });
+  if (atBottom && added) box.scrollTop = box.scrollHeight;
+  noteChatActivity();
+  if (!$("emote-bar").children.length) {
+    EMOTES.forEach(e => {
+      const b = document.createElement("button");
+      b.className = "emote-btn"; b.type = "button"; b.innerHTML = reactionIcon(e);
+      b.title = reactionName(e);
+      b.setAttribute("aria-label", "Send " + reactionName(e) + " reaction");
+      b.onclick = () => send({ type: "emote", e });
+      $("emote-bar").appendChild(b);
+    });
+  }
+  $("emote-bar").style.display = S.view.you.spectator ? "none" : ""; // seats only, per the server rule
+}
+/* Mirrors screens/game.js's own seat→position convention (POS_CLASS/posOfSeat):
+   position 0..3 is south/west/north/east relative to the viewer's own seat.
+   Duplicated here, not imported, because game.js already imports renderChat/
+   closeSheet from this file (renderGame() and render() both call into
+   ui/chat.js) — importing posOfSeat back from game.js would make the two
+   files import each other: screens/game.js -> ui/chat.js -> screens/game.js.
+   Small, pure, S-only formula; two copies are cheaper than a cycle. */
+const POS_CLASS = ["south", "west", "north", "east"];
+/* Floating reaction over the sender's seat (transient — never part of state). */
+function showEmote(seat, e) {
+  if (typeof seat !== "number" || !S.view || !S.view.room.started) return;
+  const pos = (seat - (S.mySeat == null ? 0 : S.mySeat) + 4) % 4;
+  const host = $("seat-" + POS_CLASS[pos]);
+  if (!host) return;
+  const d = document.createElement("div");
+  d.className = "float-emote"; d.innerHTML = reactionIcon(e);
+  host.appendChild(d);
+  setTimeout(() => d.remove(), 2000);
+}
+
+// ---------- mobile bottom sheet ----------
+let unreadChat = 0, lastChatLen = 0;
+function openSheet(tab) {
+  const a = document.querySelector("aside");
+  const same = a.classList.contains("open") && a.dataset.tab === tab;
+  a.dataset.tab = tab;
+  a.classList.toggle("open", !same);
+  document.querySelectorAll("#sheet-tabs button").forEach(b =>
+    b.setAttribute("aria-expanded", String(!same && b.dataset.tab === tab)));
+  if (!same && tab === "chat") { unreadChat = 0; updateChatBadge(); $("chat-log").scrollTop = $("chat-log").scrollHeight; }
+}
+function closeSheet() {
+  const a = document.querySelector("aside");
+  a.classList.remove("open");
+  document.querySelectorAll("#sheet-tabs button").forEach(b => b.setAttribute("aria-expanded", "false"));
+}
+function updateChatBadge() {
+  const el = $("chat-badge");
+  el.textContent = String(unreadChat);
+  el.style.display = unreadChat > 0 ? "" : "none";
+}
+/* Count messages that arrive while the chat panel isn't on screen. */
+function noteChatActivity() {
+  const msgs = (S.view.chat || []).length;
+  const a = document.querySelector("aside");
+  const visible = window.innerWidth > 900 || (a.classList.contains("open") && a.dataset.tab === "chat");
+  if (msgs > lastChatLen && !visible) { unreadChat += msgs - lastChatLen; updateChatBadge(); }
+  lastChatLen = msgs;
+}
+
+/* Wrapped in a function (rather than run at module load) so this file can still
+   be `import()`-ed under Node with no DOM — see test/client-modules.test.js.
+   Called once from index.html at boot. */
+function initKeyboardHandling() {
+  /* iOS floats the keyboard over fixed elements instead of resizing the layout, so the
+     chat sheet and its tab bar would end up underneath it. visualViewport reports the
+     covered height; --kb lifts both above it. */
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const trackKeyboard = () => {
+      const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      document.documentElement.style.setProperty("--kb", (covered > 60 ? covered : 0) + "px");
+    };
+    vv.addEventListener("resize", trackKeyboard);
+    vv.addEventListener("scroll", trackKeyboard);
+    trackKeyboard();
+  }
+  $("chat-input").addEventListener("focus", () => {
+    setTimeout(() => { $("chat-log").scrollTop = $("chat-log").scrollHeight; }, 250); // after the keyboard animates in
+  });
+}
+
+export { renderChat, showEmote, noteChatActivity, updateChatBadge, openSheet, closeSheet, initKeyboardHandling };
