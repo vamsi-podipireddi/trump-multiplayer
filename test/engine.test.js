@@ -2,8 +2,13 @@
    Pure engine, no I/O — every playout must satisfy the deck/trick/score laws. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as E from "../app/js/core/engine/index.js";
 import * as R from "../room.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];
@@ -285,4 +290,30 @@ test("AI-driven matches produce only legal actions (normal + easy)", () => {
         assert.ok(act, "AI produced an action");
         return act;
       });
+});
+
+test("the engine tree imports nothing the browser cannot resolve", () => {
+  const dir = path.join(__dirname, "..", "app", "js", "core", "engine");
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e =>
+    e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  for (const f of walk(dir).filter(f => f.endsWith(".js"))) {
+    const src = fs.readFileSync(f, "utf8");
+    assert.ok(!/from\s+["']node:|require\(/.test(src),
+      `${path.relative(dir, f)} imports a node-only module — the browser serves this file`);
+    for (const m of src.matchAll(/from\s+["'](\.[^"']*)["']/g))
+      assert.ok(m[1].endsWith(".js"),
+        `${path.relative(dir, f)} imports "${m[1]}" without a .js extension — browsers do not guess`);
+  }
+});
+
+test("randomInt is uniform over [0,n)", () => {
+  const counts = new Array(6).fill(0);
+  for (let i = 0; i < 60000; i++) counts[E.randomInt(6)]++;
+  for (const c of counts) assert.ok(c > 9000 && c < 11000, `skewed bucket: ${counts}`);
+  for (let i = 0; i < 1000; i++) assert.strictEqual(E.randomInt(1), 0);
+  for (const n of [2, 3, 4, 13, 52])
+    for (let i = 0; i < 500; i++) {
+      const v = E.randomInt(n);
+      assert.ok(Number.isInteger(v) && v >= 0 && v < n, `randomInt(${n}) returned ${v}`);
+    }
 });
