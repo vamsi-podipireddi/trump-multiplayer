@@ -58,12 +58,22 @@ let gen = 0;
    running unseen. Multiplayer's ui/modals.js has no matching flag: its game
    state lives on a server the client doesn't control, so a client-side
    pause could only hide that the AI and turn timer kept running there, not
-   actually stop them — solo owns G directly, so it can. */
+   actually stop them — solo owns G directly, so it can.
+   Match-scoped, like gen, and reset alongside every gen++ for the same
+   reason: a keyboard user can Tab straight past the Help overlay (nothing
+   here may add a focus trap or inert — ui/modals.js is shared with the
+   multiplayer client) to "New match" and activate it, which calls
+   toStart() and hides the overlay directly, never through the
+   setRenderHandler seam that normally clears this flag. Left uncleared,
+   every future step() timer would see a stale paused=true and no-op
+   forever — a silently frozen game with no path back except reopening and
+   properly closing Help. */
 let paused = false;
 
 export function startSolo(opts) {
   difficulty = opts.difficulty;
   gen++;
+  paused = false;   // a fresh match must not inherit a stale pause — see the comment on the declaration above
   G = E.createMatch(["You", "West", "North", "East"], { targetDeals: opts.targetDeals });
   E.startMatch(G);
   $("start-screen").classList.remove("show");
@@ -375,9 +385,14 @@ function phaseLabel(phase) {
 
 // ---------- start / restart ----------
 /* Abandon the current match (if any) and return to the difficulty/deals
-   picker. Bumping gen invalidates any AI/trick timer still pending from it. */
+   picker. Bumping gen invalidates any AI/trick timer still pending from it.
+   Also clears paused: this hides the overlay directly rather than through
+   showHelp's own close button, so it is reachable with Help still open
+   (Tab past it to "New match") and must not leave a stale pause behind for
+   the next match — see the comment on paused's declaration. */
 function toStart() {
   gen++;
+  paused = false;
   G = null;
   hideOverlay();
   document.body.classList.remove("in-game");
