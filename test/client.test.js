@@ -30,11 +30,8 @@ const jsFiles = (function walk(dir) {
 
 // The client is index.html (markup only) plus a tree of leaf modules under
 // app/js/ (core/ excluded — that's the shared engine, not client code). CLIENT
-// is the JS side: the protocol, option-list and error-code scans below read
-// it. MARKUP is index.html itself, kept separate so a scan for markup (an id,
-// a data- attribute) can never accidentally match against JS source instead.
+// is the JS side: the protocol, option-list and error-code scans below read it.
 const CLIENT = jsFiles.map(f => fs.readFileSync(f, "utf8")).join("\n");
-const MARKUP = fs.readFileSync(path.join(__dirname, "..", "app", "index.html"), "utf8");
 const CORE = fs.readdirSync(path.join(__dirname, "..", "src", "core", "room"))
   .filter(f => f.endsWith(".js"))
   .map(f => fs.readFileSync(path.join(__dirname, "..", "src", "core", "room", f), "utf8"))
