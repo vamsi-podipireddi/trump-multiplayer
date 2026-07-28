@@ -1,7 +1,7 @@
 /* PIMC hard-AI tests: legality, determinizer soundness, budget, strength sanity. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as E from "../engine.js";
+import * as E from "../app/js/core/engine/index.js";
 
 const key = c => c.suit + c.rank;
 

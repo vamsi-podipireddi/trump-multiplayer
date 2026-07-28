@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as R from "../room.js";
-import * as E from "../engine.js";
+import * as E from "../app/js/core/engine/index.js";
 
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];

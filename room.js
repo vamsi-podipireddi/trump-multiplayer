@@ -22,7 +22,7 @@
    Adapters own: sockets, rate limiting, persistence, Origin checks.
    ============================================================ */
 
-import * as E from "./engine.js";
+import * as E from "./app/js/core/engine/index.js";
 
 const SEAT_LABEL = ["South", "West", "North", "East"];
 const EMOTES = ["👏", "😂", "😱", "🔥", "🤝", "💀"];

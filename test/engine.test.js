@@ -2,7 +2,7 @@
    Pure engine, no I/O — every playout must satisfy the deck/trick/score laws. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import * as E from "../engine.js";
+import * as E from "../app/js/core/engine/index.js";
 import * as R from "../room.js";
 
 const rnd = (n) => Math.floor(Math.random() * n);
