@@ -824,6 +824,7 @@
 
 <script type="module">
 "use strict";
+import { S, myUid, leaveRoom, mintCode, takeNotice } from "/js/session.js";
 import { $, esc, toast, paintAvatar, avatarHtml } from "/js/util/dom.js";
 import { setFourColor, initPrefs } from "/js/util/prefs.js";
 import { SUITS, RED, SUIT_NAME, SUIT_KEY, cardName,
@@ -836,79 +837,62 @@ const DIFF_OPTS = [["easy","Easy"],["normal","Normal"],["hard","Hard"]];
 const DEAL_OPTS = [3,5,7];
 const TIMER_OPTS = [0,15,30,45,60,90];
 
-let ws = null, view = null, myPid = null, mySeat = null, roomCode = null;
-let humanBidValue = null, bidCtxKey = null, reconnectTimer = null, wantConnected = false;
-let autoStartSolo = false, startingSolo = false; // one-click "Play vs 3 Bots"
-let serverSkew = 0;   // Date.now() - server now; keeps deadlines honest across clock drift
-let creating = false, createPrivate = false, createTries = 0, myName = "";
-
 // ---------- networking ----------
 // Production "Pages + separate Worker" split: set WS_BASE to the Worker's URL,
 // e.g. "wss://trump-multiplayer.<your-subdomain>.workers.dev".
 // Leave "" for same-origin (single Worker w/ static assets, or local `node server.js`).
 const WS_BASE = "";
-/* Codes are minted client-side because the Durable Object is routed by the code
-   before the socket opens. 4 chars for a shareable room, 8 for a private one. */
-const mintCode = (len) => { const A = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let s = ""; for (let i = 0; i < (len || 4); i++) s += A[Math.floor(Math.random() * A.length)]; return s; };
-/* Stable per-browser id for optional stats — random, no account, never leaves as PII. */
-function myUid() {
-  try {
-    let u = localStorage.getItem("trump_uid");
-    if (!u) { u = mintCode(8).toLowerCase() + Date.now().toString(36); localStorage.setItem("trump_uid", u); }
-    return u;
-  } catch { return null; }
-}
 function connect(name, code) {
-  wantConnected = true;
-  myName = name;
-  if (!code) code = mintCode(createPrivate ? 8 : 4);
-  roomCode = code;
+  S.wantConnected = true;
+  S.myName = name;
+  if (!code) code = mintCode(S.createPrivate ? 8 : 4);
+  S.roomCode = code;
   const base = WS_BASE || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`;
-  ws = new WebSocket(`${base}/ws?room=${encodeURIComponent(code)}`);
-  ws.onopen = () => {
+  S.ws = new WebSocket(`${base}/ws?room=${encodeURIComponent(code)}`);
+  S.ws.onopen = () => {
     $("conn").classList.remove("show");
     reconnectDelay = RECONNECT_MIN; // a good connection resets the backoff
     let pid = null; // only auto-resume a recent session token (avoids hijacking a stale one on a shared device)
     const t = +localStorage.getItem("trump_pid_" + code + "_t") || 0; if (Date.now() - t < 3 * 3600 * 1000) pid = localStorage.getItem("trump_pid_" + code);
-    ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null, uid: myUid(), create: creating, private: createPrivate }));
+    S.ws.send(JSON.stringify({ type: "join", room: code, name, playerId: pid || null, uid: myUid(), create: S.creating, private: S.createPrivate }));
   };
-  ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
-  ws.onclose = () => { if (wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
-  ws.onerror = () => {};
+  S.ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMsg(m); };
+  S.ws.onclose = () => { if (S.wantConnected) { $("conn").classList.add("show"); scheduleReconnect(name); } };
+  S.ws.onerror = () => {};
 }
 /* Exponential backoff with jitter: a server that is down (or restarting, and
    about to get every client back at once) shouldn't be hammered every 1.5s. */
 const RECONNECT_MIN = 800, RECONNECT_MAX = 20000;
 let reconnectDelay = RECONNECT_MIN;
 function scheduleReconnect(name) {
-  if (reconnectTimer) return;
+  if (S.reconnectTimer) return;
   const wait = Math.round(reconnectDelay * (0.7 + Math.random() * 0.6));
   reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX);
-  reconnectTimer = setTimeout(() => { reconnectTimer = null; if (wantConnected) connect(name, roomCode); }, wait);
+  S.reconnectTimer = setTimeout(() => { S.reconnectTimer = null; if (S.wantConnected) connect(name, S.roomCode); }, wait);
 }
 function onMsg(m) {
   if (m.type === "joined") {
-    myPid = m.playerId; roomCode = m.room;
-    creating = false; createTries = 0;   // a later reconnect must not re-assert "create"
+    S.myPid = m.playerId; S.roomCode = m.room;
+    S.creating = false; S.createTries = 0;   // a later reconnect must not re-assert "create"
     localStorage.setItem("trump_pid_" + m.room, m.playerId);
     localStorage.setItem("trump_pid_" + m.room + "_t", String(Date.now()));
     localStorage.setItem("trump_name", $("join-name").value.trim());
     history.replaceState(null, "", "?room=" + m.room);
   } else if (m.type === "state") {
-    view = m.view; mySeat = view.you.seat;
-    if (typeof view.now === "number") serverSkew = Date.now() - view.now;
-    if (autoStartSolo && !view.room.started && view.room.isHost) { autoStartSolo = false; send({ type: "start" }); }
+    S.view = m.view; S.mySeat = S.view.you.seat;
+    if (typeof S.view.now === "number") S.serverSkew = Date.now() - S.view.now;
+    if (S.autoStartSolo && !S.view.room.started && S.view.room.isHost) { S.autoStartSolo = false; send({ type: "start" }); }
     render();
   } else if (m.type === "emote") {
     showEmote(m.seat, m.e);
   } else if (m.type === "error") {
     // a freshly minted code collided with a live room — mint another and try again
-    if (m.code === "code-taken" && creating && createTries < 6) {
-      createTries++;
-      const dead = ws;
+    if (m.code === "code-taken" && S.creating && S.createTries < 6) {
+      S.createTries++;
+      const dead = S.ws;
       if (dead) { dead.onclose = null; dead.onerror = null; dead.onmessage = null; try { dead.close(); } catch {} }
-      ws = null; roomCode = null;
-      connect(myName, "");
+      S.ws = null; S.roomCode = null;
+      connect(S.myName, "");
       return;
     }
     // the host removed us: stop reconnecting, drop the session, back to the join screen
@@ -916,8 +900,8 @@ function onMsg(m) {
     toast(m.message);
   }
 }
-const serverNow = () => Date.now() - serverSkew;
-const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+const serverNow = () => Date.now() - S.serverSkew;
+const send = o => { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(o)); };
 
 // ---------- join UI ----------
 function doJoin(create) {
@@ -925,15 +909,15 @@ function doJoin(create) {
   if (!name) { $("join-err").textContent = "Enter a name."; return; }
   const code = create ? "" : $("join-code").value.trim().toUpperCase();
   if (!create && !code) { $("join-err").textContent = "Enter a room code, or use Create New Room."; return; }
-  creating = !!create; createPrivate = create && $("join-private").checked; createTries = 0;
-  roomCode = code || null;
+  S.creating = !!create; S.createPrivate = create && $("join-private").checked; S.createTries = 0;
+  S.roomCode = code || null;
   connect(name, code);
 }
 function doSolo() {
   const name = $("join-name").value.trim();
   if (!name) { $("join-err").textContent = "Enter a name."; return; }
-  autoStartSolo = true; startingSolo = true; roomCode = null;
-  creating = true; createPrivate = false; createTries = 0;
+  S.autoStartSolo = true; S.startingSolo = true; S.roomCode = null;
+  S.creating = true; S.createPrivate = false; S.createTries = 0;
   connect(name, ""); // create a fresh room, then auto-start with 3 bots
 }
 $("btn-solo").onclick = doSolo;
@@ -955,53 +939,42 @@ $("join-name").value = localStorage.getItem("trump_name") || "";
   } catch {}
 })();
 { const p = new URLSearchParams(location.search).get("room"); if (p) $("join-code").value = p.toUpperCase(); }
-// a notice left by leaveRoom() survives the reload it triggers (e.g. "the host removed you")
-try { const n = sessionStorage.getItem("trump_notice"); if (n) { $("join-err").textContent = n; sessionStorage.removeItem("trump_notice"); } } catch {}
-/* Hard reset back to the join screen: forget this room's session token and
-   reload, so no state from the old table survives. */
-function leaveRoom(reason) {
-  wantConnected = false;
-  try {
-    if (roomCode) { localStorage.removeItem("trump_pid_" + roomCode); localStorage.removeItem("trump_pid_" + roomCode + "_t"); }
-    if (reason) sessionStorage.setItem("trump_notice", reason);
-  } catch {}
-  if (ws) { ws.onclose = null; try { ws.close(); } catch {} }
-  location.href = location.pathname;
-}
+const notice = takeNotice();
+if (notice) $("join-err").textContent = notice;
 $("btn-leave").onclick = () => leaveRoom("");
 $("btn-help").onclick = showHelp;
 
 // ---------- orientation ----------
-const orient = () => (mySeat == null ? 0 : mySeat);
+const orient = () => (S.mySeat == null ? 0 : S.mySeat);
 const seatAtPos = pos => (orient() + pos) % 4;
 const posOfSeat = seat => (seat - orient() + 4) % 4;
 
 // ---------- top-level render ----------
 function render() {
-  if (!view) return;
-  if (!view.room.started && startingSolo) { $("join-err").textContent = "Dealing…"; return; } // skip the lobby for solo
-  if (view.room.started) startingSolo = false;
-  if (!view.room.started) { $("join-screen").classList.remove("show"); $("lobby-screen").classList.add("show"); $("game").style.display = "none"; renderLobby(); }
+  if (!S.view) return;
+  if (!S.view.room.started && S.startingSolo) { $("join-err").textContent = "Dealing…"; return; } // skip the lobby for solo
+  if (S.view.room.started) S.startingSolo = false;
+  if (!S.view.room.started) { $("join-screen").classList.remove("show"); $("lobby-screen").classList.add("show"); $("game").style.display = "none"; renderLobby(); }
   else { $("join-screen").classList.remove("show"); $("lobby-screen").classList.remove("show"); $("game").style.display = "grid"; renderGame(); }
-  document.body.classList.toggle("in-game", !!view.room.started);
-  if (!view.room.started) closeSheet();
-  $("awaybar").classList.toggle("show", !!(view.room.started && view.you.away));
-  $("btn-stand").style.display = view.room.started && !view.you.spectator ? "" : "none";
+  document.body.classList.toggle("in-game", !!S.view.room.started);
+  if (!S.view.room.started) closeSheet();
+  $("awaybar").classList.toggle("show", !!(S.view.room.started && S.view.you.away));
+  $("btn-stand").style.display = S.view.room.started && !S.view.you.spectator ? "" : "none";
   const ok = $("overlay").dataset.kind;
-  if (ok === "settings" && $("modal-settings")) renderSettings($("modal-settings"), !!view.room.isHost); // keep open, refresh pressed states
-  else if (view.phase === "matchOver") { if (ok !== "help" && ok !== "match") showMatchOver(); }
+  if (ok === "settings" && $("modal-settings")) renderSettings($("modal-settings"), !!S.view.room.isHost); // keep open, refresh pressed states
+  else if (S.view.phase === "matchOver") { if (ok !== "help" && ok !== "match") showMatchOver(); }
   else if (ok !== "help") hideOverlay();
 }
 
 // ---------- lobby ----------
 function renderLobby() {
-  $("lobby-code").textContent = view.room.code;
+  $("lobby-code").textContent = S.view.room.code;
   const list = $("lobby-seats"); list.innerHTML = "";
-  const isHost = view.room.isHost;
-  view.seats.forEach(s => {
+  const isHost = S.view.room.isHost;
+  S.view.seats.forEach(s => {
     const row = document.createElement("div");
     row.className = "seatrow" + (s.you ? " you" : "");
-    const host = view.room.hostSeat === s.seat ? ` <span class="pill ai">Host</span>` : "";
+    const host = S.view.room.hostSeat === s.seat ? ` <span class="pill ai">Host</span>` : "";
     const pill = s.isHuman
       ? `<span class="pill ${s.connected ? "on" : "off"}">${s.you ? "You" : (s.connected ? "Here" : "Away")}</span>`
       : `<span class="pill open">Open</span>`;
@@ -1014,7 +987,7 @@ function renderLobby() {
   renderSettings($("lobby-settings"), isHost);
 
   const ctrl = $("lobby-controls"); ctrl.innerHTML = "";
-  if (view.you.spectator) {
+  if (S.view.you.spectator) {
     const p = document.createElement("p"); p.className = "muted";
     p.textContent = "You're spectating — take any open seat above to play.";
     ctrl.appendChild(p);
@@ -1025,11 +998,11 @@ function renderLobby() {
     b.onclick = () => send({ type: "start" }); ctrl.appendChild(b);
   } else {
     const p = document.createElement("p"); p.className = "muted"; p.style.textAlign = "center";
-    p.innerHTML = `Waiting for <b>${esc(view.room.hostName || "host")}</b> to start…`;
+    p.innerHTML = `Waiting for <b>${esc(S.view.room.hostName || "host")}</b> to start…`;
     ctrl.appendChild(p);
   }
-  const spec = view.room.spectators;
-  $("lobby-note").textContent = `${view.room.humans} seated${spec ? `, ${spec} spectating` : ""}. Empty seats become AI when the game starts.`;
+  const spec = S.view.room.spectators;
+  $("lobby-note").textContent = `${S.view.room.humans} seated${spec ? `, ${spec} spectating` : ""}. Empty seats become AI when the game starts.`;
 }
 function miniBtn(label, cls, fn, ic) {
   const b = document.createElement("button");
@@ -1040,11 +1013,11 @@ function miniBtn(label, cls, fn, ic) {
 }
 /* Settings are host-driven; everyone else sees the same rows, read-only. */
 function renderSettings(host_el, isHost) {
-  const st = view.settings || {}; host_el.innerHTML = "";
+  const st = S.view.settings || {}; host_el.innerHTML = "";
   const seg = (label, opts, cur, key, live) => {
     const row = document.createElement("div"); row.className = "setrow";
     const l = document.createElement("span"); l.className = "lbl"; l.textContent = label; row.appendChild(l);
-    const editable = isHost && (live || !view.room.started);
+    const editable = isHost && (live || !S.view.room.started);
     opts.forEach(([val, text]) => {
       const b = document.createElement("button");
       b.className = "segbtn"; b.type = "button"; b.textContent = text;
@@ -1061,28 +1034,28 @@ function renderSettings(host_el, isHost) {
 }
 
 // ---------- game board ----------
-function sideOf(seat) { return (seat === view.declarer || seat === view.partner) ? "D" : "O"; }
+function sideOf(seat) { return (seat === S.view.declarer || seat === S.view.partner) ? "D" : "O"; }
 function activeSeat() {
-  if (view.phase === "playing") return view.turn;
-  if (view.phase === "bidding") return view.bidTurn;
-  if (view.phase === "trumpSelect" || view.phase === "partnerSelect") return view.declarer;
+  if (S.view.phase === "playing") return S.view.turn;
+  if (S.view.phase === "bidding") return S.view.bidTurn;
+  if (S.view.phase === "trumpSelect" || S.view.phase === "partnerSelect") return S.view.declarer;
   return -1;
 }
 function roleOf(seat) {
-  if (!view.teamsRevealed) {
-    if (view.phase === "bidding" && view.bidActive.includes(seat)) return seat === view.highBidder ? { c:"bidding", t:"high bid" } : { c:"bidding", t:"bidding" };
-    if (seat === view.highBidder) return { c:"bidding", t:"high bid" };
+  if (!S.view.teamsRevealed) {
+    if (S.view.phase === "bidding" && S.view.bidActive.includes(seat)) return seat === S.view.highBidder ? { c:"bidding", t:"high bid" } : { c:"bidding", t:"bidding" };
+    if (seat === S.view.highBidder) return { c:"bidding", t:"high bid" };
     // a folded seat used to return null and render blank — identical to one yet to act
-    if (view.phase === "bidding") return { c:"passed", t:"passed" };
+    if (S.view.phase === "bidding") return { c:"passed", t:"passed" };
     return null;
   }
-  if (seat === view.declarer) return { c:"bidder", t:"BIDDER" };
-  if (seat === view.partner) return { c:"partner", t:"PARTNER" };
+  if (seat === S.view.declarer) return { c:"bidder", t:"BIDDER" };
+  if (seat === S.view.partner) return { c:"partner", t:"PARTNER" };
   return { c:"def", t:"DEFENDER" };
 }
 function renderGame() {
   ringEl = null; // rebuilt below if the active seat is on the clock
-  $("header-state").innerHTML = `Deal <b>${view.roundNumber}</b> · first to <b>${view.consts.TARGET_GAMES}</b>`;
+  $("header-state").innerHTML = `Deal <b>${S.view.roundNumber}</b> · first to <b>${S.view.consts.TARGET_GAMES}</b>`;
   renderMedallion();
 
   const act = activeSeat();
@@ -1090,11 +1063,11 @@ function renderGame() {
   for (let pos = 0; pos < 4; pos++) {
     const seat = seatAtPos(pos);
     const el = $("seat-" + POS_CLASS[pos]);
-    const info = view.seats[seat];
+    const info = S.view.seats[seat];
     el.classList.toggle("active", seat === act);
-    el.classList.toggle("dealer", view.dealer === seat);
-    el.classList.toggle("team-d", view.teamsRevealed && sideOf(seat) === "D");
-    el.classList.toggle("team-o", view.teamsRevealed && sideOf(seat) === "O");
+    el.classList.toggle("dealer", S.view.dealer === seat);
+    el.classList.toggle("team-d", S.view.teamsRevealed && sideOf(seat) === "D");
+    el.classList.toggle("team-o", S.view.teamsRevealed && sideOf(seat) === "O");
     const np = el.querySelector(".nameplate");
     np.querySelector(".who").textContent = info.name || info.label;
     paintAvatar(np.querySelector(".avatar"), info.name || info.label, !info.isHuman);
@@ -1104,42 +1077,42 @@ function renderGame() {
     if (role) { const r = document.createElement("span"); r.className = "role " + role.c; r.textContent = role.t; np.appendChild(r); }
     /* The dealer button is a puck that travels round a real table, so it is one
        here too — appended last, which is where it sits in front of the player. */
-    if (view.dealer === seat) {
+    if (S.view.dealer === seat) {
       const d = document.createElement("span"); d.className = "dealer-btn"; d.textContent = "D";
       d.title = "Dealer"; np.appendChild(d);
     }
     /* The countdown rings the player's own face — the one place on the plate the
        eye is already looking — instead of adding a second disc beside it. */
     const ava = np.querySelector(".avatar");
-    const onClock = seat === act && view.turnDeadline != null && info.isHuman && info.connected && !info.away;
+    const onClock = seat === act && S.view.turnDeadline != null && info.isHuman && info.connected && !info.away;
     ava.classList.toggle("ticking", onClock);
     if (onClock) ringEl = ava; else ava.classList.remove("urgent");
     np.classList.toggle("off", info.isHuman && !info.connected);
     el.classList.toggle("away-seat", !!info.away);
     const zzz = info.away ? ` · <span class="zzz">on autopilot</span>` : (info.isHuman && !info.connected ? ` · <span class="zzz">offline</span>` : "");
     // tricks, not deals: deal-wins are in the scoreboard as pips, where "first to N" reads
-    const tw = view.tricksWon[seat];
-    el.querySelector(".meta").innerHTML = `<b>${view.capturedPoints[seat]}</b> pts · ${tw} ${tw === 1 ? "trick" : "tricks"}${zzz}`;
+    const tw = S.view.tricksWon[seat];
+    el.querySelector(".meta").innerHTML = `<b>${S.view.capturedPoints[seat]}</b> pts · ${tw} ${tw === 1 ? "trick" : "tricks"}${zzz}`;
     /* What each seat actually bid — the pill beside the name says the state
        (bidding / high bid / passed), this says the number, so neither repeats. */
     const bc = el.querySelector(".bidchip");
-    const bidVal = view.phase === "bidding" && view.bids ? view.bids[seat] : null;
-    bc.className = "bidchip" + (seat === view.highBidder ? " high" : "");
+    const bidVal = S.view.phase === "bidding" && S.view.bids ? S.view.bids[seat] : null;
+    bc.className = "bidchip" + (seat === S.view.highBidder ? " high" : "");
     bc.textContent = bidVal != null ? String(bidVal) : "";
     bc.style.display = bidVal != null ? "" : "none";
     // card backs for everyone except your own seat
     const backs = el.querySelector("[data-backs]"); backs.innerHTML = "";
-    const isMe = (mySeat != null && seat === mySeat);
+    const isMe = (S.mySeat != null && seat === S.mySeat);
     if (!isMe) {
-      for (let i = 0; i < view.handCounts[seat]; i++) { const d = document.createElement("div"); d.className = "card-back"; backs.appendChild(d); }
-      if (view.handCounts[seat]) { const n = document.createElement("span"); n.className = "backs-count"; n.textContent = String(view.handCounts[seat]); backs.appendChild(n); }
+      for (let i = 0; i < S.view.handCounts[seat]; i++) { const d = document.createElement("div"); d.className = "card-back"; backs.appendChild(d); }
+      if (S.view.handCounts[seat]) { const n = document.createElement("span"); n.className = "backs-count"; n.textContent = String(S.view.handCounts[seat]); backs.appendChild(n); }
     }
   }
 
   // trick — reuse existing nodes so only a newly played card animates in (no full-trick flash)
   const tw = $("trick");
   const keyOf = pl => pl.player + ":" + pl.card.suit + pl.card.rank;
-  const want = view.trick;
+  const want = S.view.trick;
   const existing = Array.from(tw.children);
   const prefixOk = existing.length <= want.length && existing.every((el, i) => el.dataset.k === keyOf(want[i]));
   if (!prefixOk) tw.innerHTML = "";
@@ -1151,7 +1124,7 @@ function renderGame() {
       el.classList.add("trick-card", "pos-" + posOfSeat(play.player));
       tw.appendChild(el);
     }
-    el.classList.toggle("winner", view.phase === "trickEnd" && i === view.lastWinnerSlot);
+    el.classList.toggle("winner", S.view.phase === "trickEnd" && i === S.view.lastWinnerSlot);
   });
 
   renderHand();
@@ -1176,41 +1149,41 @@ function renderMedallion() {
   const label = med.querySelector(".med-label"), main = med.querySelector(".med-main");
   const sub = med.querySelector(".med-sub"), bar = med.querySelector(".med-bar > i");
   const chips = med.querySelector(".med-chips");
-  const ph = view.phase;
+  const ph = S.view.phase;
   let mode = "full", showBar = false, pct = 0;
-  chips.innerHTML = view.bonusSuit ? `<span>bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })} = 30</span>` : "";
+  chips.innerHTML = S.view.bonusSuit ? `<span>bonus ${cardSpan({ suit: S.view.bonusSuit, rank: 3 })} = 30</span>` : "";
   main.classList.remove("set");
 
   if (ph === "playing" || ph === "trickEnd") {
     mode = "strip"; showBar = true;
-    const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
-    label.innerHTML = `${suitSpan(view.trump)} TRUMP`;
-    main.innerHTML = `<b>${view.bid}</b> to make · <b>${dPts}</b>`;
-    pct = view.bid ? Math.min(1, dPts / view.bid) : 0;
+    const dPts = S.view.capturedPoints[S.view.declarer] + S.view.capturedPoints[S.view.partner];
+    label.innerHTML = `${suitSpan(S.view.trump)} TRUMP`;
+    main.innerHTML = `<b>${S.view.bid}</b> to make · <b>${dPts}</b>`;
+    pct = S.view.bid ? Math.min(1, dPts / S.view.bid) : 0;
     // the trick counter rides in the strip rather than floating separately — one
     // element to keep clear of the seats and the cross instead of two
-    const done = view.tricksWon.reduce((a, b) => a + b, 0);
+    const done = S.view.tricksWon.reduce((a, b) => a + b, 0);
     chips.innerHTML = `<span>trick ${Math.min(13, done + (ph === "playing" ? 1 : 0))} / 13</span>`;
   } else if (ph === "bidding") {
     label.textContent = "AUCTION";
-    main.textContent = view.highBid ? String(view.highBid) : "—";
-    sub.innerHTML = view.highBid ? `held by <b>${esc(view.names[view.highBidder])}</b>` : "no bid yet";
+    main.textContent = S.view.highBid ? String(S.view.highBid) : "—";
+    sub.innerHTML = S.view.highBid ? `held by <b>${esc(S.view.names[S.view.highBidder])}</b>` : "no bid yet";
     // minBid is only on the wire while *you* are the required bidder; never recompute it
-    if (view.you.minBid != null) chips.innerHTML += `<span>min next ${view.you.minBid}</span>`;
+    if (S.view.you.minBid != null) chips.innerHTML += `<span>min next ${S.view.you.minBid}</span>`;
   } else if (ph === "trumpSelect") {
     label.textContent = "BID WON";
-    main.textContent = String(view.bid);
-    sub.innerHTML = `<b>${esc(view.names[view.declarer])}</b> is choosing trump`;
+    main.textContent = String(S.view.bid);
+    sub.innerHTML = `<b>${esc(S.view.names[S.view.declarer])}</b> is choosing trump`;
   } else if (ph === "partnerSelect") {
-    label.innerHTML = `TRUMP ${suitSpan(view.trump)}`;
-    main.textContent = String(view.bid);
-    sub.innerHTML = `<b>${esc(view.names[view.declarer])}</b> is calling a partner`;
-  } else if (view.lastResult) {           // roundEnd, matchOver
-    const r = view.lastResult;
+    label.innerHTML = `TRUMP ${suitSpan(S.view.trump)}`;
+    main.textContent = String(S.view.bid);
+    sub.innerHTML = `<b>${esc(S.view.names[S.view.declarer])}</b> is calling a partner`;
+  } else if (S.view.lastResult) {           // roundEnd, matchOver
+    const r = S.view.lastResult;
     label.textContent = "DEAL OVER";
     main.textContent = r.made ? "MADE" : "SET";
     main.classList.toggle("set", !r.made);
-    sub.innerHTML = `${esc(view.names[r.declarer])} &amp; ${esc(view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid}`;
+    sub.innerHTML = `${esc(S.view.names[r.declarer])} &amp; ${esc(S.view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid}`;
     showBar = true; pct = r.bid ? Math.min(1, r.dPts / r.bid) : 0;
   } else {
     label.textContent = ""; main.textContent = "—"; sub.textContent = "";
@@ -1227,10 +1200,10 @@ function renderMedallion() {
 const HAND_ORDER = { "♠":0, "♥":1, "♣":2, "♦":3 };
 function renderHand() {
   const wrap = $("my-hand");
-  const hand = ((view.you && view.you.hand) || []).slice()
+  const hand = ((S.view.you && S.view.you.hand) || []).slice()
     .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank));
-  const canPlay = view.you.toAct && view.you.actKind === "play";
-  const legalKey = new Set((canPlay ? (view.you.legal || []) : []).map(x => x.suit + x.rank));
+  const canPlay = S.view.you.toAct && S.view.you.actKind === "play";
+  const legalKey = new Set((canPlay ? (S.view.you.legal || []) : []).map(x => x.suit + x.rank));
 
   /* Rebuilding the hand blows away keyboard focus, and a state message arrives
      for every action at the table — including other people's chat. Skip the
@@ -1238,7 +1211,7 @@ function renderHand() {
      focus back on the same card (or its position) instead of dropping the user
      out to <body> mid-turn. */
   const sig = JSON.stringify([hand.map(c => c.suit + c.rank), canPlay, [...legalKey].sort(),
-                              view.trump, view.bonusSuit, view.leadSuit]);
+                              S.view.trump, S.view.bonusSuit, S.view.leadSuit]);
   if (wrap._sig === sig) return;
   wrap._sig = sig;
   const active = document.activeElement;
@@ -1251,8 +1224,8 @@ function renderHand() {
     const el = cardEl(card, true);              // real <button>: Tab to reach it, Enter/Space to play
     if (i > 0 && hand[i - 1].suit !== card.suit) el.classList.add("suit-start"); // seam between suits
     const notes = [];
-    if (view.trump && card.suit === view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
-    if (view.bonusSuit && card.suit === view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
+    if (S.view.trump && card.suit === S.view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
+    if (S.view.bonusSuit && card.suit === S.view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
     let label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
     if (canPlay) {
       if (legalKey.has(card.suit + card.rank)) {
@@ -1261,7 +1234,7 @@ function renderHand() {
       } else {
         el.classList.add("illegal");
         el.setAttribute("aria-disabled", "true");
-        el.title = label = `${label} — you must follow ${SUIT_NAME[view.leadSuit] || view.leadSuit}`;
+        el.title = label = `${label} — you must follow ${SUIT_NAME[S.view.leadSuit] || S.view.leadSuit}`;
       }
     } else {
       // still focusable (so the hand can be read out) but inert
@@ -1342,7 +1315,7 @@ function fitTable() {
 addEventListener("resize", () => { const w = $("my-hand"); if (w && w.children.length) fitHand(w); fitTable(); });
 
 function renderScoreboard() {
-  const c = view.consts;
+  const c = S.view.consts;
   $("score-title").textContent = `SCOREBOARD · FIRST TO ${c.TARGET_GAMES}`;
   /* Deal-wins as pips against the target — "2" never said how close anyone was.
      Seven of them don't fit the column, so "first to 7" falls back to n / K. */
@@ -1352,28 +1325,28 @@ function renderScoreboard() {
   let html = `<tr><th class="name">Player</th><th>Points</th><th class="deals">Deals</th></tr>`;
   for (let s = 0; s < 4; s++) {
     const cls = [];
-    if (mySeat != null && s === mySeat) cls.push("you");
-    if (view.teamsRevealed) cls.push(sideOf(s) === "D" ? "side-d" : "side-o");   // a rail on the row, not a dot in the cell
-    html += `<tr class="${cls.join(" ")}"><td class="name">${esc(view.names[s] || view.seats[s].label)}${view.dealer === s ? " (D)" : ""}</td>` +
-            `<td><b>${view.capturedPoints[s]}</b></td><td class="deals">${deals(view.scores[s])}</td></tr>`;
+    if (S.mySeat != null && s === S.mySeat) cls.push("you");
+    if (S.view.teamsRevealed) cls.push(sideOf(s) === "D" ? "side-d" : "side-o");   // a rail on the row, not a dot in the cell
+    html += `<tr class="${cls.join(" ")}"><td class="name">${esc(S.view.names[s] || S.view.seats[s].label)}${S.view.dealer === s ? " (D)" : ""}</td>` +
+            `<td><b>${S.view.capturedPoints[s]}</b></td><td class="deals">${deals(S.view.scores[s])}</td></tr>`;
   }
   $("scoreboard").innerHTML = html;
 
   const cl = $("contract-line"); cl.innerHTML = "";
-  if (view.teamsRevealed && view.declarer != null) {
-    const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
+  if (S.view.teamsRevealed && S.view.declarer != null) {
+    const dPts = S.view.capturedPoints[S.view.declarer] + S.view.capturedPoints[S.view.partner];
     const top = document.createElement("div"); top.className = "cbar-top";
-    top.innerHTML = `<span>${suitSpan(view.trump)} ${esc(view.names[view.declarer])} &amp; ${esc(view.names[view.partner])}</span><b>${dPts}/${view.bid}</b>`;
+    top.innerHTML = `<span>${suitSpan(S.view.trump)} ${esc(S.view.names[S.view.declarer])} &amp; ${esc(S.view.names[S.view.partner])}</span><b>${dPts}/${S.view.bid}</b>`;
     const bar = document.createElement("div"); bar.className = "cbar";
     const fill = document.createElement("i");
-    fill.style.width = (view.bid ? Math.min(1, dPts / view.bid) * 100 : 0).toFixed(1) + "%";
+    fill.style.width = (S.view.bid ? Math.min(1, dPts / S.view.bid) * 100 : 0).toFixed(1) + "%";
     bar.appendChild(fill); cl.appendChild(top); cl.appendChild(bar);
   }
 
-  const st = view.settings || {}, sl = $("settings-line");
+  const st = S.view.settings || {}, sl = $("settings-line");
   const diffName = (DIFF_OPTS.find(d => d[0] === st.difficulty) || ["", "?"])[1];
   sl.innerHTML = `<span class="chip">AI <b>${diffName}</b></span><span class="chip">Timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b></span> `;
-  if (view.room.isHost) sl.appendChild(miniBtn("Change", "", showSettingsModal, "gear"));
+  if (S.view.room.isHost) sl.appendChild(miniBtn("Change", "", showSettingsModal, "gear"));
 }
 
 /* ---------- sliding-window lists (the table log and the chat) ----------
@@ -1403,12 +1376,12 @@ function syncWindow(box, keys, build) {
 function renderChat() {
   const box = $("chat-log");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  const msgs = view.chat || [];
+  const msgs = S.view.chat || [];
   $("chat-empty").style.display = msgs.length ? "none" : "";
   const added = syncWindow(box, msgs.map(m => `${m.ts} ${m.from} ${m.text}`), i => {
     const m = msgs[i];
     const d = document.createElement("div");
-    d.className = "msg" + (m.seat != null && m.seat === mySeat ? " you" : "");
+    d.className = "msg" + (m.seat != null && m.seat === S.mySeat ? " you" : "");
     d.innerHTML = `<span class="from">${esc(m.from)}:</span> ${esc(m.text)}`;
     return d;
   });
@@ -1424,11 +1397,11 @@ function renderChat() {
       $("emote-bar").appendChild(b);
     });
   }
-  $("emote-bar").style.display = view.you.spectator ? "none" : ""; // seats only, per the server rule
+  $("emote-bar").style.display = S.view.you.spectator ? "none" : ""; // seats only, per the server rule
 }
 /* Floating reaction over the sender's seat (transient — never part of state). */
 function showEmote(seat, e) {
-  if (typeof seat !== "number" || !view || !view.room.started) return;
+  if (typeof seat !== "number" || !S.view || !S.view.room.started) return;
   const host = $("seat-" + POS_CLASS[posOfSeat(seat)]);
   if (!host) return;
   const d = document.createElement("div");
@@ -1451,28 +1424,28 @@ $("btn-stand").onclick = () => {
 // ---------- live countdowns (deadlines are absolute server ms) ----------
 let ringEl = null, tickHandle = null;
 function tickTimers() {
-  if (!view || !view.room.started) return;
+  if (!S.view || !S.view.room.started) return;
   const now = serverNow();
-  if (ringEl && view.turnDeadline != null) {
-    const total = (view.settings.turnTimerSec || 45) * 1000;
-    const left = Math.max(0, view.turnDeadline - now);
+  if (ringEl && S.view.turnDeadline != null) {
+    const total = (S.view.settings.turnTimerSec || 45) * 1000;
+    const left = Math.max(0, S.view.turnDeadline - now);
     ringEl.style.setProperty("--p", String(Math.max(0, Math.min(1, left / total))));
     ringEl.classList.toggle("urgent", left <= 10000);
     ringEl.title = `${Math.ceil(left / 1000)}s left`;
   }
   const rc = $("ready-count");
-  if (rc && view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((view.roundDeadline - now) / 1000))}s`;
+  if (rc && S.view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((S.view.roundDeadline - now) / 1000))}s`;
 }
 tickHandle = setInterval(tickTimers, 250);
 
 function showSettingsModal() {
   setModal("settings", `<h2>Table Settings</h2><div id="modal-settings" style="text-align:left;"></div><button id="btn-close-set">Done</button>`);
-  renderSettings($("modal-settings"), !!view.room.isHost);
+  renderSettings($("modal-settings"), !!S.view.room.isHost);
   $("btn-close-set").onclick = () => { hideOverlay(); render(); };
 }
 function renderLog() {
   const el = $("log");
-  const entries = view.log || [];
+  const entries = S.view.log || [];
   const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
     const d = document.createElement("div");
     const cls = entries[i].cls || "";
@@ -1486,52 +1459,52 @@ function renderLog() {
 }
 function renderActionBar() {
   const bar = $("action-bar"); bar.innerHTML = "";
-  bar.dataset.turn = view.you.toAct ? "you" : "other";   // drives the cue rail
-  const c = view.consts;
+  bar.dataset.turn = S.view.you.toAct ? "you" : "other";   // drives the cue rail
+  const c = S.view.consts;
   const text = (cls, html) => { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; bar.appendChild(d); };
   const button = (label, cls, fn) => { const b = document.createElement("button"); b.className = "act-btn " + (cls || ""); b.innerHTML = label; b.onclick = fn; bar.appendChild(b); return b; };
 
-  if (view.you.spectator) {
+  if (S.view.you.spectator) {
     // seats are handed out at deal boundaries mid-match, so say when you're in
-    const q = view.you.pendingSeat != null
-      ? ` · you take ${view.seats[view.you.pendingSeat].label} on the next deal`
+    const q = S.view.you.pendingSeat != null
+      ? ` · you take ${S.view.seats[S.view.you.pendingSeat].label} on the next deal`
       : "";
-    text("status", `Spectating ${esc(view.room.hostName || "")}'s table — ${phaseLabel()}${q}`);
+    text("status", `Spectating ${esc(S.view.room.hostName || "")}'s table — ${phaseLabel()}${q}`);
     return;
   }
 
-  if (view.you.toAct) {
-    if (view.you.actKind === "bid") {
-      const ctxKey = view.roundNumber + "|" + (view.highBid || 0);
-      if (bidCtxKey !== ctxKey) { bidCtxKey = ctxKey; humanBidValue = null; } // fresh bid context → start at the minimum
-      const lo = view.you.minBid;
-      text("prompt", `Your bid — highest so far ${view.highBid ? "<b>" + view.highBid + "</b> from " + esc(view.names[view.highBidder]) : "<b>none</b>"} · bonus ${cardSpan({ suit: view.bonusSuit, rank: 3 })} is worth 30`);
-      button("Pass", "pass", () => { humanBidValue = null; send({ type: "bid", value: null }); });
+  if (S.view.you.toAct) {
+    if (S.view.you.actKind === "bid") {
+      const ctxKey = S.view.roundNumber + "|" + (S.view.highBid || 0);
+      if (S.bidCtxKey !== ctxKey) { S.bidCtxKey = ctxKey; S.humanBidValue = null; } // fresh bid context → start at the minimum
+      const lo = S.view.you.minBid;
+      text("prompt", `Your bid — highest so far ${S.view.highBid ? "<b>" + S.view.highBid + "</b> from " + esc(S.view.names[S.view.highBidder]) : "<b>none</b>"} · bonus ${cardSpan({ suit: S.view.bonusSuit, rank: 3 })} is worth 30`);
+      button("Pass", "pass", () => { S.humanBidValue = null; send({ type: "bid", value: null }); });
       if (lo > c.MAX_BID) { text("status", "Bidding is maxed out — you can only pass."); return; }
-      let v = humanBidValue; if (v == null || v < lo || v > c.MAX_BID) { v = lo; humanBidValue = v; }
-      const dn = button("−" + c.BID_STEP, "step", () => { humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
+      let v = S.humanBidValue; if (v == null || v < lo || v > c.MAX_BID) { v = lo; S.humanBidValue = v; }
+      const dn = button("−" + c.BID_STEP, "step", () => { S.humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
       dn.setAttribute("aria-label", "Lower the bid by " + c.BID_STEP);
       dn.disabled = v <= lo;
       const val = document.createElement("span"); val.className = "bidval"; val.textContent = v; bar.appendChild(val);
-      const up = button("+" + c.BID_STEP, "step", () => { humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
+      const up = button("+" + c.BID_STEP, "step", () => { S.humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
       up.setAttribute("aria-label", "Raise the bid by " + c.BID_STEP);
       up.disabled = v >= c.MAX_BID;
-      button("Bid " + v, "", () => { humanBidValue = null; send({ type: "bid", value: v }); });
+      button("Bid " + v, "", () => { S.humanBidValue = null; send({ type: "bid", value: v }); });
       return;
     }
-    if (view.you.actKind === "trump") {
-      text("prompt", `You won the bid at <b>${view.bid}</b>. Choose the trump suit.`);
+    if (S.view.you.actKind === "trump") {
+      text("prompt", `You won the bid at <b>${S.view.bid}</b>. Choose the trump suit.`);
       SUITS.forEach(s => {
         const b = button(`${suitSvg(s)}<small>${SUIT_NAME[s]}</small>`, "suit s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s }));
         b.setAttribute("aria-label", "Choose " + SUIT_NAME[s] + " as trump");
       });
       return;
     }
-    if (view.you.actKind === "call") {
-      text("prompt", `Trump is ${suitSpan(view.trump)}. Now name a card you <b>don't</b> hold — whoever has it is your partner.`);
+    if (S.view.you.actKind === "call") {
+      text("prompt", `Trump is ${suitSpan(S.view.trump)}. Now name a card you <b>don't</b> hold — whoever has it is your partner.`);
       const grid = document.createElement("div"); grid.className = "call-grid";
       const byS = {}; SUITS.forEach(s => byS[s] = []);
-      (view.you.callable || []).forEach(cd => byS[cd.suit].push(cd));
+      (S.view.you.callable || []).forEach(cd => byS[cd.suit].push(cd));
       SUITS.forEach(s => {
         if (!byS[s].length) return;
         const row = document.createElement("div"); row.className = "call-row";
@@ -1541,9 +1514,9 @@ function renderActionBar() {
         byS[s].sort((a, b) => b.rank - a.rank).forEach(cd => {
           const m = document.createElement("button");
           m.type = "button";
-          m.className = "mini-card s-" + SUIT_KEY[cd.suit] + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === view.bonusSuit && cd.rank === 3 ? " bonus" : "");
+          m.className = "mini-card s-" + SUIT_KEY[cd.suit] + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === S.view.bonusSuit && cd.rank === 3 ? " bonus" : "");
           m.innerHTML = cardFace(cd, true);
-          m.setAttribute("aria-label", "Call " + cardName(cd) + (cd.suit === view.bonusSuit && cd.rank === 3 ? " (bonus 30 points)" : ""));
+          m.setAttribute("aria-label", "Call " + cardName(cd) + (cd.suit === S.view.bonusSuit && cd.rank === 3 ? " (bonus 30 points)" : ""));
           m.onclick = () => send({ type: "call", card: { suit: cd.suit, rank: cd.rank } });
           row.appendChild(m);
         });
@@ -1552,59 +1525,59 @@ function renderActionBar() {
       bar.appendChild(grid);
       return;
     }
-    if (view.you.actKind === "play") { bannerForPlay(true); return; }
+    if (S.view.you.actKind === "play") { bannerForPlay(true); return; }
   }
   // not my turn / transitions
-  if (view.phase === "playing" || view.phase === "trickEnd") { bannerForPlay(false); return; }
-  if (view.phase === "roundEnd") {
-    if (view.lastResult) {
-      const r = view.lastResult;
-      text("banner", `${esc(view.names[r.declarer])} & ${esc(view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(view.names[p])).join(" & ")} win the deal.`);
+  if (S.view.phase === "playing" || S.view.phase === "trickEnd") { bannerForPlay(false); return; }
+  if (S.view.phase === "roundEnd") {
+    if (S.view.lastResult) {
+      const r = S.view.lastResult;
+      text("banner", `${esc(S.view.names[r.declarer])} & ${esc(S.view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(S.view.names[p])).join(" & ")} win the deal.`);
     }
-    const live = view.seats.filter(s => s.isHuman && s.connected && !s.away);
+    const live = S.view.seats.filter(s => s.isHuman && s.connected && !s.away);
     const ready = live.filter(s => s.ready).length;
-    if (!view.you.spectator) {
-      const b = button(view.you.ready ? `Ready ✓ — waiting ${ready}/${live.length}` : `Next deal — I'm ready (${ready}/${live.length})`,
+    if (!S.view.you.spectator) {
+      const b = button(S.view.you.ready ? `Ready ✓ — waiting ${ready}/${live.length}` : `Next deal — I'm ready (${ready}/${live.length})`,
         "ready", () => send({ type: "ready" }));
-      b.disabled = !!view.you.ready;
+      b.disabled = !!S.view.you.ready;
     }
     text("status", `Next deal starts when everyone is ready — auto in <span id="ready-count">…</span>`);
     return;
   }
-  text("status", `${phaseLabel()} — waiting for <b>${esc(view.names[activeSeat()] || "")}</b>`);
+  text("status", `${phaseLabel()} — waiting for <b>${esc(S.view.names[activeSeat()] || "")}</b>`);
 }
 function bannerForPlay(myTurn) {
-  if (mySeat == null) { return $("action-bar").appendChild(divStatus(`${phaseLabel()} — ${esc(view.names[view.turn])} to play`)); }
-  const c = view.consts;
-  const dPts = view.capturedPoints[view.declarer] + view.capturedPoints[view.partner];
-  const mySide = sideOf(mySeat);
-  const mate = mySide === "D" ? (mySeat === view.declarer ? view.partner : view.declarer) : [0,1,2,3].filter(p => p !== view.declarer && p !== view.partner && p !== mySeat)[0];
-  const turnTxt = myTurn ? " <b>Your turn.</b>" : ` — ${esc(view.names[view.turn])} to play`;
+  if (S.mySeat == null) { return $("action-bar").appendChild(divStatus(`${phaseLabel()} — ${esc(S.view.names[S.view.turn])} to play`)); }
+  const c = S.view.consts;
+  const dPts = S.view.capturedPoints[S.view.declarer] + S.view.capturedPoints[S.view.partner];
+  const mySide = sideOf(S.mySeat);
+  const mate = mySide === "D" ? (S.mySeat === S.view.declarer ? S.view.partner : S.view.declarer) : [0,1,2,3].filter(p => p !== S.view.declarer && p !== S.view.partner && p !== S.mySeat)[0];
+  const turnTxt = myTurn ? " <b>Your turn.</b>" : ` — ${esc(S.view.names[S.view.turn])} to play`;
   if (mySide === "D")
-    addBanner(`<span class="d">You + ${esc(view.names[mate])}</span> are the bidding side — need <b>${view.bid}</b> pts, captured <b>${dPts}</b>.${turnTxt}`);
+    addBanner(`<span class="d">You + ${esc(S.view.names[mate])}</span> are the bidding side — need <b>${S.view.bid}</b> pts, captured <b>${dPts}</b>.${turnTxt}`);
   else
-    addBanner(`<span class="o">You + ${esc(view.names[mate])}</span> defend — keep them under <b>${view.bid}</b> pts (they have <b>${dPts}</b>).${turnTxt}`);
+    addBanner(`<span class="o">You + ${esc(S.view.names[mate])}</span> defend — keep them under <b>${S.view.bid}</b> pts (they have <b>${dPts}</b>).${turnTxt}`);
 }
 function addBanner(html) { const d = document.createElement("div"); d.className = "banner"; d.innerHTML = html; $("action-bar").appendChild(d); }
 function divStatus(html) { const d = document.createElement("div"); d.className = "status"; d.innerHTML = html; return d; }
-function phaseLabel() { return ({ bidding:"Bidding", trumpSelect:"Choosing trump", partnerSelect:"Calling partner", playing:"Playing", trickEnd:"Trick won", roundEnd:"Deal over", matchOver:"Match over" })[view.phase] || ""; }
+function phaseLabel() { return ({ bidding:"Bidding", trumpSelect:"Choosing trump", partnerSelect:"Calling partner", playing:"Playing", trickEnd:"Trick won", roundEnd:"Deal over", matchOver:"Match over" })[S.view.phase] || ""; }
 
 // ---------- modals ----------
 function showMatchOver() {
-  const max = Math.max(...view.scores);
-  const champs = [0,1,2,3].filter(p => view.scores[p] === max);
-  const youWon = mySeat != null && champs.includes(mySeat);
-  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p =>
-    `<div class="${mySeat!=null&&p===mySeat?"me":""}"><span>${esc(view.names[p])}${mySeat!=null&&p===mySeat?" (you)":""}</span>` +
-    `<span>${view.scores[p]} deal${view.scores[p]===1?"":"s"}</span></div>`).join("");
-  let btn = view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
+  const max = Math.max(...S.view.scores);
+  const champs = [0,1,2,3].filter(p => S.view.scores[p] === max);
+  const youWon = S.mySeat != null && champs.includes(S.mySeat);
+  const standings = [0,1,2,3].slice().sort((a,b)=>S.view.scores[b]-S.view.scores[a]).map(p =>
+    `<div class="${S.mySeat!=null&&p===S.mySeat?"me":""}"><span>${esc(S.view.names[p])}${S.mySeat!=null&&p===S.mySeat?" (you)":""}</span>` +
+    `<span>${S.view.scores[p]} deal${S.view.scores[p]===1?"":"s"}</span></div>`).join("");
+  let btn = S.view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(S.view.room.hostName||"host")} to start a new match…</p>`;
   setModal("match",
-    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>view.names[p]).join(" & ")) + " win the match"}</p>` +
-    `<p>First to ${view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
-  if (view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
+    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>S.view.names[p]).join(" & ")) + " win the match"}</p>` +
+    `<p>First to ${S.view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
+  if (S.view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
 }
 function showHelp() {
-  const c = (view && view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
+  const c = (S.view && S.view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
   setModal("help",
     `<h2>How to Play TRUMP</h2><ul class="how">` +
     `<li>4 seats; you take an open one and any empty seats are AI. The deck holds <b>${c.TOTAL_POINTS} points</b>: A/K/Q/J/10 = 10 each, every 5 = 5, one random suit's <b>3 = 30</b> (announced before bidding).</li>` +
@@ -1619,7 +1592,7 @@ function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").datase
 function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
 
 // ---------- invite / share ----------
-function inviteUrl() { return location.origin + location.pathname + "?room=" + encodeURIComponent(roomCode || ""); }
+function inviteUrl() { return location.origin + location.pathname + "?room=" + encodeURIComponent(S.roomCode || ""); }
 $("btn-copy").onclick = async () => {
   const url = inviteUrl();
   try { await navigator.clipboard.writeText(url); toast("Invite link copied"); }
@@ -1629,7 +1602,7 @@ if (navigator.share) {
   $("btn-share").style.display = "";
   $("btn-share").onclick = () => navigator.share({
     title: "TRUMP — join my table",
-    text: `Join my TRUMP game — room ${roomCode}`,
+    text: `Join my TRUMP game — room ${S.roomCode}`,
     url: inviteUrl(),
   }).catch(() => {});
 }
@@ -1686,7 +1659,7 @@ function updateChatBadge() {
 }
 /* Count messages that arrive while the chat panel isn't on screen. */
 function noteChatActivity() {
-  const msgs = (view.chat || []).length;
+  const msgs = (S.view.chat || []).length;
   const a = document.querySelector("aside");
   const visible = window.innerWidth > 900 || (a.classList.contains("open") && a.dataset.tab === "chat");
   if (msgs > lastChatLen && !visible) { unreadChat += msgs - lastChatLen; updateChatBadge(); }
