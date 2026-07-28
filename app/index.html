@@ -827,17 +827,28 @@
 import { S, myUid, leaveRoom, takeNotice } from "/js/session.js";
 import { $, esc, toast, paintAvatar, avatarHtml } from "/js/util/dom.js";
 import { setFourColor, initPrefs } from "/js/util/prefs.js";
-import { SUITS, RED, SUIT_NAME, SUIT_KEY, cardName,
-         suitSvg, suitSpan, cardSpan, textWithCards } from "/js/cards/labels.js";
-import { EMOTES, icon, reactionIcon, reactionName, paintIcons } from "/js/cards/icons.js";
-import { cardFace, cardEl } from "/js/cards/deck.js";
-import { WS_BASE, connect, send, serverNow, setViewHandler, setEmoteHandler } from "/js/net.js";
+import { SUITS, SUIT_KEY, suitSvg, suitSpan, cardSpan } from "/js/cards/labels.js";
+import { icon, paintIcons } from "/js/cards/icons.js";
+import { cardEl } from "/js/cards/deck.js";
+import { WS_BASE, connect, send, setViewHandler, setEmoteHandler } from "/js/net.js";
 import { inviteUrl, copyInvite } from "/js/share.js";
 import { registerServiceWorker } from "/js/pwa.js";
-/* render() and showEmote() are still defined below, not modules yet — net.js
-   can only reach them through this registration seam (see net.js). */
+import { renderLog } from "/js/ui/log.js";
+import { renderChat, showEmote, openSheet, closeSheet, initKeyboardHandling } from "/js/ui/chat.js";
+import { hideOverlay, showMatchOver, showHelp, showSettingsModal, setRenderHandler, setRenderSettingsHandler } from "/js/ui/modals.js";
+import { renderActionBar } from "/js/ui/actionbar.js";
+import { renderHand } from "/js/ui/hand.js";
+import { fitTable, tickTimers, startTicking, setRingEl, initResize } from "/js/ui/layout.js";
+/* render() is still defined below, not a module yet — net.js can only reach it
+   through this registration seam (see net.js). showEmote() did move into a
+   module (ui/chat.js), but net.js still can't import it directly: chat.js
+   imports send() from net.js, so the reverse import would be a cycle. Same
+   seam, a different reason. showHelp()/showSettingsModal() (ui/modals.js) use
+   the same trick to call back into render()/renderSettings(), also still here. */
 setViewHandler(render);
 setEmoteHandler(showEmote);
+setRenderHandler(render);
+setRenderSettingsHandler(renderSettings);
 const POS_CLASS = ["south","west","north","east"]; // pos 0..3 relative to viewer
 
 const DIFF_OPTS = [["easy","Easy"],["normal","Normal"],["hard","Hard"]];
@@ -995,7 +1006,7 @@ function roleOf(seat) {
   return { c:"def", t:"DEFENDER" };
 }
 function renderGame() {
-  ringEl = null; // rebuilt below if the active seat is on the clock
+  setRingEl(null); // rebuilt below if the active seat is on the clock
   $("header-state").innerHTML = `Deal <b>${S.view.roundNumber}</b> · first to <b>${S.view.consts.TARGET_GAMES}</b>`;
   renderMedallion();
 
@@ -1027,7 +1038,7 @@ function renderGame() {
     const ava = np.querySelector(".avatar");
     const onClock = seat === act && S.view.turnDeadline != null && info.isHuman && info.connected && !info.away;
     ava.classList.toggle("ticking", onClock);
-    if (onClock) ringEl = ava; else ava.classList.remove("urgent");
+    if (onClock) setRingEl(ava); else ava.classList.remove("urgent");
     np.classList.toggle("off", info.isHuman && !info.connected);
     el.classList.toggle("away-seat", !!info.away);
     const zzz = info.away ? ` · <span class="zzz">on autopilot</span>` : (info.isHuman && !info.connected ? ` · <span class="zzz">offline</span>` : "");
@@ -1134,126 +1145,7 @@ function renderMedallion() {
   med.classList.toggle("has-bar", showBar);
   bar.style.width = (pct * 100).toFixed(1) + "%";
 }
-/* The hand always reads ♠ ♥ ♣ ♦, high to low, whatever order the wire used.
-   Alternating the colours is what makes a fanned hand scannable, and a fixed
-   order means your ace of hearts is in the same place every single deal —
-   the engine's habit of shuffling trump to the end moved it mid-hand. */
-const HAND_ORDER = { "♠":0, "♥":1, "♣":2, "♦":3 };
-function renderHand() {
-  const wrap = $("my-hand");
-  const hand = ((S.view.you && S.view.you.hand) || []).slice()
-    .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank));
-  const canPlay = S.view.you.toAct && S.view.you.actKind === "play";
-  const legalKey = new Set((canPlay ? (S.view.you.legal || []) : []).map(x => x.suit + x.rank));
-
-  /* Rebuilding the hand blows away keyboard focus, and a state message arrives
-     for every action at the table — including other people's chat. Skip the
-     rebuild when nothing about the hand changed, and when it does change put
-     focus back on the same card (or its position) instead of dropping the user
-     out to <body> mid-turn. */
-  const sig = JSON.stringify([hand.map(c => c.suit + c.rank), canPlay, [...legalKey].sort(),
-                              S.view.trump, S.view.bonusSuit, S.view.leadSuit]);
-  if (wrap._sig === sig) return;
-  wrap._sig = sig;
-  const active = document.activeElement;
-  const hadFocus = active && wrap.contains(active);
-  const focusKey = hadFocus ? active.dataset.k : null;
-  const focusIdx = hadFocus ? Array.prototype.indexOf.call(wrap.children, active) : -1;
-  wrap.innerHTML = "";
-
-  hand.forEach((card, i) => {
-    const el = cardEl(card, true);              // real <button>: Tab to reach it, Enter/Space to play
-    if (i > 0 && hand[i - 1].suit !== card.suit) el.classList.add("suit-start"); // seam between suits
-    const notes = [];
-    if (S.view.trump && card.suit === S.view.trump) { el.classList.add("trumpcard"); notes.push("trump"); }
-    if (S.view.bonusSuit && card.suit === S.view.bonusSuit && card.rank === 3) { el.classList.add("bonuscard"); notes.push("bonus 30 points"); }
-    let label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
-    if (canPlay) {
-      if (legalKey.has(card.suit + card.rank)) {
-        el.classList.add("playable"); el.onclick = () => send({ type: "play", card });
-        label = "Play " + label;
-      } else {
-        el.classList.add("illegal");
-        el.setAttribute("aria-disabled", "true");
-        el.title = label = `${label} — you must follow ${SUIT_NAME[S.view.leadSuit] || S.view.leadSuit}`;
-      }
-    } else {
-      // still focusable (so the hand can be read out) but inert
-      el.setAttribute("aria-disabled", "true");
-    }
-    el.setAttribute("aria-label", label);
-    el.dataset.k = card.suit + card.rank;
-    wrap.appendChild(el);
-  });
-
-  /* Fan the hand: --rot/--dy are composed with --lift in one CSS transform, so a
-     hover or focus lift can't flatten the arc (and the arc can't cancel the lift). */
-  const n = wrap.children.length;
-  for (let i = 0; i < n; i++) {
-    const t = n > 1 ? (i / (n - 1)) * 2 - 1 : 0;      // -1 … +1 across the hand
-    wrap.children[i].style.setProperty("--rot", (t * 7).toFixed(2) + "deg");
-    wrap.children[i].style.setProperty("--dy", (t * t * 6).toFixed(1) + "px");
-  }
-  fitHand(wrap);
-
-  if (hadFocus && wrap.children.length) {
-    let target = null;
-    for (const el of wrap.children) if (el.dataset.k === focusKey) { target = el; break; }
-    if (!target) target = wrap.children[Math.min(Math.max(focusIdx, 0), wrap.children.length - 1)];
-    target.focus();
-  }
-}
-/* Thirteen cards at the CSS overlap are ~564px wide — wider than any phone, and a
-   grid track's `auto` minimum is min-content, so the oversized hand used to stretch
-   column 1 and push the header and the felt off screen. Tighten the overlap only as
-   far as the width actually demands, and never past 16px of each card showing. */
-function fitHand(wrap) {
-  const n = wrap.children.length;
-  if (!n) return;
-  const cs = getComputedStyle(wrap);
-  const base = parseFloat(cs.getPropertyValue("--ml-base")) || -22;
-  const seam = parseFloat(cs.getPropertyValue("--seam")) || 16;
-  const cw = wrap.children[0].offsetWidth;              // layout width: transforms don't count
-  /* …which is exactly why the budget has to allow for them: the outermost cards are
-     rotated ~7deg about an origin below the card, so each end reaches about
-     height*sin(7deg) further out than its layout box. */
-  const slop = Math.ceil(wrap.children[0].offsetHeight * 0.25) + 12;
-  const avail = wrap.clientWidth - slop;
-  if (!cw || avail <= 0) return;                        // not laid out yet
-  let ml = base;
-  if (n > 1) {
-    let seams = 0;
-    for (const el of wrap.children) if (el.classList.contains("suit-start")) seams++;
-    ml = Math.min(base, (avail - cw - seams * seam) / (n - 1) - cw);
-    /* Never hide more than this: the exposed sliver carries the corner index and is
-       the card's only reliable tap target, since the next card paints over the rest. */
-    ml = Math.max(ml, -(cw - 20));
-  }
-  wrap.style.setProperty("--ml", ml.toFixed(2) + "px");
-}
-/* The trick cross is laid out in fixed pixels — cards 88px tall at ±118px — while the
-   felt scales with the viewport. On a short felt the cross runs into the seats and
-   leaves no clear band for the contract strip (110px of clearance on a desktop felt,
-   22px on a phone's), so scale the cross to what the felt can actually hold and put
-   the strip in what remains. */
-function fitTable() {
-  const t = $("table");
-  const h = t ? t.getBoundingClientRect().height : 0;
-  if (!h) return;
-  /* How far the cross reaches below centre is (radius + half a card), and both
-     halve at the phone breakpoint — so measure them rather than keeping a second
-     copy of the numbers the stylesheet already owns. */
-  const tr = $("trick");
-  const probe = tr.querySelector(".card");
-  const reach = (parseFloat(getComputedStyle(tr).getPropertyValue("--reach-y")) || 47)
-              + (probe ? probe.offsetHeight : 93) / 2;
-  const s = Math.max(0.6, Math.min(1, (h / 2 - 108) / reach));
-  t.style.setProperty("--trick-scale", s.toFixed(3));
-  const bandTop = h / 2 + reach * s, bandBottom = h - 66;      // south seat starts ~66px off the bottom
-  t.style.setProperty("--strip-top", Math.round((bandTop + bandBottom) / 2) + "px");
-}
-/* both fits are measured, so a resize has to re-measure them */
-addEventListener("resize", () => { const w = $("my-hand"); if (w && w.children.length) fitHand(w); fitTable(); });
+initResize();
 
 function renderScoreboard() {
   const c = S.view.consts;
@@ -1290,66 +1182,6 @@ function renderScoreboard() {
   if (S.view.room.isHost) sl.appendChild(miniBtn("Change", "", showSettingsModal, "gear"));
 }
 
-/* ---------- sliding-window lists (the table log and the chat) ----------
-   Both arrive as "the last N entries", and the server re-sends them with every
-   state message — on every card played, every timer tick, every chat line. A
-   naive redraw re-inserts every row, which in an aria-live region means a
-   screen reader re-reads the entire backlog each time. Diff the incoming window
-   against what is already on screen, drop what scrolled off the top, and append
-   only what is genuinely new; an unchanged window touches no DOM at all.
-   Pure apart from the four node operations, so test/client.test.js can run it. */
-function syncWindow(box, keys, build) {
-  const prev = box._winKeys || [];
-  let keep = 0; // longest suffix of `prev` that is also a prefix of `keys`
-  for (let n = Math.min(prev.length, keys.length); n > 0; n--) {
-    let same = true;
-    for (let i = 0; i < n; i++) if (prev[prev.length - n + i] !== keys[i]) { same = false; break; }
-    if (same) { keep = n; break; }
-  }
-  if (keep === 0) box.textContent = "";
-  else for (let drop = prev.length - keep; drop > 0 && box.firstChild; drop--) box.removeChild(box.firstChild);
-  for (let i = keep; i < keys.length; i++) box.appendChild(build(i));
-  box._winKeys = keys;
-  return keys.length - keep; // rows actually added
-}
-
-// ---------- chat + emotes ----------
-function renderChat() {
-  const box = $("chat-log");
-  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  const msgs = S.view.chat || [];
-  $("chat-empty").style.display = msgs.length ? "none" : "";
-  const added = syncWindow(box, msgs.map(m => `${m.ts} ${m.from} ${m.text}`), i => {
-    const m = msgs[i];
-    const d = document.createElement("div");
-    d.className = "msg" + (m.seat != null && m.seat === S.mySeat ? " you" : "");
-    d.innerHTML = `<span class="from">${esc(m.from)}:</span> ${esc(m.text)}`;
-    return d;
-  });
-  if (atBottom && added) box.scrollTop = box.scrollHeight;
-  noteChatActivity();
-  if (!$("emote-bar").children.length) {
-    EMOTES.forEach(e => {
-      const b = document.createElement("button");
-      b.className = "emote-btn"; b.type = "button"; b.innerHTML = reactionIcon(e);
-      b.title = reactionName(e);
-      b.setAttribute("aria-label", "Send " + reactionName(e) + " reaction");
-      b.onclick = () => send({ type: "emote", e });
-      $("emote-bar").appendChild(b);
-    });
-  }
-  $("emote-bar").style.display = S.view.you.spectator ? "none" : ""; // seats only, per the server rule
-}
-/* Floating reaction over the sender's seat (transient — never part of state). */
-function showEmote(seat, e) {
-  if (typeof seat !== "number" || !S.view || !S.view.room.started) return;
-  const host = $("seat-" + POS_CLASS[posOfSeat(seat)]);
-  if (!host) return;
-  const d = document.createElement("div");
-  d.className = "float-emote"; d.innerHTML = reactionIcon(e);
-  host.appendChild(d);
-  setTimeout(() => d.remove(), 2000);
-}
 $("chat-form").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const input = $("chat-input"), text = input.value.trim();
@@ -1362,175 +1194,7 @@ $("btn-stand").onclick = () => {
   if (confirm("Give up your seat? An AI will finish the match for you.")) send({ type: "stand" });
 };
 
-// ---------- live countdowns (deadlines are absolute server ms) ----------
-let ringEl = null, tickHandle = null;
-function tickTimers() {
-  if (!S.view || !S.view.room.started) return;
-  const now = serverNow();
-  if (ringEl && S.view.turnDeadline != null) {
-    const total = (S.view.settings.turnTimerSec || 45) * 1000;
-    const left = Math.max(0, S.view.turnDeadline - now);
-    ringEl.style.setProperty("--p", String(Math.max(0, Math.min(1, left / total))));
-    ringEl.classList.toggle("urgent", left <= 10000);
-    ringEl.title = `${Math.ceil(left / 1000)}s left`;
-  }
-  const rc = $("ready-count");
-  if (rc && S.view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((S.view.roundDeadline - now) / 1000))}s`;
-}
-tickHandle = setInterval(tickTimers, 250);
-
-function showSettingsModal() {
-  setModal("settings", `<h2>Table Settings</h2><div id="modal-settings" style="text-align:left;"></div><button id="btn-close-set">Done</button>`);
-  renderSettings($("modal-settings"), !!S.view.room.isHost);
-  $("btn-close-set").onclick = () => { hideOverlay(); render(); };
-}
-function renderLog() {
-  const el = $("log");
-  const entries = S.view.log || [];
-  const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
-    const d = document.createElement("div");
-    const cls = entries[i].cls || "";
-    d.className = "entry " + cls;
-    /* the core marks a won trick with a ★; draw it instead of printing a dingbat */
-    const text = entries[i].text.replace(/^★\s*/, "");
-    d.innerHTML = (cls === "win" ? icon("star") : "") + `<span>${textWithCards(text)}</span>`;
-    return d;
-  });
-  if (added) el.scrollTop = el.scrollHeight;
-}
-function renderActionBar() {
-  const bar = $("action-bar"); bar.innerHTML = "";
-  bar.dataset.turn = S.view.you.toAct ? "you" : "other";   // drives the cue rail
-  const c = S.view.consts;
-  const text = (cls, html) => { const d = document.createElement("div"); d.className = cls; d.innerHTML = html; bar.appendChild(d); };
-  const button = (label, cls, fn) => { const b = document.createElement("button"); b.className = "act-btn " + (cls || ""); b.innerHTML = label; b.onclick = fn; bar.appendChild(b); return b; };
-
-  if (S.view.you.spectator) {
-    // seats are handed out at deal boundaries mid-match, so say when you're in
-    const q = S.view.you.pendingSeat != null
-      ? ` · you take ${S.view.seats[S.view.you.pendingSeat].label} on the next deal`
-      : "";
-    text("status", `Spectating ${esc(S.view.room.hostName || "")}'s table — ${phaseLabel()}${q}`);
-    return;
-  }
-
-  if (S.view.you.toAct) {
-    if (S.view.you.actKind === "bid") {
-      const ctxKey = S.view.roundNumber + "|" + (S.view.highBid || 0);
-      if (S.bidCtxKey !== ctxKey) { S.bidCtxKey = ctxKey; S.humanBidValue = null; } // fresh bid context → start at the minimum
-      const lo = S.view.you.minBid;
-      text("prompt", `Your bid — highest so far ${S.view.highBid ? "<b>" + S.view.highBid + "</b> from " + esc(S.view.names[S.view.highBidder]) : "<b>none</b>"} · bonus ${cardSpan({ suit: S.view.bonusSuit, rank: 3 })} is worth 30`);
-      button("Pass", "pass", () => { S.humanBidValue = null; send({ type: "bid", value: null }); });
-      if (lo > c.MAX_BID) { text("status", "Bidding is maxed out — you can only pass."); return; }
-      let v = S.humanBidValue; if (v == null || v < lo || v > c.MAX_BID) { v = lo; S.humanBidValue = v; }
-      const dn = button("−" + c.BID_STEP, "step", () => { S.humanBidValue = Math.max(lo, v - c.BID_STEP); renderActionBar(); });
-      dn.setAttribute("aria-label", "Lower the bid by " + c.BID_STEP);
-      dn.disabled = v <= lo;
-      const val = document.createElement("span"); val.className = "bidval"; val.textContent = v; bar.appendChild(val);
-      const up = button("+" + c.BID_STEP, "step", () => { S.humanBidValue = Math.min(c.MAX_BID, v + c.BID_STEP); renderActionBar(); });
-      up.setAttribute("aria-label", "Raise the bid by " + c.BID_STEP);
-      up.disabled = v >= c.MAX_BID;
-      button("Bid " + v, "", () => { S.humanBidValue = null; send({ type: "bid", value: v }); });
-      return;
-    }
-    if (S.view.you.actKind === "trump") {
-      text("prompt", `You won the bid at <b>${S.view.bid}</b>. Choose the trump suit.`);
-      SUITS.forEach(s => {
-        const b = button(`${suitSvg(s)}<small>${SUIT_NAME[s]}</small>`, "suit s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : ""), () => send({ type: "trump", suit: s }));
-        b.setAttribute("aria-label", "Choose " + SUIT_NAME[s] + " as trump");
-      });
-      return;
-    }
-    if (S.view.you.actKind === "call") {
-      text("prompt", `Trump is ${suitSpan(S.view.trump)}. Now name a card you <b>don't</b> hold — whoever has it is your partner.`);
-      const grid = document.createElement("div"); grid.className = "call-grid";
-      const byS = {}; SUITS.forEach(s => byS[s] = []);
-      (S.view.you.callable || []).forEach(cd => byS[cd.suit].push(cd));
-      SUITS.forEach(s => {
-        if (!byS[s].length) return;
-        const row = document.createElement("div"); row.className = "call-row";
-        const lab = document.createElement("span");
-        lab.className = "call-suit sc s-" + SUIT_KEY[s]; lab.innerHTML = suitSvg(s); lab.setAttribute("aria-hidden", "true");
-        row.appendChild(lab);
-        byS[s].sort((a, b) => b.rank - a.rank).forEach(cd => {
-          const m = document.createElement("button");
-          m.type = "button";
-          m.className = "mini-card s-" + SUIT_KEY[cd.suit] + (RED.has(cd.suit) ? " red" : "") + (cd.rank === 14 ? " ace" : "") + (cd.suit === S.view.bonusSuit && cd.rank === 3 ? " bonus" : "");
-          m.innerHTML = cardFace(cd, true);
-          m.setAttribute("aria-label", "Call " + cardName(cd) + (cd.suit === S.view.bonusSuit && cd.rank === 3 ? " (bonus 30 points)" : ""));
-          m.onclick = () => send({ type: "call", card: { suit: cd.suit, rank: cd.rank } });
-          row.appendChild(m);
-        });
-        grid.appendChild(row);
-      });
-      bar.appendChild(grid);
-      return;
-    }
-    if (S.view.you.actKind === "play") { bannerForPlay(true); return; }
-  }
-  // not my turn / transitions
-  if (S.view.phase === "playing" || S.view.phase === "trickEnd") { bannerForPlay(false); return; }
-  if (S.view.phase === "roundEnd") {
-    if (S.view.lastResult) {
-      const r = S.view.lastResult;
-      text("banner", `${esc(S.view.names[r.declarer])} & ${esc(S.view.names[r.partner])} captured <b>${r.dPts}</b>/${r.bid} → <b>${r.made ? "MADE" : "SET"}</b>. ${r.winners.map(p => esc(S.view.names[p])).join(" & ")} win the deal.`);
-    }
-    const live = S.view.seats.filter(s => s.isHuman && s.connected && !s.away);
-    const ready = live.filter(s => s.ready).length;
-    if (!S.view.you.spectator) {
-      const b = button(S.view.you.ready ? `Ready ✓ — waiting ${ready}/${live.length}` : `Next deal — I'm ready (${ready}/${live.length})`,
-        "ready", () => send({ type: "ready" }));
-      b.disabled = !!S.view.you.ready;
-    }
-    text("status", `Next deal starts when everyone is ready — auto in <span id="ready-count">…</span>`);
-    return;
-  }
-  text("status", `${phaseLabel()} — waiting for <b>${esc(S.view.names[activeSeat()] || "")}</b>`);
-}
-function bannerForPlay(myTurn) {
-  if (S.mySeat == null) { return $("action-bar").appendChild(divStatus(`${phaseLabel()} — ${esc(S.view.names[S.view.turn])} to play`)); }
-  const c = S.view.consts;
-  const dPts = S.view.capturedPoints[S.view.declarer] + S.view.capturedPoints[S.view.partner];
-  const mySide = sideOf(S.mySeat);
-  const mate = mySide === "D" ? (S.mySeat === S.view.declarer ? S.view.partner : S.view.declarer) : [0,1,2,3].filter(p => p !== S.view.declarer && p !== S.view.partner && p !== S.mySeat)[0];
-  const turnTxt = myTurn ? " <b>Your turn.</b>" : ` — ${esc(S.view.names[S.view.turn])} to play`;
-  if (mySide === "D")
-    addBanner(`<span class="d">You + ${esc(S.view.names[mate])}</span> are the bidding side — need <b>${S.view.bid}</b> pts, captured <b>${dPts}</b>.${turnTxt}`);
-  else
-    addBanner(`<span class="o">You + ${esc(S.view.names[mate])}</span> defend — keep them under <b>${S.view.bid}</b> pts (they have <b>${dPts}</b>).${turnTxt}`);
-}
-function addBanner(html) { const d = document.createElement("div"); d.className = "banner"; d.innerHTML = html; $("action-bar").appendChild(d); }
-function divStatus(html) { const d = document.createElement("div"); d.className = "status"; d.innerHTML = html; return d; }
-function phaseLabel() { return ({ bidding:"Bidding", trumpSelect:"Choosing trump", partnerSelect:"Calling partner", playing:"Playing", trickEnd:"Trick won", roundEnd:"Deal over", matchOver:"Match over" })[S.view.phase] || ""; }
-
-// ---------- modals ----------
-function showMatchOver() {
-  const max = Math.max(...S.view.scores);
-  const champs = [0,1,2,3].filter(p => S.view.scores[p] === max);
-  const youWon = S.mySeat != null && champs.includes(S.mySeat);
-  const standings = [0,1,2,3].slice().sort((a,b)=>S.view.scores[b]-S.view.scores[a]).map(p =>
-    `<div class="${S.mySeat!=null&&p===S.mySeat?"me":""}"><span>${esc(S.view.names[p])}${S.mySeat!=null&&p===S.mySeat?" (you)":""}</span>` +
-    `<span>${S.view.scores[p]} deal${S.view.scores[p]===1?"":"s"}</span></div>`).join("");
-  let btn = S.view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(S.view.room.hostName||"host")} to start a new match…</p>`;
-  setModal("match",
-    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>S.view.names[p]).join(" & ")) + " win the match"}</p>` +
-    `<p>First to ${S.view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
-  if (S.view.room.isHost) $("btn-rematch").onclick = () => send({ type: "newMatch" });
-}
-function showHelp() {
-  const c = (S.view && S.view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
-  setModal("help",
-    `<h2>How to Play TRUMP</h2><ul class="how">` +
-    `<li>4 seats; you take an open one and any empty seats are AI. The deck holds <b>${c.TOTAL_POINTS} points</b>: A/K/Q/J/10 = 10 each, every 5 = 5, one random suit's <b>3 = 30</b> (announced before bidding).</li>` +
-    `<li><b>Bid</b> the points your side will capture (min ${c.MIN_BID}, steps of ${c.BID_STEP}) or pass; highest bidder wins.</li>` +
-    `<li>The bid winner picks <b>trump</b> and <b>calls a card they don't hold</b> — its holder is their partner (teams shown at once: gold = bidding side, blue = defenders).</li>` +
-    `<li>The bid winner leads. Follow suit if you can; highest trump wins a trick, else the highest card of the led suit; the winner captures its point-cards and leads next.</li>` +
-    `<li>Make the bid → bidding side wins the deal; fall short → defenders win it. First to <b>${c.TARGET_GAMES} deals</b> wins the match.</li>` +
-    `</ul><button id="btn-close">Got it</button>`);
-  $("btn-close").onclick = () => { hideOverlay(); render(); };
-}
-function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").dataset.kind = kind; $("overlay").classList.add("show"); }
-function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
+startTicking();
 
 // ---------- invite / share ----------
 $("btn-copy").onclick = copyInvite;
@@ -1570,54 +1234,9 @@ paintIcons(document);
 initPrefs();
 $("btn-colors").onclick = () => setFourColor(!document.body.classList.contains("fourcolor"));
 
-// ---------- mobile bottom sheet ----------
-let unreadChat = 0, lastChatLen = 0;
-function openSheet(tab) {
-  const a = document.querySelector("aside");
-  const same = a.classList.contains("open") && a.dataset.tab === tab;
-  a.dataset.tab = tab;
-  a.classList.toggle("open", !same);
-  document.querySelectorAll("#sheet-tabs button").forEach(b =>
-    b.setAttribute("aria-expanded", String(!same && b.dataset.tab === tab)));
-  if (!same && tab === "chat") { unreadChat = 0; updateChatBadge(); $("chat-log").scrollTop = $("chat-log").scrollHeight; }
-}
-function closeSheet() {
-  const a = document.querySelector("aside");
-  a.classList.remove("open");
-  document.querySelectorAll("#sheet-tabs button").forEach(b => b.setAttribute("aria-expanded", "false"));
-}
 document.querySelectorAll("#sheet-tabs button").forEach(b => { b.onclick = () => openSheet(b.dataset.tab); });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
-function updateChatBadge() {
-  const el = $("chat-badge");
-  el.textContent = String(unreadChat);
-  el.style.display = unreadChat > 0 ? "" : "none";
-}
-/* Count messages that arrive while the chat panel isn't on screen. */
-function noteChatActivity() {
-  const msgs = (S.view.chat || []).length;
-  const a = document.querySelector("aside");
-  const visible = window.innerWidth > 900 || (a.classList.contains("open") && a.dataset.tab === "chat");
-  if (msgs > lastChatLen && !visible) { unreadChat += msgs - lastChatLen; updateChatBadge(); }
-  lastChatLen = msgs;
-}
-
-/* iOS floats the keyboard over fixed elements instead of resizing the layout, so the
-   chat sheet and its tab bar would end up underneath it. visualViewport reports the
-   covered height; --kb lifts both above it. */
-if (window.visualViewport) {
-  const vv = window.visualViewport;
-  const trackKeyboard = () => {
-    const covered = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-    document.documentElement.style.setProperty("--kb", (covered > 60 ? covered : 0) + "px");
-  };
-  vv.addEventListener("resize", trackKeyboard);
-  vv.addEventListener("scroll", trackKeyboard);
-  trackKeyboard();
-}
-$("chat-input").addEventListener("focus", () => {
-  setTimeout(() => { $("chat-log").scrollTop = $("chat-log").scrollHeight; }, 250); // after the keyboard animates in
-});
+initKeyboardHandling();
 
 registerServiceWorker();
 </script>

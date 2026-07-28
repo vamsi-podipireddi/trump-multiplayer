@@ -1,10 +1,11 @@
 import { S, myUid, mintCode, leaveRoom } from "./session.js";
 import { $, toast } from "./util/dom.js";
 
-/* `render()` and `showEmote()` are UI functions that still live in the inline
-   script and are not modules yet (a later task moves them). net.js cannot
-   import them without importing upward from a module into the page that
-   loads it — that dependency does not exist and cannot. The inline script
+/* `render()` is a UI function that still lives in the inline script and is not
+   a module (a later task may change that). `showEmote()` did become a module
+   (ui/chat.js), but net.js still can't import it directly: chat.js imports
+   send() from net.js, so the reverse import would be a cycle. Either way, net.js
+   cannot reach these without the page registering them. The inline script
    registers the real functions once at boot; until then these are no-ops,
    so a message arriving before that registration is inert, not a crash. */
 let onView = () => {};
