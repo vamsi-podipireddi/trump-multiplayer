@@ -33,7 +33,7 @@ Open **http://localhost:3000**.
 | **Between deals** | The next deal starts when every present player clicks **ready**, or after 30s — whichever comes first. |
 | **Chat & emotes** | Chat panel with a 50-message ring, plus six reactions that float over your seat. |
 | **Reconnect** | Your seat is held and AI-played while you're gone; the newest connection for a session wins, so a second tab or a phone takes over cleanly. |
-| **Offline** | Installable PWA. With no network, the service worker serves the solo game (`app/solo.html`) from its precache — it still needs the page to have been loaded once while online. |
+| **Offline** | Installable PWA. The app shell is precached and keeps working with no network at all — that's the generic offline fallback for any navigation. The standalone solo game (`app/solo.html`) is precached too and playable offline if you navigate to it directly (a link, a bookmark, the manifest shortcut), but it does not replace the shell as the fallback. Either way, the page needs to have been loaded once while online first. |
 | **Accessibility** | Cards are real buttons (Tab / Enter), labelled "play ace of spades"; the table log and chat are live regions; optional 4-colour deck (♦ blue, ♣ green). |
 | **Mobile** | Below 900px the sidebar becomes a bottom sheet with **Score / Log / Chat** tabs — nothing is hidden. |
 

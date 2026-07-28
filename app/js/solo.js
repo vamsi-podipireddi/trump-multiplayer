@@ -52,6 +52,14 @@ let humanBidValue = null, bidCtxKey = null;    // the human's in-progress bid st
    into the *next* match's G. drive.js gets this for free from room.timers;
    a bare setTimeout here needs the counter to get it too. */
 let gen = 0;
+/* Set while the Help modal covers the table, cleared when it closes (see
+   boot()'s setRenderHandler below). Checked by step()'s two timers so the
+   trick-end pause and AI play both freeze behind the modal instead of
+   running unseen. Multiplayer's ui/modals.js has no matching flag: its game
+   state lives on a server the client doesn't control, so a client-side
+   pause could only hide that the AI and turn timer kept running there, not
+   actually stop them — solo owns G directly, so it can. */
+let paused = false;
 
 export function startSolo(opts) {
   difficulty = opts.difficulty;
@@ -69,7 +77,7 @@ function step() {
   const ra = E.requiredActor(G);
   const myGen = gen;
   if (G.phase === "trickEnd") {
-    setTimeout(() => { if (myGen !== gen) return; E.advanceTrick(G); paint(); step(); }, TRICK_DELAY);
+    setTimeout(() => { if (myGen !== gen || paused) return; E.advanceTrick(G); paint(); step(); }, TRICK_DELAY);
     return;
   }
   if (G.phase === "roundEnd") { paint(); return; }    // player clicks "Next deal" -> E.nextDeal(G); paint(); step();
@@ -77,7 +85,7 @@ function step() {
   if (!ra) { paint(); return; }
   if (ra.seat === ME) { paint(); return; }            // wait for input; the click handlers call step() again
   setTimeout(() => {
-    if (myGen !== gen) return;
+    if (myGen !== gen || paused) return;
     const a = E.aiActionFor(G, ra.seat, difficulty);
     apply(ra.seat, a);
     paint();
@@ -385,14 +393,19 @@ function toStart() {
    reference, so checking on Node (where `document` is never declared at all)
    doesn't itself throw. Mirrors main.js's own boot() guard exactly. */
 function boot() {
-  setRenderHandler(paint);
+  /* showHelp()'s close button calls back into whatever setRenderHandler
+     registered (see ui/modals.js) — the seam solo.js already uses to get
+     paint() called on close. Piggyback the resume on it here instead of
+     touching ui/modals.js: unpause and re-step() so the AI/trick timer that
+     froze behind the modal picks back up. */
+  setRenderHandler(() => { paint(); if (paused) { paused = false; step(); } });
   paintIcons(document);
   $("title-suits").innerHTML = E.SUITS.map(suitSpan).join("");
   const pips = E.SUITS.map(s => `<span class="sc s-${SUIT_KEY[s]}">${suitSvg(s)}</span>`).join("");
   $("brand-colophon").innerHTML = `<i class="bar"></i>${pips}<i class="bar"></i>`;
 
   $("btn-start").onclick = () => startSolo({ difficulty: $("sel-difficulty").value, targetDeals: Number($("sel-deals").value) });
-  $("btn-help").onclick = () => showHelp(lastView);
+  $("btn-help").onclick = () => { paused = true; showHelp(lastView); };
   $("btn-new").onclick = toStart;
 
   initPrefs();

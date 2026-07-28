@@ -106,6 +106,18 @@ const PHONE = splitMedia(CSS, "(max-width:900px)").inside;
 const COARSE = splitMedia(CSS, "(pointer:coarse)").inside;
 const BASE = splitMedia(splitMedia(CSS, "(max-width:900px)").outside, "(pointer:coarse)").outside;
 
+/* The exact source of a top-level `function name(...) { ... }`, brace-matched
+   rather than sliced to a fixed-size window — a fixed window either spills
+   into whatever function follows a short one, or truncates one that outgrew
+   it, missing exactly the content past the cut. */
+function functionSource(src, name) {
+  const at = src.indexOf(`function ${name}(`);
+  assert.ok(at !== -1, `function ${name} not found in client source`);
+  let depth = 0, j = src.indexOf("{", at);
+  for (; j < src.length; j++) { if (src[j] === "{") depth++; else if (src[j] === "}" && --depth === 0) break; }
+  return src.slice(at, j + 1);
+}
+
 test("manifest is installable: required fields + icons that exist at the declared size", () => {
   for (const f of ["name", "short_name", "start_url", "scope", "display", "background_color", "theme_color", "icons"])
     assert.ok(MANIFEST[f], `manifest is missing ${f}`);
@@ -117,7 +129,12 @@ test("manifest is installable: required fields + icons that exist at the declare
     assert.deepStrictEqual(got, { w, h }, `${icon.src} is ${got.w}x${got.h}, manifest says ${icon.sizes}`);
   }
   assert.ok(MANIFEST.icons.some(i => i.purpose === "maskable"), "need a maskable icon for adaptive launchers");
-  for (const s of MANIFEST.shortcuts || [])
+  // Asserted to exist, not treated as optional: `MANIFEST.shortcuts || []`
+  // asserts nothing at all once the key is gone, and the solo-play shortcut
+  // below is a deliberate, shipped feature, not incidental.
+  assert.ok(Array.isArray(MANIFEST.shortcuts) && MANIFEST.shortcuts.length,
+    "manifest should declare at least one shortcut (e.g. the solo-play jump)");
+  for (const s of MANIFEST.shortcuts)
     assert.ok(fs.existsSync(path.join(PUB, s.url.replace(/^\//, ""))), `shortcut target ${s.url} does not exist`);
 });
 
@@ -163,7 +180,15 @@ test("mobile: the sidebar survives as a bottom sheet instead of being hidden", (
   for (const tab of ["score", "log", "chat"])
     assert.ok(new RegExp(`data-tab="${tab}"`).test(CLIENT), `mobile tab "${tab}" missing`);
   const phone = mediaBlock(CSS, "(max-width:900px)");
-  assert.ok(!declared(phone, "aside", "display").includes("none"),
+  // declared() returns [] when nothing matches `sel`/`prop` at all, and
+  // [].includes(x) is false — so the old check passed just as well when the
+  // rule was flat-out missing (rename `aside` and it never fails again) as
+  // when the rule genuinely said something other than none. Assert the rule
+  // exists (base display:flex, or an override in the phone block) before
+  // asserting what it says.
+  const asideDisplay = [...declared(BASE, "aside", "display"), ...declared(phone, "aside", "display")];
+  assert.ok(asideDisplay.length, "aside declares no display rule to check on mobile");
+  assert.ok(!asideDisplay.includes("none"),
     "the sidebar must not be display:none on mobile — that drops score/log/chat");
   // every interactive control clears the 40px touch-target floor at phone width
   for (const sel of [".act-btn", ".mini-btn", "#sheet-tabs button", ".emote-btn", "#chat-input"]) {
@@ -201,11 +226,17 @@ test("iOS/iPad: dynamic viewport, safe areas, and touch-only pointers are handle
   assert.ok(!/height:\s*min\(\s*\d+vh/.test(CSS), "sheet heights should use dvh too");
 
   // anything pinned to a screen edge has to respect the notch / home indicator
-  for (const [sel, prop] of [["header", "padding"], ["#awaybar", "padding"],
-                             ["#conn", "padding"], ["#sheet-tabs", "padding-bottom"]]) {
-    const vals = rules(CSS).filter(r => r.sels.includes(sel)).map(r => r.body).join(";");
-    assert.ok(/env\(\s*safe-area-inset/.test(vals),
-      `${sel} ignores the safe-area inset it overlaps (checked ${prop} and friends)`);
+  // — checked on the exact property that abuts that edge, not "does
+  // env(safe-area-inset) appear anywhere in this selector's whole body":
+  // #sheet-tabs used to pass on padding-top alone (inherited from nowhere —
+  // it doesn't even declare one), which does nothing for the home indicator
+  // it actually overlaps at the bottom, the exact gap this test names.
+  for (const [sel, prop] of [["header", "padding-top"], ["#awaybar", "padding-top"],
+                             ["#conn", "padding-top"], ["#sheet-tabs", "padding-bottom"]]) {
+    const vals = declared(CSS, sel, prop);
+    assert.ok(vals.length, `${sel} declares no ${prop}`);
+    assert.ok(vals.some(v => /env\(\s*safe-area-inset/.test(v)),
+      `${sel}'s ${prop} ignores the safe-area inset it overlaps (declares ${JSON.stringify(vals)})`);
   }
   const sheetBottom = declared(mediaBlock(CSS, "(max-width:900px)"), "aside", "bottom").join(" ");
   for (const need of ["safe-area-inset-bottom", "--kb"])
@@ -239,9 +270,13 @@ test("live regions are updated incrementally, not rebuilt", () => {
      message — one per card played. syncWindow's behaviour is tested for real in
      client.test.js; this pins that the log and chat actually route through it. */
   for (const fn of ["renderLog", "renderChat"]) {
-    const body = CLIENT.slice(CLIENT.indexOf(`function ${fn}(`), CLIENT.indexOf(`function ${fn}(`) + 900);
+    // Whole (brace-matched) function body, checked in full — not just the
+    // text before the first "syncWindow" substring inside an arbitrary
+    // 900-character window, which could miss a clear placed after that
+    // point (or after a comment merely mentioning syncWindow) entirely.
+    const body = functionSource(CLIENT, fn);
     assert.ok(/syncWindow\(/.test(body), `${fn} must diff its window instead of redrawing`);
-    assert.ok(!/\.innerHTML\s*=\s*""/.test(body.split("syncWindow")[0]),
+    assert.ok(!/\.innerHTML\s*=\s*""/.test(body),
       `${fn} still clears the live region before rendering`);
   }
   assert.ok(/id="chat-empty"/.test(CLIENT) && !/#chat-log .empty/.test(CSS),
@@ -277,6 +312,12 @@ test("every shipped js and css file is precached", () => {
         ? walk(path.join(dir, e.name), base + e.name + "/")
         : [base + e.name])
     : [];
-  for (const rel of [...walk("js").map(f => "/js/" + f), ...walk("css").map(f => "/css/" + f)])
+  const shipped = [...walk("js").map(f => "/js/" + f), ...walk("css").map(f => "/css/" + f)];
+  // A measured floor, the way test/client-modules.test.js:13 floors its file
+  // count: 39 js+css files ship today. Without this, walk()'s existsSync(...)
+  // ? … : [] means a moved/renamed app/js silently walks nothing, the loop
+  // below iterates zero entries, and the whole test stays green.
+  assert.ok(shipped.length >= 30, `expected shipped js+css files, found ${shipped.length}`);
+  for (const rel of shipped)
     assert.ok(shell.includes(rel), `sw does not precache ${rel}`);
 });

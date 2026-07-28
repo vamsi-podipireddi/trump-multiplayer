@@ -26,7 +26,9 @@ test("every client module loads, and its imports resolve to real exports", async
 
   for (const f of files) {
     const src = fs.readFileSync(f, "utf8");
-    for (const m of src.matchAll(/from\s+"([^"]+)"/g))
+    // Both quote styles: matching only "..." let `from '/js/x.js'` (single-quoted)
+    // evade the absolute-path ban docs/STRUCTURE.md rule 3 says this enforces.
+    for (const m of src.matchAll(/from\s+["']([^"']+)["']/g))
       assert.ok(!m[1].startsWith("/"),
         `${path.relative(JS, f)} imports "${m[1]}" — absolute specifiers break node's resolver; use a relative path`);
   }

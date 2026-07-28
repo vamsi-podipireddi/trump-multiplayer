@@ -52,8 +52,9 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D12. ~~Root `index.html` (offline game) stays untouched~~** — SUPERSEDED 2026-07-27 by
   `docs/superpowers/specs/2026-07-27-project-structure-design.md`. The copy had drifted from the
   engine (`Math.random` deals instead of the CSPRNG, no hard AI, no `targetDeals`), so it was deleted and the solo game
-  rebuilt on the shared engine at `app/js/core/engine/`. The offline fallback is now
-  `app/solo.html`, served by the service worker.
+  rebuilt on the shared engine at `app/js/core/engine/`. `app/solo.html` is precached by
+  the service worker and playable offline when navigated to directly; the generic
+  offline-navigation fallback is the precached app shell (`index.html`), not solo.html.
 - **D13. Native ES modules, no bundler.** ~1100 lines of client JS doesn't need one; keeps edit-and-reload
   dev and a zero-build deploy; HTTP/2 makes ~19 small files free, and the service worker precaches them
   on first visit anyway. Rejected: an esbuild bundle to a single `public/app.js` — adds a devDependency, a

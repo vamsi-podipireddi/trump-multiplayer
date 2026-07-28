@@ -29,7 +29,15 @@ function createHttpServer(getRoomCount) {
       if (err) { res.writeHead(404); res.end("not found"); return; }
       res.writeHead(200, {
         "Content-Type": MIME[path.extname(file)] || "application/octet-stream",
-        "Cache-Control": file.endsWith("sw.js") || file.endsWith(".html")
+        // Client modules and stylesheets are no-cache too, same as sw.js/html:
+        // before the split, all client JS lived inside index.html and inherited
+        // no-cache automatically. Now a redeploy over `npm start` can serve
+        // fresh HTML against up-to-an-hour-stale modules from the old
+        // max-age, and with a ~20-module graph one renamed export is a blank
+        // page. Cloudflare fronts the Worker adapter in production, so this
+        // only matters on the node adapter — which is the path README.md
+        // tells LAN/self-host users to run.
+        "Cache-Control": file.endsWith("sw.js") || file.endsWith(".html") || rel.startsWith("js/") || rel.startsWith("css/")
           ? "no-cache" : "public, max-age=3600",
       });
       res.end(buf);
