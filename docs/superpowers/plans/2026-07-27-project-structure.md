@@ -936,7 +936,9 @@ git commit -m "refactor: room.js becomes src/core/room/"
   - `http.js` → `createHttpServer(getRoomCount: () => number): http.Server`
   - `registry.js` → `rooms: Map`, `getOrCreateRoom(codeRaw, priv)`, `newRoomCode(len)`, `deleteRoom(entry)`, `armTimer(entry)`, `applyFx(entry, fx, ws)`, `send(ws, obj)`
   - `sockets.js` → `attachSockets(httpServer): WebSocketServer`
-  - `index.js` → bootstrap only, no exports
+  - `index.js` → bootstrap, and **must re-export `{ httpServer, wss, rooms }`** exactly as `server.js` does today
+
+  That export list is not optional. `test/server.test.js` does `process.env.MAX_ROOMS = "3"` and then `const { httpServer, rooms } = await import("../server.js")` — a dynamic import specifically so the env var is set before the module evaluates and the room cap is reachable. Repoint it at `src/server/index.js` and keep both the dynamic import and the statement ordering; a static import would hoist, `config.js` would read `MAX_ROOMS` before the test set it, and the cap test would silently exercise the default of 500 instead of 3.
 
 - [ ] **Step 1: Read the current file end to end**
 
