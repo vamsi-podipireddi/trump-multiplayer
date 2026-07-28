@@ -1381,7 +1381,9 @@ state has to live on one object."
 - Produces:
   - `net.js` → `connect(name, code): void`, `send(o: object): void`, `serverNow(): number`, `scheduleReconnect(name): void`, `onMsg(m): void`, `WS_BASE`
   - `share.js` → `inviteUrl(): string`, `copyInvite(): void`
-  - `pwa.js` → `registerServiceWorker(): void`, `initInstallPrompt(): void`
+  - `pwa.js` → `registerServiceWorker(): void`
+
+  There is no install-prompt code in this repo. An earlier draft of this plan listed an `initInstallPrompt()` alongside it; a repo-wide grep for `beforeinstallprompt` finds nothing. Do not write one — inventing behaviour violates the pure-code-move constraint.
 
 - [ ] **Step 1: Create `net.js`**
 
@@ -1410,7 +1412,7 @@ In the inline script:
 ```js
 import { connect, send, serverNow, scheduleReconnect, setViewHandler } from "./net.js";
 import { inviteUrl, copyInvite } from "./share.js";
-import { registerServiceWorker, initInstallPrompt } from "./pwa.js";
+import { registerServiceWorker } from "./pwa.js";
 
 setViewHandler(render);
 ```
@@ -1552,7 +1554,7 @@ Keep the medallion comment about `width:max-content` being load-bearing, and the
 
 - [ ] **Step 4: Create `main.js`**
 
-Everything left in the inline script: the imports, `setViewHandler(render)`, the first-paint block (~1833-1856), `?room=` handling, `paintIcons(document)`, `initPrefs()`, `registerServiceWorker()`, `initInstallPrompt()`, `startTicking()` and the global event listeners.
+Everything left in the inline script: the imports, `setViewHandler(render)`, the first-paint block (~1833-1856), `?room=` handling, `paintIcons(document)`, `initPrefs()`, `registerServiceWorker()`, `startTicking()` and the global event listeners.
 
 Keep the first-paint comment block intact.
 
