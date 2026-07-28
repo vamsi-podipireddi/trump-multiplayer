@@ -10,7 +10,7 @@ and **Cloudflare Workers + Durable Objects** for a free global deploy.
 
 ```bash
 npm install      # one dependency (ws)
-npm start        # or: node server.js
+npm start        # runs src/server/index.js
 ```
 
 Open **http://localhost:3000**.
@@ -33,7 +33,7 @@ Open **http://localhost:3000**.
 | **Between deals** | The next deal starts when every present player clicks **ready**, or after 30s — whichever comes first. |
 | **Chat & emotes** | Chat panel with a 50-message ring, plus six reactions that float over your seat. |
 | **Reconnect** | Your seat is held and AI-played while you're gone; the newest connection for a session wins, so a second tab or a phone takes over cleanly. |
-| **Offline** | Installable PWA. With no network, it falls back to the self-contained single-player build. |
+| **Offline** | Installable PWA. With no network, the service worker serves the solo game (`app/solo.html`) from its precache — it still needs the page to have been loaded once while online. |
 | **Accessibility** | Cards are real buttons (Tab / Enter), labelled "play ace of spades"; the table log and chat are live regions; optional 4-colour deck (♦ blue, ♣ green). |
 | **Mobile** | Below 900px the sidebar becomes a bottom sheet with **Score / Log / Chat** tabs — nothing is hidden. |
 
@@ -49,7 +49,7 @@ npx wrangler login      # one-time
 npm run deploy
 ```
 
-This deploys a single Worker that serves both the static client (`public/`) and the realtime backend on
+This deploys a single Worker that serves both the static client (`app/`) and the realtime backend on
 one origin. Local preview: `npm run dev` (Worker + DO under workerd at `127.0.0.1:8787`).
 
 The DO uses the **WebSocket Hibernation API**, so it is evicted between messages instead of billing for a
@@ -63,8 +63,8 @@ I/O operations, so a wall-clock cutoff never fires inside a Durable Object and t
 (13 legal moves, 52 cards live) would run at full width on every deal. Worst-case search is ~2–3 ms warm.
 
 **Pages + separate Worker (optional split):** remove the `[assets]` block from `wrangler.toml`, set
-`WS_BASE` near the top of `public/index.html` to your Worker URL (e.g. `wss://trump.<you>.workers.dev`),
-deploy the Worker, and publish `public/` to Pages.
+`WS_BASE` in `app/js/net.js` to your Worker URL (e.g. `wss://trump.<you>.workers.dev`), deploy the
+Worker, and publish `app/` to Pages.
 
 ### Optional player stats (D1)
 
@@ -84,35 +84,47 @@ no stats endpoint; the line just stays hidden.
 ## How it works
 
 ```
-engine.js   pure game rules + AI          ─┐
-room.js     pure room state machine        ├─ no I/O, fully JSON-serializable
-                                          ─┘
-server.js       node adapter: ws sockets, setTimeout, static files, per-IP caps
-src/worker.js   Cloudflare adapter: hibernating DO, storage, alarms, D1 stats
-public/         the networked client (single file) + PWA assets
-index.html      the original offline single-player game (untouched)
-scripts/        build-assets.js (index.html -> public/solo.html, sw cache version), gen-icons.js
+app/js/core/engine/   pure game rules + AI          ─┐
+src/core/room/        pure room state machine        ├─ no I/O, fully JSON-serializable
+                                                     ─┘
+src/server/     node adapter: ws sockets, setTimeout, static files, per-IP caps
+src/worker/     Cloudflare adapter: hibernating DO, storage, alarms, D1 stats
+app/            everything the browser is served: the client (multiplayer + solo shells, PWA
+                assets) AND the shared engine, which the browser must fetch too
+scripts/        build-assets.js (regenerates the service worker's precache list + cache
+                version by walking app/), gen-icons.js
 ```
 
-- **`engine.js`** — deal, auction, trump and partner call, trick play, scoring, and the three AI levels.
-  Pure functions over a game object.
-- **`room.js`** — everything around the game: seats, host, settings, chat, ready gate, timers, and the
-  **redacted per-viewer view**. Every function is `(room, …, now) -> effects`; it never touches a socket,
-  a clock or storage. Timers are *data* (`room.timers`), so the adapter arms exactly one
+- **`app/js/core/engine/`** — deal, auction, trump and partner call, trick play, scoring, and the three
+  AI levels. Pure functions over a game object, split into 14 acyclic modules behind one barrel
+  `index.js`. It lives under `app/`, not `src/`, because the browser has to fetch it — see
+  `docs/STRUCTURE.md` for the full layer table and why.
+- **`src/core/room/`** — everything around the game: seats, host, settings, chat, ready gate, timers, and
+  the **redacted per-viewer view**. Every function is `(room, …, now) -> effects`; it never touches a
+  socket, a clock or storage. Timers are *data* (`room.timers`), so the adapter arms exactly one
   `setTimeout`/alarm for the earliest one — that is what lets the same core hibernate on Cloudflare.
-- **Adapters** own sockets, rate limits, persistence and origin checks, and apply the effects
-  (`broadcast`, `sends`, `closes`, `emote`, `deleteRoom`) the core returns.
-- **`scripts/build-assets.js`** regenerates the two derived files — `public/solo.html` (the byte-identical
-  offline copy) and the service worker's cache `VERSION` (a hash of the shell, so a deploy actually evicts
-  the old precache). `npm test` fails if either is stale.
-- **`public/index.html`** — the client: a thin view of server state, rotated so you always sit at the
-  bottom, plus the lobby, chat and PWA wiring.
+  This subtree holds every seat's hand and is never served to a client.
+- **Adapters** (`src/server/`, `src/worker/`) own sockets, rate limits, persistence and origin checks,
+  and apply the effects (`broadcast`, `sends`, `closes`, `emote`, `deleteRoom`) the core returns.
+- **`scripts/build-assets.js`** walks `app/` to regenerate `app/sw.js`'s precache list and cache
+  `VERSION` (a hash of the shell, so a deploy actually evicts the old precache). Run
+  `npm run build:assets` after touching anything under `app/` — `npm test` fails if it's stale.
+- **`app/index.html`** / **`app/solo.html`** — thin markup shells that load the client's ~20 JS modules
+  and 5 stylesheets: a rendering of server (or, for solo, in-browser engine) state, rotated so you
+  always sit at the bottom, plus the lobby, chat and PWA wiring.
+
+## Repo structure
+
+The client, the shared game engine, the room state machine and both server adapters each live in their
+own small modules instead of one big file per concern. `docs/STRUCTURE.md` has the full map: every
+file's responsibility, the engine's acyclic layer table, and the import rules (barrel vs. leaf module,
+relative vs. absolute) worth knowing before touching anything under `app/` or `src/`.
 
 ## Tests
 
 ```bash
-npm test              # node --test, no dependencies
-npm run build:assets  # after editing the client: refreshes solo.html + the sw cache version
+npm test              # node --test, no dependencies (bare — no path argument, see docs/STRUCTURE.md)
+npm run build:assets  # after touching anything under app/: refreshes the sw precache list + cache version
 ```
 
 Three kinds of test, worth telling apart:
@@ -127,12 +139,18 @@ Three kinds of test, worth telling apart:
 - **Adapter tests over real sockets and a real Worker** (`server`, `worker`) — the socket↔player
   bookkeeping the core never sees (a connection that re-joins must not strand its old identity), path
   traversal, and the Worker's routing/origin/stats behaviour.
-- **Contract checks over the client source** (`client`, `pwa`) — the client is a single hand-written HTML
-  file with no module boundary, so these pin its protocol vocabulary against `room.js` and read the
-  stylesheet's *declarations* (not its formatting) to check the touch-target floors, safe areas and
-  dynamic viewport. Self-contained client functions (`syncWindow`, `esc`) are lifted out and executed for
-  real. These are structural: they cannot tell you the layout looks right, only that it still says what it
-  claimed to. There is no DOM harness — that would mean a dependency, and `npm test` deliberately has none.
+- **Tests over the client** (`client`, `client-modules`, `cards`, `pwa`, `solo`) — the client is real ES
+  modules now, so most of this group imports them directly: `client-modules` loads every file under
+  `app/js/` as a real module and asserts every import specifier resolves and is relative, never absolute;
+  `cards` unit-tests `cards/labels.js` and `cards/deck.js` for real; `solo` asserts `app/solo.html` +
+  `app/js/solo.js` import `core/engine` and re-implement none of its rules functions, and that the
+  deleted root `index.html` stays gone. `client` and `pwa` still read some things as text — the protocol
+  vocabulary (message types, emote set, option lists) never meets as a runtime value on both sides, so
+  there is nothing to import and compare directly — and `pwa` reads the stylesheets' *declarations* (not
+  their formatting) for touch-target floors, safe areas and dynamic viewport, and calls
+  `scripts/build-assets.js`'s `check()` so a stale precache fails the suite. Self-contained functions
+  (`syncWindow`, `esc`) are lifted out and executed for real either way. There is no DOM harness — that
+  would mean a dependency, and `npm test` deliberately has none.
 
 CI runs the suite on node 20 and 22.
 
