@@ -82,23 +82,29 @@ function playOutRound(sim, rnd = Math.random) {
    spends it where PIMC actually pays: the endgame. */
 const PIMC_PLAY_BUDGET = 8000;
 
-function choosePIMCCard(G, me, opts) {
+/* Score every legal move. Split out of choosePIMCCard so the bot and the
+   browser-side coach share one evaluator: two searchers that disagree about the
+   same position would be a bug generator, and this is the one that is tuned.
+   Returns null when the sampler cannot build a consistent world — the caller
+   falls back to the heuristic, exactly as before. */
+function evaluateMoves(G, me, opts) {
   const legal = legalCards(G, me);
-  if (legal.length <= 1) return legal[0];
+  const rnd = (opts && opts.rnd) || Math.random;
   const timeMs = (opts && opts.timeMs) || 25;
   const budget = (opts && opts.playBudget) || PIMC_PLAY_BUDGET;
-  const rnd = (opts && opts.rnd) || Math.random; // the coach seeds this to replay a search's numbers
   const cardsLeft = G.hands.reduce((n, h) => n + h.length, 0) || 1;
-  const affordable = Math.max(1, Math.floor(budget / (legal.length * cardsLeft)));
+  const affordable = Math.max(1, Math.floor(budget / (Math.max(1, legal.length) * cardsLeft)));
   const maxDet = Math.min((opts && opts.determinizations) || 24, affordable);
   const started = Date.now();
   const iAmDeclaring = sideOf(G, me) === "D";
-  const totals = legal.map(() => 0), counts = legal.map(() => 0);
+  const wins = legal.map(() => 0), pts = legal.map(() => 0), counts = legal.map(() => 0);
+  let dets = 0;
 
   for (let d = 0; d < maxDet; d++) {
     if (d >= 4 && Date.now() - started > timeMs) break; // secondary guard; a no-op on Workers
     const world = determinize(G, me, rnd);
-    if (!world) return chooseAICard(G, me, false);
+    if (!world) return null;
+    dets++;
     for (let i = 0; i < legal.length; i++) {
       const sim = rolloutClone(G);
       for (const p of [0, 1, 2, 3]) if (p !== me) sim.hands[p] = world[p].slice();
@@ -106,18 +112,37 @@ function choosePIMCCard(G, me, opts) {
       playOutRound(sim, rnd);
       const dPts = sim.capturedPoints[sim.declarer] + sim.capturedPoints[sim.partner];
       const made = dPts >= sim.bid;
-      const win = (iAmDeclaring === made) ? 1 : 0;
-      const margin = iAmDeclaring ? dPts : TOTAL_POINTS - dPts;
-      totals[i] += win * 1000 + margin; counts[i]++;
+      /* winProb and meanPoints are stated from MY side's point of view, which is
+         what makes them readable in a hint. Their fusion below is algebraically
+         the old win*1000 + margin, so the bot's choice is unchanged. */
+      wins[i] += (iAmDeclaring === made) ? 1 : 0;
+      pts[i] += iAmDeclaring ? dPts : TOTAL_POINTS - dPts;
+      counts[i]++;
     }
   }
-  let best = 0, bestAvg = -Infinity;
-  for (let i = 0; i < legal.length; i++) {
-    if (!counts[i]) continue;
-    const avg = totals[i] / counts[i];
-    if (avg > bestAvg) { bestAvg = avg; best = i; }
-  }
+  return {
+    determinizations: dets,
+    moves: legal.map((card, i) => ({
+      card,
+      winProb: counts[i] ? wins[i] / counts[i] : 0,
+      meanPoints: counts[i] ? pts[i] / counts[i] : 0,
+      samples: counts[i],
+    })),
+  };
+}
+
+function choosePIMCCard(G, me, opts) {
+  const legal = legalCards(G, me);
+  if (legal.length <= 1) return legal[0];
+  const ev = evaluateMoves(G, me, opts);
+  if (!ev) return chooseAICard(G, me, false, (opts && opts.rnd) || Math.random);
+  let best = 0, bestScore = -Infinity;
+  ev.moves.forEach((m, i) => {
+    if (!m.samples) return;
+    const score = m.winProb * 1000 + m.meanPoints;
+    if (score > bestScore) { bestScore = score; best = i; }
+  });
   return legal[best];
 }
 
-export { determinize, PIMC_PLAY_BUDGET, choosePIMCCard };
+export { determinize, PIMC_PLAY_BUDGET, evaluateMoves, choosePIMCCard };

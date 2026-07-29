@@ -2,7 +2,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as E from "../app/js/core/engine/index.js";
-import { mulberry32 } from "../app/js/core/engine/random.js";
 
 const key = c => c.suit + c.rank;
 
@@ -154,20 +153,20 @@ test("hard AI is not weaker than the heuristic (paired-deal comparison)", () => 
 });
 
 test("mulberry32 is deterministic and in range", () => {
-  const a = mulberry32(12345), b = mulberry32(12345);
+  const a = E.mulberry32(12345), b = E.mulberry32(12345);
   const xs = Array.from({ length: 200 }, () => a());
   const ys = Array.from({ length: 200 }, () => b());
   assert.deepEqual(xs, ys, "same seed must produce the same stream");
   for (const x of xs) assert.ok(x >= 0 && x < 1, `out of range: ${x}`);
-  assert.notDeepEqual(xs, Array.from({ length: 200 }, mulberry32(999)), "different seeds must differ");
+  assert.notDeepEqual(xs, Array.from({ length: 200 }, E.mulberry32(999)), "different seeds must differ");
 });
 
 test("a seeded search is reproducible on one position", () => {
   const G = E.createMatch(); E.startMatch(G);
   while (G.phase !== "playing") stepAI(G);          // helper already in this file
   const seat = G.turn;
-  const a = E.choosePIMCCard(G, seat, { rnd: mulberry32(7), determinizations: 8 });
-  const b = E.choosePIMCCard(G, seat, { rnd: mulberry32(7), determinizations: 8 });
+  const a = E.choosePIMCCard(G, seat, { rnd: E.mulberry32(7), determinizations: 8 });
+  const b = E.choosePIMCCard(G, seat, { rnd: E.mulberry32(7), determinizations: 8 });
   assert.deepEqual(a, b, "same seed, same position, same card");
 });
 
@@ -176,9 +175,44 @@ test("determinize honours a supplied rng and stays legal", () => {
   while (G.phase !== "playing") stepAI(G);
   const seat = G.turn;
   // the barrel exports this as `_determinize` (app/js/core/engine/index.js:23)
-  const w1 = E._determinize(G, seat, mulberry32(3));
-  const w2 = E._determinize(G, seat, mulberry32(3));
+  const w1 = E._determinize(G, seat, E.mulberry32(3));
+  const w2 = E._determinize(G, seat, E.mulberry32(3));
   assert.deepEqual(w1, w2, "seeded determinization must repeat");
   for (const p of [0, 1, 2, 3]) if (p !== seat)
     assert.equal(w1[p].length, G.hands[p].length, `seat ${p} got the wrong number of cards`);
+});
+
+test("evaluateMoves scores every legal card", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  while (G.phase !== "playing") stepAI(G);
+  const seat = G.turn;
+  const ev = E.evaluateMoves(G, seat, { rnd: E.mulberry32(11), determinizations: 6 });
+  assert.equal(ev.moves.length, E.legalCards(G, seat).length);
+  for (const m of ev.moves) {
+    assert.ok(m.winProb >= 0 && m.winProb <= 1, `winProb out of range: ${m.winProb}`);
+    assert.ok(m.meanPoints >= 0 && m.meanPoints <= 250, `meanPoints out of range: ${m.meanPoints}`);
+    assert.ok(m.samples > 0, "every legal card must be sampled");
+  }
+});
+
+test("choosePIMCCard is exactly the argmax of winProb*1000 + meanPoints", () => {
+  for (let trial = 0; trial < 12; trial++) {
+    const G = E.createMatch(); E.startMatch(G);
+    while (G.phase !== "playing") stepAI(G);
+    const seat = G.turn;
+    const opts = { rnd: E.mulberry32(100 + trial), determinizations: 8 };
+    const ev = E.evaluateMoves(G, seat, { ...opts, rnd: E.mulberry32(100 + trial) });
+    let best = ev.moves[0];
+    for (const m of ev.moves) if (m.winProb * 1000 + m.meanPoints > best.winProb * 1000 + best.meanPoints) best = m;
+    const picked = E.choosePIMCCard(G, seat, { ...opts, rnd: E.mulberry32(100 + trial) });
+    assert.deepEqual(picked, best.card, "the wrapper must pick what the evaluator ranks first");
+  }
+});
+
+test("choosePIMCCard still short-circuits a forced play", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  while (G.phase !== "playing") stepAI(G);
+  const seat = G.turn;
+  G.hands[seat] = [G.hands[seat][0]];                       // exactly one card
+  assert.deepEqual(E.choosePIMCCard(G, seat), G.hands[seat][0]);
 });
