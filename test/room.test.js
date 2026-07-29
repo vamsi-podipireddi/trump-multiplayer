@@ -21,14 +21,33 @@ function joinN(room, n, now) {
 }
 
 /* The redaction property: a viewer's serialized view must never contain
-   another seat's current hand cards. `you.callable` is excluded — it is the
-   exact complement of the viewer's own hand (52 minus their 13), so it
-   necessarily "contains" every other card without revealing who holds what. */
+   another seat's current hand cards. Two fields are excluded, and only these
+   two — both because they are already public by the rules of the game, not
+   because they are inconvenient:
+
+   · `you.callable` is the exact complement of the viewer's own hand (52 minus
+     their 13), so it necessarily "contains" every other card without revealing
+     who holds what.
+   · `calledCard` is the card the declarer named out loud. `applyCall` sets it
+     and `teamsRevealed` in the same breath, publishes `partner`, and writes
+     "X calls A♠ — partner is Y." into the log every viewer receives — so the
+     fact "seat Y holds A♠" is already in the view as prose. Publishing the
+     card as an object adds no information; withholding it would only force the
+     client to parse that sentence back out.
+
+   Excluding a field is not the same as trusting it, so both exclusions are
+   pinned below: `calledCard` must be null until the teams are known, and must
+   be exactly the card the engine recorded. A view that smuggled some *other*
+   card through this hole would fail there instead. */
 function assertRedacted(room, pids) {
   for (const pid of pids) {
     const v = R.buildView(room, pid);
+    assert.ok("calledCard" in v, "the view must publish calledCard (null before the call)");
+    if (!room.G.teamsRevealed) assert.equal(v.calledCard, null, "calledCard leaks before the teams are known");
+    else assert.deepEqual(v.calledCard, room.G.calledCard, "calledCard must be the card that was actually called");
     const clone = JSON.parse(JSON.stringify(v));
     if (clone.you) delete clone.you.callable;
+    delete clone.calledCard;
     const s = JSON.stringify(clone);
     const mySeat = room.players[pid] ? room.players[pid].seat : null;
     for (let seat = 0; seat < 4; seat++) {

@@ -88,6 +88,34 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D22. D12 ("root `index.html` stays untouched") superseded**, not deleted from this list — see the
   amendment above. The duplicate had already drifted (`Math.random()` deals, no hard AI, no
   `targetDeals`); leaving D12 in force would have left a known-drifted rules copy in the repo.
+- **D23. The table is a rounded slab with two rails, not an oval with one sidebar.** Adopts the
+  `TRUMP.dc.html` design wholesale (`docs/superpowers/specs/2026-07-29-design-integration.md` is the
+  module contract). Contract + scoreboard + your own tricks go left, log + chat go right, and
+  whatever you have to decide rides a tray *out of flow* above the hand — the auction's five controls
+  and the 20-card call grid used to grow the action bar and resize the felt on every phase change.
+  Rejected: keeping the oval and restyling it — at 16:9 the oval flung the seats to its rim, left a
+  dead centre, and wasted exactly the two corners a 13-card hand needs.
+- **D24. One team colour, and it is the bidding side's.** The pair that bought the contract is lit
+  (`--acc` / `--teambd` / `--teamtint`); defenders are simply everyone who isn't. Rejected: the old
+  gold/blue pair — a second accent competing with the brass made four seats read as two pairs of
+  strangers, and the felt already carries enough colour.
+- **D25. Shared renderers, parameterised on the view.** Everything under `app/js/ui/` takes the view
+  as its first argument and an action-handler object as its second, so `screens/game.js` (handlers =
+  `send()`) and `solo.js` (handlers = engine call + repaint) paint one implementation. This is what
+  removes solo's private copy of the seats, medallion, scoreboard and action bar. See
+  `docs/STRUCTURE.md` rule 6. Rejected: sharing by having solo populate `session.js`'s `S` — that
+  couples two clients that must stay independent, which is the coupling the parameterisation avoids.
+- **D26. The webfonts are a progressive enhancement, never a dependency.** Instrument Sans / Instrument
+  Serif / IBM Plex Mono load from Google Fonts with `display=swap`; every `--f*` token names a real
+  system fallback because the service worker cannot precache a cross-origin response, so an offline
+  load gets the system grotesk/serif/mono. Rejected: self-hosting woff2 subsets — ~300 KB of committed
+  binary for a case the fallback stack already covers legibly.
+- **D27. Trick history is public engine state.** `G.tricks` (winner, points, the four cards) is pushed
+  by `resolveTrick()` and published by `publicView()`, which is what feeds the piles in front of each
+  seat, the "tricks you won" rail and the deal-result review. Every card in it was played face-up in
+  front of all four seats, so it adds no redaction surface. Rejected: reconstructing it on the client
+  from the log — the log is prose, and a client that has to parse prose to draw the table is a client
+  that breaks the next time the wording changes.
 
 ## Milestones
 

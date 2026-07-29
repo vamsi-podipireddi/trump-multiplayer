@@ -3,47 +3,106 @@
 
      The room is dark and a warm light hangs over the felt, so the cards
      are the only bright objects on screen — which is right, because the
-     cards are what you are actually looking at. Everything else (rail,
+     cards are what you are actually looking at. Everything else (rails,
      panels, chrome) stays quiet and lets them carry the detail.
 
-     Two rules the old sheet broke, and the reason it read as clip-art:
+     Two rules that keep this from reading as clip-art:
        · suits are drawn (SVG paths), never typed. ♠♥♦♣ are font glyphs
          and every OS ships a different, flatter one.
        · nothing in the interface is an emoji. Emoji can't take the
          interface's colour and are mud below 16px.
+
+     Only ONE team colour, and it is the bidding side's. The design this
+     sheet implements deliberately has no second team hue: the pair that
+     bought the contract is lit (--teambd / --teamtint / --acc), and the
+     defenders are simply everyone who isn't. A second accent competing
+     with the brass just made four seats read as two pairs of strangers.
      ============================================================ */
   :root {
     /* the room */
-    --room-0:#070c0a; --room-1:#0d1613; --room-2:#14211b; --room-3:#1b2a23;
-    --felt-hi:#1f5741; --felt:#123a2c; --felt-lo:#091e17;
-    --rail-hi:#6a4b2e; --rail:#33231a; --rail-lo:#17100b;
-    /* card stock */
-    --stock:#f7f3e7; --stock-lo:#e6dfca; --ink:#15171a; --red:#b02a2e;
+    --bg:#08090a; --bg2:#0e1011; --panel:#131518; --panel2:#1c1f23;
+    --line:rgba(255,255,255,.075); --line2:rgba(255,255,255,.17);
+    /* brass is the lamp */
+    --acc:#e6c07a; --acc2:#9c7936; --on-acc:#171105;
+    --glow:rgba(230,192,122,.24); --shadow:rgba(0,0,0,.76);
+    /* the bidding side */
+    --teamtint:rgba(230,192,122,.13); --teambd:rgba(230,192,122,.6);
+    /* type */
+    --txt:#f4f2ec; --txt2:rgba(244,242,236,.64); --txt3:rgba(244,242,236,.37);
+    /* the felt */
+    --felt:#0f7045; --felt2:#03170e; --rim:rgba(230,192,122,.22);
+    /* card stock: the only bright surface in the room */
+    --stock:#fcfaf4; --stock2:#eae4d6;
+    --stockbg:radial-gradient(130% 96% at 20% 6%,#fffefa 0%,rgba(255,254,250,0) 52%),linear-gradient(168deg,var(--stock),var(--stock2));
+    --cink:#14120f; --cred:#bc2a20; --cardline:rgba(20,18,15,.32);
+    --ok:#5cc98f; --bad:#e0705c;
+    /* 4-colour deck — printed ink is darker than the same suit named in a sentence */
     --dia-4c:#1b62c8; --club-4c:#0d7a47;
-    /* accents — brass is the lamp; slate is the defending side */
-    --gold:#debd79; --gold-hi:#f2dca9; --gold-dim:#9c7a34;
-    --team-d:#debd79; --team-o:#8bb0e0; --ok:#5fc495; --danger:#e4705e;
-    /* ink on brass — near-black with a warm cast, never pure #000 */
-    --on-gold:#1a1509;
-    --shadow:rgba(0,0,0,.45); --card-bg:#f7f3e7;
+    --dia-4c-ui:#5b9cf5; --club-4c-ui:#35a76a;
+
     --kb:0px;   /* on-screen keyboard height, measured from visualViewport */
-    /* type scale — everything used to sit between 10 and 14px, so nothing read as primary */
-    --t-2xs:10px; --t-xs:11.5px; --t-sm:13px; --t-md:14.5px; --t-lg:17px; --t-xl:21px; --t-2xl:28px; --t-3xl:38px;
-    --txt:#ecefea; --txt-2:rgba(236,239,234,.70); --txt-3:rgba(236,239,234,.42);
-    --surface-1:#101b16; --surface-2:#0a120f; --surface-3:rgba(0,0,0,.3);
-    --line:rgba(255,255,255,.075); --line-2:rgba(255,255,255,.14); --line-gold:rgba(222,189,121,.26);
-    --r-xs:6px; --r-sm:9px; --r-md:13px; --r-lg:18px; --r-xl:26px; --r-pill:999px;
-    /* Two roles, and only two. The grotesk prints the interface (and the card
-       indices, which want lining figures Georgia doesn't have); the serif is
-       reserved for the wordmark and the engraved ace, where it earns its keep. */
-    --fu:system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
-    --fd:ui-serif,Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;
+
+    /* Three roles. The grotesk prints the interface and the card indices (it has
+       the lining figures a serif does not); the serif is reserved for the
+       wordmark, the contract number and the centre plaque; the mono carries
+       every small caps-and-tracking label, where a grotesk goes to mush.
+       Each names a real fallback: the webfonts are cross-origin, so the service
+       worker cannot precache them and an offline load gets the system face. */
+    --fu:'Instrument Sans',system-ui,-apple-system,"Segoe UI Variable Text","Segoe UI",Inter,Roboto,"Helvetica Neue",Arial,sans-serif;
+    --fd:'Instrument Serif',ui-serif,Georgia,"Iowan Old Style","Palatino Linotype",Palatino,serif;
+    --fm:'IBM Plex Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+    --t-2xs:10px; --t-xs:11.5px; --t-sm:12.5px; --t-md:13.5px; --t-lg:15px;
+    --t-xl:19px; --t-2xl:23px; --t-3xl:30px;
+    --r-xs:5px; --r-sm:9px; --r-md:11px; --r-lg:16px; --r-xl:20px; --r-pill:99px;
+    --e:cubic-bezier(.2,.8,.2,1);
+
+    /* ---- measured at runtime; the stylesheet only ever declares the fallback ----
+       ui/layout.js writes --seat-scale/--trick-scale/--tray-lift/--strip-top after
+       measuring the felt, ui/hand.js writes --ml after measuring the hand's column,
+       and ui/layout.js writes --p on the ticking avatar. Sizes that depend on the
+       breakpoint (--cardw … --reach-y) are declared in CSS and read back by the
+       JS that needs them, so neither side keeps a second copy of the numbers. */
+    --cardw:92px; --cardh:128px; --minw:34px; --minh:47px;
+    --trickw:84px; --trickh:118px; --reach-x:0px; --reach-y:0px;
+    --seat-scale:1; --trick-scale:1; --tray-lift:0px; --strip-top:70%;
+    --pilew:15px; --pileh:21px; --backw:17px; --backh:25px;
   }
   * { box-sizing:border-box; }
-  html,body { margin:0; height:100%; font-family:var(--fu); color:var(--txt); background:var(--room-0); overflow:hidden;
+  html,body { margin:0; height:100%; font-family:var(--fu); color:var(--txt); background:var(--bg); overflow:hidden;
     -webkit-text-size-adjust:100%; text-size-adjust:100%; overscroll-behavior:none;
     -webkit-font-smoothing:antialiased; }
 
 /* the shared icon size; individual call sites override */
   .ic { width:16px; height:16px; flex:none; display:block; }
   .su { display:inline-block; vertical-align:-.1em; width:1em; height:1em; }
+
+  ::-webkit-scrollbar { width:7px; height:7px; }
+  ::-webkit-scrollbar-thumb { background:rgba(255,255,255,.16); border-radius:var(--r-sm); }
+  ::-webkit-scrollbar-track { background:transparent; }
+
+/* ---- the motion vocabulary ----
+   Every animation in the app is one of these. Named here rather than beside
+   the rule that uses it so the same fly/rise/pop reads identically wherever
+   it appears, and so responsive.css can flatten the whole set in one place
+   for prefers-reduced-motion. */
+  @keyframes rise    { from { opacity:0; transform:translateY(16px) scale(.985); } }
+  @keyframes pop     { 0% { transform:scale(.86); opacity:0; } 62% { transform:scale(1.04); } 100% { transform:scale(1); opacity:1; } }
+  @keyframes trayUp  { from { opacity:0; transform:translateY(14px); } }
+  @keyframes fanIn   { from { opacity:0; transform:translateY(38px) rotate(0deg) scale(.92); } }
+  @keyframes dealFly { from { opacity:0; transform:translate(var(--dfx,0px),var(--dfy,-240px)) rotate(var(--dfr,-22deg)) scale(.4); } }
+  @keyframes backIn  { from { opacity:0; transform:scale(.34) translateY(-14px); } }
+  @keyframes pileIn  { from { opacity:0; transform:translateY(-22px) scale(.4); } }
+  @keyframes logIn   { from { opacity:0; transform:translateX(-7px); } }
+  @keyframes dotBob  { 0%,78%,100% { opacity:.22; transform:translateY(0); } 38% { opacity:1; transform:translateY(-3px); } }
+  @keyframes feltFlash { 0% { opacity:0; } 14% { opacity:1; } 100% { opacity:0; } }
+  @keyframes chipUp  { 0% { opacity:0; transform:translate(-50%,14px) scale(.82); } 22% { opacity:1; transform:translate(-50%,-4px) scale(1); } 100% { opacity:0; transform:translate(-50%,-64px) scale(1); } }
+  @keyframes chipFly { 0% { opacity:0; transform:translate(-50%,-50%) scale(.35) rotate(0deg); }
+                       16% { opacity:1; transform:translate(-50%,-50%) scale(1) rotate(6deg); }
+                       100% { opacity:0; transform:translate(calc(-50% + var(--tx,0px)),calc(-50% + var(--ty,0px))) scale(.52) rotate(var(--cr,120deg)); } }
+  @keyframes spinIn  { 0% { opacity:0; transform:rotateY(-540deg) scale(.24); } 70% { opacity:1; } 100% { opacity:1; transform:rotateY(0deg) scale(1); } }
+  @keyframes slideIn { from { opacity:0; transform:translateX(var(--sx,0px)) scale(.9); } }
+  @keyframes ampIn   { 0% { opacity:0; transform:scale(2.6) rotate(-18deg); } 70% { opacity:1; } 100% { opacity:1; transform:scale(1) rotate(0deg); } }
+  @keyframes sheen   { from { transform:translateX(-130%) skewX(-18deg); } to { transform:translateX(260%) skewX(-18deg); } }
+  @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
+                       100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }

@@ -13,6 +13,10 @@ const SUIT_KEY = { "♠":"s", "♥":"h", "♦":"d", "♣":"c" };
 const SUIT_NAME = { "♠":"spades", "♥":"hearts", "♦":"diamonds", "♣":"clubs" };
 const RANK_NAME = { 14:"ace", 13:"king", 12:"queen", 11:"jack" };
 const cardName = c => `${RANK_NAME[c.rank] || c.rank} of ${SUIT_NAME[c.suit] || c.suit}`;
+/* A card's ink is a class and never an inline style, so `body.fourcolor` can
+   repaint ♦ blue and ♣ green from CSS alone. One definition, because every card
+   element — full, mini, hero — has to carry the identical pair. */
+const suitClass = s => "s-" + SUIT_KEY[s] + (RED.has(s) ? " red" : "");
 
 /* ---------- the deck ----------
    Suits are drawn, never typed. ♠♥♦♣ are font glyphs: every OS ships a
@@ -39,4 +43,4 @@ function textWithCards(t) {
   return esc(t).replace(/([AKQJ0-9]{1,2}|10)([♠♥♦♣])/g, (m, r, s) => `<span class="sc s-${SUIT_KEY[s]}">${r}${suitSvg(s)}</span>`);
 }
 
-export { RED, SUIT_KEY, SUIT_NAME, RANK_NAME, cardName, SUIT_PATH, suitSvg, suitSpan, cardSpan, textWithCards };
+export { RED, SUIT_KEY, SUIT_NAME, RANK_NAME, cardName, suitClass, SUIT_PATH, suitSvg, suitSpan, cardSpan, textWithCards };

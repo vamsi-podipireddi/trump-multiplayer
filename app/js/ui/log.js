@@ -1,6 +1,4 @@
-import { S } from "../session.js";
 import { $ } from "../util/dom.js";
-import { icon } from "../cards/icons.js";
 import { textWithCards } from "../cards/labels.js";
 
 /* ---------- sliding-window lists (the table log and the chat) ----------
@@ -25,20 +23,38 @@ function syncWindow(box, keys, build) {
   box._winKeys = keys;
   return keys.length - keep; // rows actually added
 }
-/* view defaults to the multiplayer session so screens/game.js's call site (no
-   arguments) is unchanged; solo.js passes it explicitly instead of populating
-   S — see app/js/solo.js. */
+
+/* The wire carries no timestamps: the log is a window of plain strings that the
+   server re-sends whole. So the clock column is the moment *this* client first
+   saw the entry, remembered against the very key syncWindow diffs on. Entries
+   that have scrolled off the window lose their stamp again — a long match
+   otherwise grows this Map for the life of the page. Two identical lines share
+   one stamp, which is the right answer anyway: they read the same. */
+const stamps = new Map();
+const clockNow = () => {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+};
+
 function renderLog(view) {
-  view = view || S.view;
   const el = $("log");
   const entries = view.log || [];
-  const added = syncWindow(el, entries.map(e => `${e.cls || ""} ${e.text}`), i => {
+  const keys = entries.map(e => `${e.cls || ""} ${e.text}`);
+  const live = new Set(keys);
+  for (const k of stamps.keys()) if (!live.has(k)) stamps.delete(k);
+  const seen = clockNow();
+  for (const k of keys) if (!stamps.has(k)) stamps.set(k, seen);
+  const added = syncWindow(el, keys, i => {
     const d = document.createElement("div");
-    const cls = entries[i].cls || "";
-    d.className = "entry " + cls;
-    /* the core marks a won trick with a ★; draw it instead of printing a dingbat */
-    const text = entries[i].text.replace(/^★\s*/, "");
-    d.innerHTML = (cls === "win" ? icon("star") : "") + `<span>${textWithCards(text)}</span>`;
+    d.className = "entry " + (entries[i].cls || "");
+    const t = document.createElement("span");
+    t.className = "t";
+    t.textContent = stamps.get(keys[i]);
+    const body = document.createElement("span");
+    /* the core marks a won trick with a ★; .entry.win already says so in colour,
+       so strip the dingbat rather than printing it beside the clock */
+    body.innerHTML = textWithCards(entries[i].text.replace(/^★\s*/, ""));
+    d.append(t, body);
     return d;
   });
   if (added) el.scrollTop = el.scrollHeight;

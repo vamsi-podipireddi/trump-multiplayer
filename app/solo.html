@@ -5,87 +5,154 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>TRUMP — Solo</title>
 <meta name="description" content="Offline single-player TRUMP: bid for points, call a hidden partner, capture tricks against three AI opponents. No room, no network." />
-<meta name="theme-color" content="#0d4d2e" />
+<meta name="theme-color" content="#08090a" />
 <meta name="color-scheme" content="dark" />
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
+<!-- cross-origin, so never precached: offline the --f* fallbacks carry the page (see index.html) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=Instrument+Serif&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/css/tokens.css" />
 <link rel="stylesheet" href="/css/base.css" />
 <link rel="stylesheet" href="/css/table.css" />
 <link rel="stylesheet" href="/css/panels.css" />
 <link rel="stylesheet" href="/css/responsive.css" />
 </head>
-<body>
+<body class="solo">
 
 <!-- Start screen: difficulty + match length, chosen once before startSolo() runs -->
 <div id="start-screen" class="screen show">
-  <div class="brand">
-    <h1>TRUMP</h1>
-    <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
-    <p class="lede">Bid for points, call a hidden partner, capture tricks. Three AI opponents — no room, no network.</p>
-  </div>
-  <div class="panel slim">
-    <div class="field">
-      <label for="sel-difficulty">Opponents</label>
-      <select id="sel-difficulty">
-        <option value="easy">Easy</option>
-        <option value="normal" selected>Normal</option>
-        <option value="hard">Hard</option>
-      </select>
+  <div class="join-grid">
+    <div class="join-hero">
+      <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
+      <h1>TRUMP</h1>
+      <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
+      <p class="lede">Bid for points, name a trump suit, then call a card you don't hold — whoever has it becomes your secret partner. Three AI opponents; no room, no network.</p>
     </div>
-    <div class="field">
-      <label for="sel-deals">Match length</label>
-      <select id="sel-deals">
-        <option value="3">First to 3 deals</option>
-        <option value="5" selected>First to 5 deals</option>
-        <option value="7">First to 7 deals</option>
-      </select>
+    <div class="join-forms">
+      <div class="panel">
+        <div class="field">
+          <label for="sel-difficulty">Opponents</label>
+          <select id="sel-difficulty">
+            <option value="easy">Easy</option>
+            <option value="normal" selected>Normal</option>
+            <option value="hard">Hard</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="sel-deals">Match length</label>
+          <select id="sel-deals">
+            <option value="3">First to 3 deals</option>
+            <option value="5" selected>First to 5 deals</option>
+            <option value="7">First to 7 deals</option>
+          </select>
+        </div>
+        <button class="btn" id="btn-start">Deal me in</button>
+      </div>
+      <div class="join-meta"><span>NO SIGNUP</span><span>WORKS OFFLINE</span><span>THREE BOTS</span></div>
     </div>
-    <button class="btn" id="btn-start" style="width:100%;">Deal me in</button>
   </div>
 </div>
 
-<!-- Game -->
+<!-- ══════════ TABLE ══════════ -->
 <div id="game">
   <header>
-    <div>
-      <h1>TRUMP<span class="suits" id="title-suits"></span></h1>
-      <div class="tagline" id="header-state"></div>
-    </div>
+    <div id="turn-bar" aria-hidden="true"></div>
+    <h1>TRUMP</h1>
+    <div class="tagline" id="header-state"></div>
     <div class="hdr-actions">
+      <button id="btn-sound" data-ic="sound" aria-pressed="false" aria-label="Table sound" title="Table sound"><span class="wide">Sound</span></button>
       <button id="btn-colors" data-ic="deck" aria-pressed="false" aria-label="Four-colour deck" title="Colour diamonds blue and clubs green"><span class="wide">4-Colour</span></button>
       <button id="btn-help" data-ic="help" aria-label="How to play"><span class="wide">How to play</span></button>
       <button id="btn-new" data-ic="table" aria-label="New match" title="Abandon this match and choose new settings"><span class="wide">New match</span></button>
     </div>
   </header>
+
+  <aside id="rail-left" data-tab="score">
+    <div class="panel-section" id="sec-contract">
+      <div class="lbl">Contract</div>
+      <div class="contract-head">
+        <span class="su-big" id="contract-suit" aria-hidden="true"></span>
+        <span class="contract-bid" id="contract-bid">—</span>
+        <span class="contract-tomake">TO<br />MAKE</span>
+      </div>
+      <div class="contract-side" id="contract-side">not set yet</div>
+      <div class="cbar"><i id="contract-fill"></i></div>
+      <div class="contract-foot"><span id="contract-captured">0 captured</span><span id="contract-remain"></span></div>
+      <div class="contract-card" id="called-card-row">
+        <div class="mini-card static" id="called-card"></div>
+        <div><div class="lbl">Called card</div><div class="sub" id="called-sub"></div></div>
+      </div>
+      <div class="contract-card" id="bonus-card-row">
+        <div class="mini-card static" id="bonus-card"></div>
+        <div><div class="lbl">Bonus · 30 pts</div><div class="sub" id="bonus-sub"></div></div>
+      </div>
+    </div>
+    <div class="panel-section" id="sec-score">
+      <h2 id="score-title">Scoreboard</h2>
+      <table class="score" id="scoreboard"></table>
+      <div class="contract-line" id="contract-line"></div>
+    </div>
+    <div class="panel-section" id="sec-tricks">
+      <h2>Tricks you won<span class="count" id="my-tricks-count">0</span></h2>
+      <div class="note" id="last-trick-note">Nothing taken yet.</div>
+      <div id="my-tricks"></div>
+      <div class="note empty" id="my-tricks-empty">Every trick you take lands here — and as a pile in front of your seat.</div>
+    </div>
+  </aside>
+
   <div id="table-wrap">
     <div id="table">
-      <!-- medallion before #trick: played cards must stack above it -->
-      <div id="medallion" data-mode="full" aria-hidden="true">
+      <div id="felt" aria-hidden="true"></div>
+      <div id="felt-inner" aria-hidden="true"></div>
+      <div id="turn-glow" aria-hidden="true"></div>
+      <div id="flash" aria-hidden="true"></div>
+      <div id="medallion" aria-hidden="true">
         <div class="med-label"></div>
         <div class="med-main"></div>
         <div class="med-sub"></div>
-        <div class="med-bar"><i></i></div>
-        <div class="med-chips"></div>
       </div>
-      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
-      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
-      <div id="trick"></div>
+      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs vertical" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs vertical" data-backs></div><div class="pile" data-pile></div></div>
+      <div id="trick"><div id="points-chip"></div><div id="trick-chips" aria-hidden="true"></div></div>
     </div>
   </div>
-  <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
-  <aside data-tab="score">
-    <div class="panel-section" id="sec-score"><h2 id="score-title">Scoreboard</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div></div>
-    <div class="panel-section" id="sec-log" style="flex:1; display:flex; flex-direction:column; min-height:0;"><h2>Table log</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
+
+  <div id="bottom">
+    <div id="contract-strip" aria-hidden="true"></div>
+    <div id="hand-block">
+      <div id="action-tray"><div class="tray"><div id="action-buttons"></div><div id="call-grid"></div></div></div>
+      <div id="action-bar"></div>
+      <div id="hand-tools">
+        <button type="button" id="btn-flip" data-ic="flip" aria-label="Turn over all face-down cards" title="Turn over all face-down cards"></button>
+        <button type="button" id="btn-sort" data-ic="sort" aria-pressed="false" aria-label="Arrange hand by suit and rank" title="Arrange by suit and rank"></button>
+      </div>
+      <div id="my-hand"></div>
+      <div id="hand-hint"></div>
+    </div>
+  </div>
+
+  <aside id="rail-right" data-tab="log">
+    <div class="panel-section" id="sec-log"><h2>Table log</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
   </aside>
+
+  <div id="reveal">
+    <div class="reveal-kicker"></div>
+    <div class="reveal-card"></div>
+    <div class="reveal-pair"></div>
+    <div class="reveal-tail"></div>
+  </div>
 </div>
+
 <nav id="sheet-tabs" aria-label="Table panels">
   <button type="button" data-tab="score" aria-expanded="false">SCORE</button>
   <button type="button" data-tab="log" aria-expanded="false">LOG</button>
 </nav>
 
 <div id="overlay"><div class="modal" id="modal"></div></div>
+<div id="toast"></div>
 
 <script type="module" src="/js/solo.js"></script>
 </body>

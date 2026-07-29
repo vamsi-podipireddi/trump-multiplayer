@@ -36,7 +36,20 @@ function resolveTrick(G) {
   const tp = trickPoints(G, G.trick);
   G.tricksWon[winner]++; G.capturedPoints[winner] += tp;
   G.lastWinnerSlot = wIdx; G.lastWinner = winner;
-  if (!G._silent) logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
+  if (!G._silent) {
+    /* The rails and the deal review still show this trick after advanceTrick()
+       has emptied G.trick, so keep a copy — copied, not aliased, because the
+       AI's rollouts reuse the very card objects G.trick holds. Recorded only
+       when the log is, for the same reason: a PIMC search resolves thousands of
+       tricks nobody will ever read, and its clone of G carries no history. */
+    if (!G.tricks) G.tricks = [];      // a room restored from storage predating this field
+    G.tricks.push({
+      no: G.tricks.length + 1, winner, pts: tp,
+      cards: G.trick.map(t => ({ player: t.player, card: { suit: t.card.suit, rank: t.card.rank } })),
+      winCard: { suit: G.trick[wIdx].card.suit, rank: G.trick[wIdx].card.rank },
+    });
+    logG(G, `★ ${name(G, winner)} wins the trick (${cardStr(G.trick[wIdx].card)})${tp ? " +" + tp + " pts" : ""}`, "win");
+  }
   G.phase = "trickEnd";
 }
 function advanceTrick(G) {

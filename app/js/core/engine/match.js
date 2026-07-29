@@ -16,7 +16,7 @@ function createMatch(names, opts) {
     bidActive: [], bidTurn: 0, highBid: null, highBidder: null, bids: [null,null,null,null], redealCount: 0,
     declarer: null, bid: null, trump: null, calledCard: null, partner: null,
     teamsRevealed: false, bonusSuit: null,
-    trick: [], leadSuit: null, turn: 0, leader: 0, trickNumber: 0,
+    trick: [], leadSuit: null, turn: 0, leader: 0, trickNumber: 0, tricks: [],
     tricksWon: [0,0,0,0], capturedPoints: [0,0,0,0], lastWinner: -1, lastWinnerSlot: -1,
     lastResult: null, log: [], playedCards: [], voids: [{}, {}, {}, {}],
   };
@@ -38,7 +38,7 @@ function deal(G) {
   G.trump = null; G.calledCard = null; G.partner = null; G.declarer = null;
   G.bid = null; G.teamsRevealed = false; G.lastResult = null;
   G.bonusSuit = SUITS[randomInt(SUITS.length)];
-  G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
+  G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricks = []; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
   G.lastWinner = -1; G.lastWinnerSlot = -1;
   G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
   G.hands.forEach(h => sortHand(h, null));
@@ -64,9 +64,20 @@ function publicView(G) {
     capturedPoints: G.capturedPoints.slice(), tricksWon: G.tricksWon.slice(),
     bonusSuit: G.bonusSuit, trump: G.trump, declarer: G.declarer,
     partner: G.teamsRevealed ? G.partner : null, teamsRevealed: G.teamsRevealed, bid: G.bid,
+    // the called card names the partner, so it is a secret until the reveal
+    calledCard: G.teamsRevealed ? G.calledCard : null,
     highBid: G.highBid, highBidder: G.highBidder, bids: G.bids.slice(), bidActive: G.bidActive.slice(), bidTurn: G.bidTurn,
     leader: G.leader, turn: G.turn, leadSuit: G.leadSuit,
     trick: G.trick.map(t => ({ player: t.player, card: t.card })),
+    /* Every seat watched these cards fall, so replaying them redacts nothing —
+       and nobody can rebuild them from G.trick, which advanceTrick() empties.
+       Copied out rather than aliased so a viewer can never reach into G, and
+       `|| []` covers a room restored from storage written before this field. */
+    tricks: (G.tricks || []).map(t => ({
+      no: t.no, winner: t.winner, pts: t.pts,
+      cards: t.cards.map(c => ({ player: c.player, card: { suit: c.card.suit, rank: c.card.rank } })),
+      winCard: { suit: t.winCard.suit, rank: t.winCard.rank },
+    })),
     lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot,
     handCounts: G.hands.map(h => h.length), names: G.names.slice(),
     log: G.log.slice(-40), lastResult: G.lastResult || null,

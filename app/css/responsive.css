@@ -1,114 +1,164 @@
 @media (prefers-reduced-motion:reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
 
-@media (hover:hover) { .btn:hover { filter:brightness(1.05); box-shadow:0 1px 0 rgba(255,255,255,.45) inset, 0 8px 22px rgba(0,0,0,.42); } }
-
+/* ---- hover, and only where hover exists ----
+   On iOS the state sticks after a tap, so every lift and every colour change
+   lives behind this query rather than in the base rule. */
 @media (hover:hover) {
-    .mini-btn:hover { background:rgba(222,189,121,.14); color:var(--gold); border-color:var(--line-gold); }
-    .mini-btn.danger:hover { background:rgba(228,112,94,.14); color:var(--danger); border-color:rgba(228,112,94,.5); }
+    .btn:hover { filter:brightness(1.06); transform:translateY(-1px); }
+    .btn.ghost:hover { background:var(--panel2); border-color:var(--acc); transform:none; }
+    .mini-btn:hover { color:var(--txt); border-color:var(--acc); }
+    .mini-btn.danger:hover { color:var(--bad); border-color:rgba(224,112,92,.6); }
+    .linkish:hover { color:var(--txt); } .linkish.danger:hover { color:var(--bad); }
+    .segbtn:not([aria-pressed="true"]):not(:disabled):hover { border-color:var(--acc); color:var(--txt); }
+    header button:hover { border-color:var(--line2); color:var(--txt); }
+    header button[aria-pressed="true"]:hover { border-color:var(--acc); color:var(--acc); }
+    header button.danger:hover { color:var(--bad); border-color:rgba(224,112,92,.45); }
+    .act-btn:not(:disabled):hover { filter:brightness(1.08); transform:translateY(-1px); }
+    .mini-card:not(.static):hover { transform:translateY(-4px); }
+    .emote-btn:hover { color:var(--acc); border-color:var(--acc); }
+    #chat-send:hover { color:var(--acc); border-color:var(--acc); }
+    #hand-tools button:hover { border-color:var(--acc); color:var(--acc); }
+    #sheet-tabs button:hover { color:var(--txt2); }
+  }
+  /* the one lift that has to be named explicitly: the hand card */
+  @media (hover:hover) { #my-hand .card.playable:hover { --lift:-26px; z-index:10; } }
+
+/* ---- mid: no room for two rails, so the log and chat become a sheet ---- */
+@media (max-width:1160px) {
+    #game { grid-template-columns:268px minmax(0,1fr); }
+    #bottom { grid-column:2/3; }
+    body.in-game #sheet-tabs { display:grid; grid-template-columns:1fr 1fr; }
+    body.in-game #sheet-tabs button[data-tab="score"] { display:none; }
+    #rail-right { position:fixed; left:0; right:0; top:auto; bottom:calc(46px + env(safe-area-inset-bottom) + var(--kb));
+      z-index:110; height:min(56dvh,420px); border-left:none; border-top:2px solid var(--acc); background:var(--panel);
+      transform:translateY(102%); transition:transform .22s ease-out; box-shadow:0 -14px 40px rgba(0,0,0,.6); }
+    #rail-right.open { transform:translateY(0); }
+    #rail-right > .panel-section { display:none; }
+    #rail-right[data-tab="log"] #sec-log { display:flex; flex:1; border-bottom:none; }
+    #rail-right[data-tab="chat"] #chat-section { display:flex; flex:1; }
+    #chat-log { max-height:none; }
+    #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }
   }
 
-@media (hover:hover) { .segbtn:not([aria-pressed="true"]):not(:disabled):hover { background:rgba(255,255,255,.11); color:var(--txt); } }
-
-@media (hover:hover) {
-    header button:hover { background:rgba(255,255,255,.1); color:var(--txt); border-color:var(--line-2); }
-    header button[aria-pressed="true"]:hover { background:var(--gold-hi); color:var(--on-gold); }
-    header button.danger:hover { background:rgba(228,112,94,.13); color:var(--danger); border-color:rgba(228,112,94,.45); }
+/* ---- join / lobby reflow (independent of the table breakpoints) ---- */
+@media (max-width:1060px) {
+    .join-grid { grid-template-columns:minmax(0,1fr); gap:32px; }
+  }
+@media (max-width:660px) {
+    .join-cards { grid-template-columns:minmax(0,1fr); }
+    .lobby-grid { grid-template-columns:minmax(0,1fr); }
+    /* it wraps to three lines between the wordmark and "Leave table" and squeezes
+       both; the join screen still carries it, which is where it introduces the game */
+    .lobby-head .colophon { display:none; }
   }
 
-@media (hover:hover) {
-    .act-btn:hover { filter:brightness(1.06); }
-    .act-btn.pass:hover { background:rgba(255,255,255,.07); color:var(--txt); }
-    .act-btn.step:hover { background:rgba(255,255,255,.12); }
-  }
-
-@media (hover:hover) { .mini-card:hover { transform:translateY(-4px); box-shadow:0 0 0 1px rgba(21,23,26,.16), 0 8px 16px var(--shadow); } }
-
-/* Lift on hover only where hover exists — on iOS the state sticks after a tap. */
-  @media (hover:hover) { #my-hand .card.playable:hover { --lift:-26px; z-index:10; filter:drop-shadow(0 6px 16px rgba(0,0,0,.5)) drop-shadow(0 0 14px rgba(222,189,121,.75)); } }
-
-@media (hover:hover) { .emote-btn:hover { background:rgba(222,189,121,.16); color:var(--gold); } }
-
+/* ---- phone: one column, both rails are sheets, nothing is dropped ---- */
 @media (max-width:900px) {
-    #game { grid-template-columns:1fr; grid-template-rows:auto 1fr auto; }
-    header h1 { font-size:18px; } header .tagline { display:none; }
-    header { gap:8px; } .hdr-actions { gap:6px; }
-    header button { padding:9px 10px; min-height:40px; font-size:12px; }
-    /* a phone is portrait: a 1.7 oval leaves the felt 220px tall with the seats,
-       the strip and the trick cross all fighting for it */
-    #table { aspect-ratio:0.78; }
-    /* On a 390px felt the east and west plates are ~150px each, so parking them
-       at the vertical centre put them on top of one another *and* on top of the
-       trick. Lift them clear of the middle and cap how wide a name may get. */
-    .seat.west, .seat.east { top:40%; }
-    .seat.west { left:6px; align-items:flex-start; } .seat.east { right:6px; align-items:flex-end; }
+    #game { grid-template-columns:minmax(0,1fr); grid-template-rows:auto 1fr auto; }
+    /* Both carry grid-column:2/3 for the three-rail desktop. Left in place against
+       a one-column grid they are placed in an *implicit* second column, which is
+       sized auto — i.e. to max-content — so the hand measured its overlap budget
+       against ~490px inside a 390px phone and hung a card off each edge. */
+    #table-wrap, #bottom { grid-column:1/2; }
+    header { min-height:50px; padding:0 11px; gap:9px;
+      padding-top:env(safe-area-inset-top); padding-left:calc(11px + env(safe-area-inset-left)); padding-right:calc(11px + env(safe-area-inset-right)); }
+    header h1 { font-size:20px; } header .tagline { display:none; }
+    header .wide { display:none; } header button { padding:8px 9px; }
+    .hdr-actions { gap:6px; }
+
+    :root { --cardw:60px; --cardh:84px; --minw:30px; --minh:42px;
+      --pilew:11px; --pileh:15px; --backw:13px; --backh:19px; }
+    #felt { inset:10px 10px 12px; border-radius:26px; }
+    #felt-inner { inset:20px 20px 22px; border-radius:15px; }
+    #flash { inset:10px 10px 12px; border-radius:26px; }
+    .seat.west { left:4px; top:44%; } .seat.east { right:4px; top:44%; }
+    .seat.north { top:4px; } .seat.south { bottom:calc(4px + var(--tray-lift)); }
+    .seat .nameplate { padding:5px 10px 5px 5px; gap:7px; }
+    .seat .who { font-size:var(--t-sm); }
+    .avatar { width:28px; height:28px; font-size:var(--t-sm); }
+    /* On a 390px felt the east and west plates are ~150px each, so an
+       unbounded name puts them on top of one another and on top of the trick. */
     .seat.west, .seat.east { max-width:45vw; }
-    .seat .nameplate { max-width:100%; }
-    /* let the role badge drop to a second line instead of squeezing the name to
-       an ellipsis — "Bot…  PARTNER" told you less than either line alone */
-    .seat.west .nameplate, .seat.east .nameplate { flex-wrap:wrap; justify-content:center; white-space:normal; row-gap:3px; }
-    .seat .nameplate .who { min-width:0; overflow:hidden; text-overflow:ellipsis; }
-    .role { font-size:9px; letter-spacing:.06em; padding:2px 6px; }
-    .dealer-btn { width:17px; height:17px; }
-    #medallion { min-width:150px; max-width:94%; padding:11px 16px; gap:2px; }
-    .med-main { font-size:var(--t-xl); } .med-bar { width:130px; }
-    #medallion[data-mode="strip"] { gap:8px; padding:5px 11px; } #medallion[data-mode="strip"] .med-bar { width:70px; }
-    #medallion[data-mode="strip"] .med-label, #medallion[data-mode="strip"] .med-main { font-size:var(--t-sm); }
-    .med-chips span { padding:2px 7px; }
-    #action-bar { min-height:76px; margin:0 8px 8px; padding:9px 12px 9px 16px; gap:7px; }
-    #action-bar .prompt { font-size:var(--t-md); }
-    body.in-game #sheet-tabs { display:flex; }   /* only over the table — never the join/lobby screens */
+    .seat.west .nameplate, .seat.east .nameplate { flex-wrap:wrap; justify-content:center; }
+    .seat .who { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+    .med-main { font-size:40px; } .med-sub { max-width:150px; }
+    .brand-fan { height:150px; } .brand-fan .card { --cardw:98px; --cardh:138px; margin-left:-22px; }
+    .join-grid { padding:26px 18px 34px; padding-top:calc(26px + env(safe-area-inset-top)); gap:30px; }
+    .lede { font-size:var(--t-lg); }
+    .lobby-grid { padding:26px 18px 34px; padding-top:calc(26px + env(safe-area-inset-top)); }
+
+    #contract-strip { display:flex; }
+    #hand-block { padding:8px 10px 10px; }
+    #action-bar { min-height:42px; font-size:var(--t-md); margin-bottom:8px; }
+    #action-tray .tray { padding:10px 11px; }
+    .act-btn { padding:10px 14px; font-size:var(--t-md); min-height:44px; }
+    .bidval { font-size:22px; min-width:56px; }
+    #my-hand { --ml-base:-24px; --seam:8px; padding-bottom:10px; }
+    #hand-tools button { width:44px; height:44px; min-height:44px; }
+    .modal { padding:20px; }
+
+    body.in-game #sheet-tabs { display:grid; grid-template-columns:1fr 1fr 1fr; }
+    body.solo.in-game #sheet-tabs { grid-template-columns:1fr 1fr; }
+    body.in-game #sheet-tabs button[data-tab="score"] { display:block; }
     /* the sheet sits on top of the tab bar, which itself sits above the home indicator */
-    aside { position:fixed; left:0; right:0; bottom:calc(46px + env(safe-area-inset-bottom) + var(--kb)); top:auto; z-index:110; height:min(52dvh,420px);
-      border-left:none; border-top:2px solid var(--gold); transform:translateY(102%); transition:transform .22s ease-out;
+    aside { position:fixed; left:0; right:0; top:auto; bottom:calc(46px + env(safe-area-inset-bottom) + var(--kb));
+      z-index:110; height:min(56dvh,420px); border-left:none; border-right:none; border-top:2px solid var(--acc);
+      background:var(--panel); transform:translateY(102%); transition:transform .22s ease-out;
       box-shadow:0 -14px 40px rgba(0,0,0,.6); }
     aside.open { transform:translateY(0); }
-    aside > .panel-section { display:none; }
-    aside[data-tab="score"] #sec-score, aside[data-tab="log"] #sec-log, aside[data-tab="chat"] #chat-section { display:flex; }
-    #sec-score { flex-direction:column; }
-    #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }   /* clear the tab bar + home indicator */
-    /* 56px, not 60: at 60 a thirteen-card hand can only fit by overlapping past the
-       point where the next card covers this one's tap target */
-    #my-hand { height:120px; padding:0 8px 22px; --ml-base:-18px; --seam:11px; }
-    #my-hand .card { width:56px; height:80px; }
-    header .wide { display:none; } header button { padding:9px 11px; }
-    #table-wrap { padding:8px; }
-    .seat .nameplate { font-size:var(--t-sm); padding:3px 10px 3px 3px; gap:6px; }
-    .seat .bidchip { font-size:var(--t-xs); padding:1px 8px; }
-    .avatar { width:24px; height:24px; font-size:var(--t-xs); }
-    .brand-fan { height:88px; } .brand-fan .card { width:60px; height:85px; margin-left:-26px; }
-    .card-back { width:20px; height:29px; }
-    .hand-backs .card-back:not(:first-child) { margin-left:-13px; } .hand-backs.vertical .card-back:not(:first-child) { margin-top:-22px; }
-    #trick { --reach-x:42px; --reach-y:37px; } #trick .card { width:52px; height:73px; }
-    .act-btn { min-height:44px; } .mini-btn { min-height:40px; } .btn { min-height:46px; }
+    #rail-left { padding:11px; gap:10px; }
+    #my-tricks { max-height:150px; }
+    #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }
   }
 
 /* A landscape phone has ~115px of felt between the header and the hand. Nothing
-     fits there four seats deep, so the felt narrows and the two things the action
-     bar already says — the contract, and how many cards are left — step aside. */
-  @media (max-width:900px) and (orientation:landscape) {
-    aside { height:min(70dvh,300px); } #my-hand { height:92px; padding-bottom:10px; } #my-hand .card { width:52px; height:74px; }
-    #table { width:min(100%,520px); }
-    #table-wrap { padding:4px; }
-    .hand-backs { display:none; }
-    #medallion { display:none; }
-    #action-bar { min-height:60px; margin-bottom:6px; padding:7px 12px 7px 16px; }
-    .seat .meta { font-size:10px; }
+   fits there four seats deep, so the felt narrows and the pieces the action bar
+   already says step aside. */
+@media (max-width:900px) and (orientation:landscape) {
+    aside { height:min(74dvh,300px); }
+    :root { --cardw:50px; --cardh:70px; }
+    #my-hand { padding-bottom:4px; }
+    .hand-backs, .pile { display:none; }
+    #medallion { display:none !important; }
+    #action-bar { min-height:30px; margin-bottom:4px; font-size:var(--t-sm); }
+    #hand-hint { display:none; }
+    .seat .meta { display:none; }
+    .seat .nameplate { padding:4px 10px 4px 4px; }
+    /* The strip keeps the contract on screen, but its two card thumbs are 31px
+       tall — a third of everything this orientation has left. The suit, the
+       number and the bar carry it alone here. */
+    #contract-strip { padding:5px 11px; }
+    #contract-strip .mini-card { display:none; }
+    /* Out of flow, tucked beside the prompt (which is centred and rarely reaches
+       the right edge): a 48px row of two buttons is the difference between a felt
+       you can read four seats on and one you cannot. The 44px targets survive. */
+    #hand-tools { position:absolute; right:10px; top:2px; min-height:0; margin:0; z-index:15; }
   }
 
-/* Any touch device: controls stay thumb-sized regardless of width. iPad landscape
-     (1024px) and iPad Pro portrait sit above the 900px query, which is exactly where
-     the desktop-sized 30px buttons used to survive on a touch-only device. */
-  @media (pointer:coarse) {
-    header button { min-height:44px; padding:10px 14px; }
-    .mini-btn, .segbtn { min-height:44px; padding:8px 14px; }
+/* Any touch device: controls stay thumb-sized regardless of width. iPad
+   landscape (1024px) and iPad Pro portrait sit above the 900px query, which is
+   exactly where the desktop-sized buttons used to survive on a touch-only device. */
+@media (pointer:coarse) {
+    header button { min-height:44px; padding:10px 12px; }
+    .mini-btn, .segbtn { min-height:44px; padding:9px 14px; }
     .btn { min-height:48px; }
     .emote-btn { min-width:44px; min-height:44px; }
     #chat-input, #chat-send { min-height:44px; }
-    .mini-card { width:44px; height:61px; }
+    #hand-tools button { width:44px; height:44px; min-height:44px; }
+    .act-btn { min-height:46px; }
   }
 
 /* Tablets only — phones already size the hand in the 900px block above. */
-  @media (pointer:coarse) and (min-width:901px) {
-    #my-hand .card { width:78px; height:110px; }   /* fingers, not a mouse pointer */
-    #my-hand { height:128px; }
+@media (pointer:coarse) and (min-width:901px) {
+    :root { --cardw:84px; --cardh:118px; --minw:40px; --minh:56px; }   /* fingers, not a mouse pointer */
+  }
+
+/* A short desktop window: the felt loses height first, so the plates shed their
+   second line rather than the hand shedding cards. */
+@media (min-width:901px) and (max-height:720px) {
+    :root { --cardw:76px; --cardh:106px; }
+    #hand-block { padding:8px 14px 10px; }
+    #action-bar { min-height:40px; }
+    .seat .meta { display:none; }
+    .seat .nameplate { padding:5px 12px 5px 5px; }
   }

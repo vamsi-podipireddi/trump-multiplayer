@@ -1,4 +1,5 @@
-import { RED, SUIT_KEY, rankLabel, SUIT_PATH } from "./labels.js";
+import { rankLabel, SUIT_PATH, suitClass, suitSvg } from "./labels.js";
+import { esc } from "../util/dom.js";
 
 const suitPath = (s, cx, cy, size, flip) =>
   `<path d="${SUIT_PATH[s]}" transform="translate(${cx} ${cy})${flip ? " rotate(180)" : ""} scale(${(size / 100).toFixed(4)}) translate(-50 -50)"/>`;
@@ -59,37 +60,67 @@ function courtFigure(rank) {
   );
 }
 
-/* `compact` is the 44px call-partner card: a full pip layout is illegible at
-   that size, so it gets the index and one centred pip — which is what a real
-   card shows through a fanned hand anyway. */
+/* `compact` is the call-partner card and the rail thumbnails: a full pip layout
+   is illegible at 34px, so it gets the index and one centred pip — which is what
+   a real card shows through a fanned hand anyway. */
 function cardFace(card, compact) {
-  const s = card.suit, r = rankLabel(card.rank);
-  const idx = `<text x="32" y="60" text-anchor="middle" font-size="${r === "10" ? 39 : 48}">${r}</text>` +
-              suitPath(s, 32, 87, 30);
+  const s = card.suit, r = esc(rankLabel(card.rank));   // a wire rank now prints as HTML, not SVG <text>
   let body;
-  if (compact) body = suitPath(s, 120, 200, 96);
+  if (compact) body = suitPath(s, 126, 220, 112);
   else if (card.rank >= 11 && card.rank <= 13) {
-    body = `<rect class="cfr" x="44" y="42" width="152" height="252" rx="10"/><path class="cfr" d="M44 168h152"/>` +
+    body = `<rect class="cfr" x="42" y="40" width="156" height="256" rx="9"/>` +
            `<g>${courtFigure(card.rank)}</g>` +
            `<g transform="rotate(180 120 168)">${courtFigure(card.rank)}</g>`;
   } else if (card.rank === 14) {
-    body = (s === "♠" ? `<path class="cfr" d="M120 74 174 168 120 262 66 168Z"/>` : "") + suitPath(s, 120, 168, s === "♠" ? 112 : 104);
+    // one oversized centred pip and nothing else — the ace of spades used to
+    // carry an engraved diamond around it, which is the one frame this deck's
+    // pip cards do not have and read as a printing fault beside them
+    body = suitPath(s, 120, 168, s === "♠" ? 112 : 104);
   } else {
     body = (PIP_LAYOUT[card.rank] || []).map(([cx, cy]) =>
       suitPath(s, COL[cx * 2], ROW_TOP + cy * (ROW_BOT - ROW_TOP), PIP_SIZE, cy > .5)).join("");
   }
-  return `<svg viewBox="0 0 240 336" fill="currentColor" aria-hidden="true">${idx}${body}` +
-         `<g transform="rotate(180 120 168)">${idx}</g></svg>`;
+  /* The corner index is HTML, not SVG <text>: it then takes the interface's
+     lining figures and its size from the card's own font-size, which is what
+     lets one string print the 124px hero card and the 34px thumbnail. SVG text
+     had to be re-measured for every card size instead. */
+  const idx = r + suitSvg(s);
+  return `<svg viewBox="0 0 240 336" fill="currentColor" aria-hidden="true">${body}</svg>` +
+         (compact ? `<span class="idx">${r}</span>`
+                  : `<span class="idx tl">${idx}</span><span class="idx br">${idx}</span>`);
 }
 
 /* `asButton` gives keyboard users a real focusable control instead of a clickable div. */
 function cardEl(card, asButton) {
   const el = document.createElement(asButton ? "button" : "div");
   if (asButton) el.type = "button";
-  el.className = "card s-" + SUIT_KEY[card.suit] + (RED.has(card.suit) ? " red" : "");
-  el.innerHTML = cardFace(card);
+  el.className = "card " + suitClass(card.suit);
+  /* Both sides always exist and `.card.down` picks which is showing, so turning
+     a card over is one object rotating rather than two cards cross-fading. */
+  el.innerHTML = `<span class="face">${cardFace(card)}</span><span class="back"></span>`;
   if (!asButton) el.setAttribute("aria-hidden", "true"); // table furniture; the log narrates play
   return el;
 }
 
-export { suitPath, courtFigure, cardFace, cardEl, COL, ROW_TOP, ROW_BOT, PIP_SIZE };
+/* The same card at thumbnail size, for the call grid and the rails. No back:
+   nothing at this size is ever face-down, so the face sits straight in the element. */
+function miniCardEl(card, asButton) {
+  const el = document.createElement(asButton ? "button" : "div");
+  if (asButton) el.type = "button";
+  el.className = "mini-card " + suitClass(card.suit) + (asButton ? "" : " static");
+  el.innerHTML = cardFace(card, true);
+  // a compact index carries no suit, so it would read as a bare "A"; the row it
+  // sits in names the card in words
+  if (!asButton) el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
+/* Somebody else's card, seen from across the table. An <i> because there is
+   nothing to read: the seat's own meta line carries how many are left. */
+function cardBackEl() {
+  const el = document.createElement("i");
+  el.className = "card-back";
+  return el;
+}
+
+export { suitPath, courtFigure, cardFace, cardEl, miniCardEl, cardBackEl, COL, ROW_TOP, ROW_BOT, PIP_SIZE };

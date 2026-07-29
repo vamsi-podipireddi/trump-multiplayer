@@ -1,66 +1,286 @@
-import { S } from "../session.js";
-import { $, esc } from "../util/dom.js";
-import { icon } from "../cards/icons.js";
-import { send } from "../net.js";
-import { renderSettings } from "../screens/lobby.js";
+import { $, esc, avatarHtml } from "../util/dom.js";
+import { SUIT_NAME } from "../cards/labels.js";
+import { cardEl } from "../cards/deck.js";
+import { sfx } from "./sound.js";
 
-/* showHelp() and showSettingsModal() close by calling back into render(),
-   which now lives in screens/game.js. It still needs the same registration
-   seam net.js uses (see net.js): game.js already imports showMatchOver/
-   hideOverlay/showSettingsModal from this file (render() and renderScoreboard()
-   both call into ui/modals.js), so importing render() back here would make the
-   two files import each other. main.js registers the real render() once at
-   boot; until then this is a safe no-op.
-   renderSettings() (screens/lobby.js) needs no such seam and is imported
-   directly above: lobby.js never imports this file, or anything that does, so
-   there is no cycle to close. */
-let onRender = () => {};
-function setRenderHandler(fn) { onRender = fn; }
+/* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
+   pages hand these functions their own view and their own handlers, and solo
+   has no session to read.
+   The one thing that cannot arrive as an argument is render(): a modal's close
+   button has to repaint whatever is behind it, and render() lives in
+   screens/game.js, which already imports this file — importing it back would
+   make the two files import each other. So main.js and solo.js each register
+   theirs at boot; until then this is a safe no-op. onRender() is exported
+   because screens/lobby.js's settings modal closes the same way and must reach
+   the same handler rather than stand up a second seam beside this one. */
+let renderHandler = () => {};
+function setRenderHandler(fn) { renderHandler = fn; }
+function onRender() { renderHandler(); }
 
-function setModal(kind, html) { $("modal").innerHTML = html; $("overlay").dataset.kind = kind; $("overlay").classList.add("show"); }
+/* Help and Settings are documents, not verdicts: they read left-aligned and a
+   little wider. The kind is the only thing either caller knows about, so the
+   width lives here rather than in every call site. */
+const WIDE = new Set(["help", "settings"]);
+function setModal(kind, html) {
+  $("modal").className = "modal" + (WIDE.has(kind) ? " wide" : "");
+  $("modal").innerHTML = html;
+  $("overlay").dataset.kind = kind;
+  $("overlay").classList.add("show");
+}
 function hideOverlay() { $("overlay").classList.remove("show"); $("overlay").dataset.kind = ""; }
 
-// ---------- modals ----------
-/* view/onRematch default to the multiplayer session/socket so screens/game.js's
-   call site (no arguments) is unchanged; solo.js passes both explicitly
-   instead of populating S — solo has no session, and writing to S from there
-   would couple the two clients (see app/js/solo.js). */
-function showMatchOver(view, onRematch) {
-  view = view || S.view;
-  onRematch = onRematch || (() => send({ type: "newMatch" }));
-  const mySeat = view.you ? view.you.seat : null;
-  const max = Math.max(...view.scores);
-  const champs = [0,1,2,3].filter(p => view.scores[p] === max);
-  const youWon = mySeat != null && champs.includes(mySeat);
-  const standings = [0,1,2,3].slice().sort((a,b)=>view.scores[b]-view.scores[a]).map(p =>
-    `<div class="${mySeat!=null&&p===mySeat?"me":""}"><span>${esc(view.names[p])}${mySeat!=null&&p===mySeat?" (you)":""}</span>` +
-    `<span>${view.scores[p]} deal${view.scores[p]===1?"":"s"}</span></div>`).join("");
-  let btn = view.room.isHost ? `<button id="btn-rematch">Start a new match</button>` : `<p class="muted">Waiting for ${esc(view.room.hostName||"host")} to start a new match…</p>`;
-  setModal("match",
-    `<h2>Match over</h2><p class="big">${youWon ? icon("cup") + "You win the match" : esc(champs.map(p=>view.names[p]).join(" & ")) + " win the match"}</p>` +
-    `<p>First to ${view.consts.TARGET_GAMES} deals.</p><div class="standings">${standings}</div>${btn}`);
-  if (view.room.isHost) $("btn-rematch").onclick = onRematch;
+/* Both clients ask for a seat's display name, and only one of them has
+   S.view.seats to ask — so it comes off the context object the table renderers
+   already receive, with the wire's names as the fallback. */
+function seatName(v, o, seat) {
+  const info = o && typeof o.seatInfo === "function" ? o.seatInfo(seat) : null;
+  return (info && info.name) || (v.names && v.names[seat]) || "";
 }
-/* view likewise defaults to S.view; solo.js passes its own instead (see
-   app/js/solo.js), so the TARGET_GAMES/MIN_BID copy below matches whatever
-   targetDeals the player actually picked rather than this hardcoded fallback. */
-function showHelp(view) {
-  view = view || S.view;
-  const c = (view && view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
-  setModal("help",
-    `<h2>How to Play TRUMP</h2><ul class="how">` +
-    `<li>4 seats; you take an open one and any empty seats are AI. The deck holds <b>${c.TOTAL_POINTS} points</b>: A/K/Q/J/10 = 10 each, every 5 = 5, one random suit's <b>3 = 30</b> (announced before bidding).</li>` +
-    `<li><b>Bid</b> the points your side will capture (min ${c.MIN_BID}, steps of ${c.BID_STEP}) or pass; highest bidder wins.</li>` +
-    `<li>The bid winner picks <b>trump</b> and <b>calls a card they don't hold</b> — its holder is their partner (teams shown at once: gold = bidding side, blue = defenders).</li>` +
-    `<li>The bid winner leads. Follow suit if you can; highest trump wins a trick, else the highest card of the led suit; the winner captures its point-cards and leads next.</li>` +
-    `<li>Make the bid → bidding side wins the deal; fall short → defenders win it. First to <b>${c.TARGET_GAMES} deals</b> wins the match.</li>` +
-    `</ul><button id="btn-close">Got it</button>`);
-  $("btn-close").onclick = () => { hideOverlay(); onRender(); };
+function seatIsAI(o, seat) {
+  const info = o && typeof o.seatInfo === "function" ? o.seatInfo(seat) : null;
+  return !!(info && info.isAI);
 }
-function showSettingsModal() {
-  setModal("settings", `<h2>Table Settings</h2><div id="modal-settings" style="text-align:left;"></div><button id="btn-close-set">Done</button>`);
-  renderSettings($("modal-settings"), !!S.view.room.isHost);
-  $("btn-close-set").onclick = () => { hideOverlay(); onRender(); };
+/* o.sideOf() answers null until the teams are known (see screens/game.js); by
+   the time anything in this file runs they are, but the fallback keeps a modal
+   from rendering "undefined" if that ever stops being true. */
+function sideOf(v, o, seat) {
+  const s = o && typeof o.sideOf === "function" ? o.sideOf(seat) : null;
+  return s || ((seat === v.declarer || seat === v.partner) ? "D" : "O");
 }
 
-export { setModal, hideOverlay, showMatchOver, showHelp, showSettingsModal, setRenderHandler };
+// ---------- how to play ----------
+/* Each page passes its own view, so the copy below quotes whatever match
+   length that player actually picked rather than a hardcoded 5. The literals
+   are the fallback for a view that has no consts yet — Help is wired at boot,
+   the first state message is not. */
+function showHelp(view) {
+  const c = (view && view.consts) || { TOTAL_POINTS:250, MIN_BID:130, BID_STEP:5, TARGET_GAMES:5 };
+  const steps = [
+    `The deck holds <b>${c.TOTAL_POINTS} points</b>: A K Q J 10 are worth 10 each, every 5 is worth 5, and one random suit's <b>3 is worth 30</b>. That bonus suit is announced before bidding.`,
+    `<b>Bid</b> the number of points your side will capture — minimum <b>${c.MIN_BID}</b>, in steps of ${c.BID_STEP} — or pass. Highest bidder wins the auction.`,
+    `The bid winner picks the <b>trump</b> suit, then <b>calls a card they don't hold</b>. Whoever holds it is their partner. Teams are revealed at once.`,
+    `Follow suit if you can. Highest trump takes the trick, otherwise the highest card of the led suit. The winner captures its point cards and leads next.`,
+    `Make the bid and the bidding side wins the deal; fall short and the defenders take it. First side to <b>${c.TARGET_GAMES} deals</b> wins the match.`,
+  ];
+  setModal("help",
+    `<h2>How to play</h2><p class="kicker">${c.TOTAL_POINTS} points in the deck</p>` +
+    `<div class="how">` +
+    steps.map((t, i) => `<div class="step"><span class="n">0${i + 1}</span><div class="t">${t}</div></div>`).join("") +
+    `</div><button class="btn ghost" id="btn-close">Got it</button>`);
+  $("btn-close").onclick = () => { hideOverlay(); onRender(); };
+}
+
+// ---------- match over ----------
+/* Both callers may ask for this on any state message, and the fanfare belongs
+   to the result rather than to the message — so, like the deal panel below, the
+   panel is built (and sounded) once per set of final scores. A rematch takes
+   the overlay off "match" on its way past, which is what lets the next match
+   sound even if it ends on the same numbers. */
+let matchKey = null;
+
+function showMatchOver(view, onRematch) {
+  const key = view.scores.join(",");
+  if (matchKey === key && $("overlay").dataset.kind === "match") return;
+  matchKey = key;
+
+  const mySeat = view.you ? view.you.seat : null;
+  const best = Math.max(...view.scores);
+  const champs = [0,1,2,3].filter(p => view.scores[p] === best);
+  const youWon = mySeat != null && champs.includes(mySeat);
+  const names = champs.map(p => esc(view.names[p])).join(" &amp; ");
+  const standings = [0,1,2,3].slice().sort((a,b) => view.scores[b] - view.scores[a]).map(p =>
+    `<div class="${mySeat != null && p === mySeat ? "me" : ""}"><span>${esc(view.names[p])}${mySeat != null && p === mySeat ? " (you)" : ""}</span>` +
+    `<span>${view.scores[p]} deal${view.scores[p] === 1 ? "" : "s"}</span></div>`).join("");
+  const btn = view.room.isHost
+    ? `<button class="btn" id="btn-rematch">Start a new match</button>`
+    : `<p class="muted">Waiting for ${esc(view.room.hostName || "the host")} to start a new match…</p>`;
+  setModal("match",
+    `<div class="sheen"></div><div class="kicker">Match over · first to ${view.consts.TARGET_GAMES}</div>` +
+    `<div class="head${youWon ? " made" : ""}">${youWon ? "YOU WIN" : names}</div>` +
+    `<p>${names} reach ${best} deal${best === 1 ? "" : "s"} first.</p>` +
+    `<div class="pbar"><i class="${youWon ? "made" : ""}" style="width:100%"></i></div>` +
+    `<div class="standings">${standings}</div>${btn}`);
+  if (view.room.isHost) $("btn-rematch").onclick = onRematch;
+  sfx("win");
+}
+
+// ---------- deal result ----------
+/* Every point in the deck is captured by someone, so the split bar closes; the
+   four shades are ordered by who took the most, which is the only ranking the
+   bar can carry without a second colour per side. */
+const SPLIT_SHADES = ["var(--acc)", "var(--acc2)", "rgba(230,192,122,.42)", "rgba(244,242,236,.22)"];
+/* screens/game.js and solo.js both call showRoundResult() on every render for
+   as long as the deal is over — the ready count in the button changes under it.
+   Rebuilding the panel each time would restart its entrance animation and
+   replay its verdict cue, so a panel already showing this deal only has its
+   button refreshed. */
+let roundKey = null;
+
+function showRoundResult(v, o, h) {
+  const r = v.lastResult;
+  if (!r) return;
+  const key = v.roundNumber + "|" + r.bid + "|" + r.dPts + "|" + (r.made ? 1 : 0);
+  if (roundKey === key && $("overlay").dataset.kind === "round") { roundAction(v, h); return; }
+  roundKey = key;
+
+  const total = v.consts.TOTAL_POINTS;
+  const nm = seat => esc(seatName(v, o, seat));
+  const tone = r.made ? "made" : "set";
+  const pct = r.bid ? Math.min(1, r.dPts / r.bid) * 100 : 0;
+  const pair = r.partner === r.declarer ? nm(r.declarer) + " alone" : nm(r.declarer) + " &amp; " + nm(r.partner);
+
+  const order = [0,1,2,3].slice().sort((a,b) => v.capturedPoints[b] - v.capturedPoints[a]);
+  const splitBar = order.map((s, i) =>
+    `<i style="width:${(v.capturedPoints[s] / total * 100).toFixed(2)}%;background:${SPLIT_SHADES[i]}"></i>`).join("");
+  const legend = order.map((s, i) =>
+    `<span><i style="background:${SPLIT_SHADES[i]}"></i>${nm(s)}<b>${v.capturedPoints[s]}</b></span>`).join("");
+
+  /* The trick history is new on the wire; a client talking to a server that has
+     not shipped it yet drops these rows rather than inventing them. */
+  const tricks = Array.isArray(v.tricks) ? v.tricks : [];
+  const bonusTaker = takerOfBonus(v, tricks);
+  const fat = tricks.slice().sort((a, b) => b.pts - a.pts || a.no - b.no)[0];
+  // declarer === partner is applyCall()'s unreachable safety; counting the seat twice would not be
+  const dTricks = r.partner === r.declarer ? v.tricksWon[r.declarer] : v.tricksWon[r.declarer] + v.tricksWon[r.partner];
+  const played = v.tricksWon.reduce((a, b) => a + b, 0);
+  const rows = [];
+  if (tricks.length) {
+    rows.push(["", `Bonus 3 of ${SUIT_NAME[v.bonusSuit] || ""} · 30 pts`, bonusTaker != null ? nm(bonusTaker) : "never taken"]);
+    rows.push(["", `Biggest trick — ${nm(fat.winner)}`, fat.pts + " pts"]);
+  }
+  rows.push(["", "Tricks — bidding / defending", dTricks + " / " + (played - dTricks)]);
+  rows.push(r.made && r.dPts === r.bid
+    ? ["good", "Margin", "exactly on the number"]
+    : [r.made ? "good" : "bad", r.made ? "Made it by" : "Short by", (r.made ? r.dPts - r.bid : r.bid - r.dPts) + " pts"]);
+  const review = `<div class="review"><div class="lbl">Where the ${total} went</div>` +
+    `<div class="splitbar">${splitBar}</div><div class="legend">${legend}</div>` +
+    rows.map(([cls, label, val]) => `<div class="rrow${cls ? " " + cls : ""}"><span>${label}</span><span>${val}</span></div>`).join("") +
+    `</div>`;
+
+  const mySeat = o ? o.mySeat : null;
+  const standings = [0,1,2,3].map(s =>
+    `<div class="${mySeat != null && s === mySeat ? "me" : ""}">` +
+    `<span>${nm(s)} · ${sideOf(v, o, s) === "D" ? "bidding" : "defending"}</span>` +
+    `<span>${v.capturedPoints[s]} pts · ${v.scores[s]} deal${v.scores[s] === 1 ? "" : "s"}</span></div>`).join("");
+
+  setModal("round",
+    `<div class="sheen"></div><div class="kicker">Deal ${v.roundNumber} result</div>` +
+    `<div class="head ${tone}">${r.made ? "MADE" : "SET"}</div>` +
+    `<p>${pair} captured ${r.dPts} of ${r.bid}. ${r.winners.map(nm).join(" &amp; ")} win the deal.</p>` +
+    `<div class="pbar"><i class="${tone}" style="width:${pct.toFixed(0)}%"></i></div>` +
+    review +
+    `<div class="standings">${standings}</div><div id="round-action"></div>`);
+  roundAction(v, h);
+  sfx(r.made ? "made" : "set");
+}
+/* The 30-point 3 is the deal's single biggest swing, so the panel names who
+   ended up with it — which the trick history knows and the score does not. */
+function takerOfBonus(v, tricks) {
+  for (const t of tricks) {
+    if (t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit)) return t.winner;
+  }
+  return null;
+}
+/* One button, and which one depends on who is driving the deal: multiplayer
+   waits for every live seat to ready up, solo deals the moment you say so. */
+function roundAction(v, h) {
+  const host = $("round-action");
+  if (!host) return;
+  host.innerHTML = "";
+  if (h && h.ready) {
+    if (v.you.spectator) { host.innerHTML = `<p class="muted">Watching — the next deal starts when the players are ready.</p>`; return; }
+    const live = (v.seats || []).filter(s => s.isHuman && s.connected && !s.away);
+    const ready = live.filter(s => s.ready).length;
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = v.you.ready ? `Ready ✓ — waiting ${ready}/${live.length}` : `Next deal — I'm ready (${ready}/${live.length})`;
+    b.disabled = !!v.you.ready;
+    b.onclick = () => h.ready();
+    host.appendChild(b);
+  } else if (h && h.nextDeal) {
+    const b = document.createElement("button");
+    b.className = "btn";
+    b.textContent = `Deal ${v.roundNumber + 1}`;
+    b.onclick = () => h.nextDeal();
+    host.appendChild(b);
+  }
+}
+
+// ---------- the partner reveal ----------
+/* Presentational only: this game has no reveal phase, so nothing in the view
+   marks the moment teams became known — it is simply the first state of a deal
+   in which they are. Without the memo every later state message would replay
+   the whole beat; clearing it whenever teams are *not* revealed re-arms it for
+   the next deal and, because a new match also deals from scratch, for a second
+   deal 1 as well. */
+let revealedRound = null;
+let revealTimers = [];
+
+function clearRevealTimers() { revealTimers.forEach(clearTimeout); revealTimers = []; }
+// deliberately leaves the memo alone: a tap dismisses the beat, it does not queue it up again
+function hideReveal() { clearRevealTimers(); $("reveal").classList.remove("show"); }
+function maybeShowReveal(v, o) {
+  if (!v.teamsRevealed || v.declarer == null || v.partner == null) {
+    if (revealedRound != null) { revealedRound = null; hideReveal(); }   // a new deal cuts a running beat short
+    return;
+  }
+  if (revealedRound === v.roundNumber) return;
+  revealedRound = v.roundNumber;
+  showReveal(v, o);
+}
+function revealBlock(cls) { const d = document.createElement("div"); d.className = cls; return d; }
+function revealWho(v, o, seat, slot) {
+  const name = seatName(v, o, seat);
+  return `<div class="reveal-who ${slot}">${avatarHtml(name, seatIsAI(o, seat))}<span>${esc(name)}</span></div>`;
+}
+function showReveal(v, o) {
+  const el = $("reveal");
+  clearRevealTimers();
+  const alone = v.partner === v.declarer;   // applyCall()'s unreachable safety, kept honest here
+  /* The card is the subject of the shot, so it is sized off the viewport rather
+     than off the felt — the felt is behind a blur at this point. */
+  const w = window.innerWidth, cw = Math.min(w * 0.17, window.innerHeight * 0.26);
+  const revW = Math.round(Math.max(96, Math.min(w < 900 ? 124 : 172, cw)));
+  el.style.setProperty("--revw", revW + "px");
+  el.style.setProperty("--revh", Math.round(revW * 1.4) + "px");
+
+  /* Every stage animates on entry, and a CSS entry animation only runs on a
+     node that has just been inserted — so each stage swaps its element in
+     rather than filling one that has been sitting in the markup since load. */
+  el.innerHTML = "";
+  const kicker = revealBlock("reveal-kicker");
+  kicker.textContent = alone ? "NOBODY HOLDS IT" : "THE CALLED CARD";
+  el.appendChild(kicker);
+  const cardHost = revealBlock("reveal-card");
+  if (v.calledCard) cardHost.appendChild(cardEl(v.calledCard));
+  el.appendChild(cardHost);
+  const pair = revealBlock("reveal-pair");
+  el.appendChild(pair);
+  const tail = revealBlock("reveal-tail");
+  el.appendChild(tail);
+
+  el.onclick = hideReveal;
+  el.classList.add("show");
+  sfx("reveal");
+
+  revealTimers.push(setTimeout(() => {
+    if (alone) return;
+    pair.innerHTML = revealWho(v, o, v.declarer, "a") + `<span class="reveal-amp">&amp;</span>` + revealWho(v, o, v.partner, "b");
+  }, 820));
+  revealTimers.push(setTimeout(() => {
+    const defenders = [0,1,2,3].filter(s => s !== v.declarer && s !== v.partner).map(s => esc(seatName(v, o, s)));
+    const line = alone
+      ? `${esc(seatName(v, o, v.declarer))} holds the called card and plays alone`
+      : `against ${defenders.join(" &amp; ")}`;
+    const fresh = revealBlock("reveal-tail");
+    // the table is already live behind the blur, so this dismisses the shot — it does not start the deal
+    fresh.innerHTML = `<div class="line">${line} · ${v.bid} to make</div><div class="tap">TAP TO CONTINUE</div>`;
+    el.replaceChild(fresh, tail);
+  }, 1680));
+  revealTimers.push(setTimeout(hideReveal, 3400));
+}
+
+export {
+  setModal, hideOverlay, showHelp, showMatchOver,
+  showRoundResult, maybeShowReveal, hideReveal, setRenderHandler, onRender,
+};

@@ -1,59 +1,127 @@
-import { S } from "../session.js";
 import { $ } from "../util/dom.js";
-import { serverNow } from "../net.js";
 import { fitHand } from "./hand.js";
+import { sfx } from "./sound.js";
 
-/* The trick cross is laid out in fixed pixels — cards 88px tall at ±118px — while the
-   felt scales with the viewport. On a short felt the cross runs into the seats and
-   leaves no clear band for the contract strip (110px of clearance on a desktop felt,
-   22px on a phone's), so scale the cross to what the felt can actually hold and put
-   the strip in what remains. */
+/* The felt has no intrinsic size — it is whatever the grid leaves between the
+   header and the hand — so the three things that have to clear each other on it
+   cannot be expressed in the stylesheet: the trick has to stay inside the ring
+   of seats, the seats have to stay off the raised action tray, and all of it has
+   to survive a 115px landscape-phone felt. Measure the slab once per render and
+   hand the stylesheet the numbers; every property that consumes one of these is
+   in table.css. */
 function fitTable() {
   const t = $("table");
-  const h = t ? t.getBoundingClientRect().height : 0;
-  if (!h) return;
-  /* How far the cross reaches below centre is (radius + half a card), and both
-     halve at the phone breakpoint — so measure them rather than keeping a second
-     copy of the numbers the stylesheet already owns. */
-  const tr = $("trick");
-  const probe = tr.querySelector(".card");
-  const reach = (parseFloat(getComputedStyle(tr).getPropertyValue("--reach-y")) || 47)
-              + (probe ? probe.offsetHeight : 93) / 2;
-  const s = Math.max(0.6, Math.min(1, (h / 2 - 108) / reach));
-  t.style.setProperty("--trick-scale", s.toFixed(3));
-  const bandTop = h / 2 + reach * s, bandBottom = h - 66;      // south seat starts ~66px off the bottom
-  t.style.setProperty("--strip-top", Math.round((bandTop + bandBottom) / 2) + "px");
+  if (!t) return;
+  const box = t.getBoundingClientRect();
+  const tblW = box.width, tblH = box.height;
+  if (!tblW || !tblH) return;                       // #game is display:none until the match starts
+
+  /* Matches the 900px breakpoint in responsive.css rather than re-measuring the
+     card, because the card sizes are what that breakpoint sets. */
+  const compact = innerWidth < 900;
+  const shortFelt = tblH < 300;
+
+  const trkW = Math.round(Math.max(40, Math.min(compact ? 60 : 84, Math.min(tblW * 0.19, tblH * (shortFelt ? 0.19 : 0.25)))));
+  const trkH = Math.round(trkW * 1.4);
+  /* The subtrahends are the room the seats themselves take: a nameplate plus its
+     pile is ~230px wide on a desktop and ~88px on a phone, and ~74px tall. What
+     is left after that is how far a played card may reach from centre. */
+  const reachX = Math.max(44, Math.min(compact ? 78 : 134, tblW / 2 - trkW / 2 - (compact ? 88 : 230)));
+  const reachY = Math.max(24, Math.min(compact ? 62 : 104, tblH / 2 - trkH / 2 - (shortFelt ? 60 : compact ? 54 : 74)));
+  const seatScale = Math.max(0.7, Math.min(compact ? 0.88 : 1, tblW / 470));
+
+  /* The tray is out of flow (it hangs off the top of #hand-block), so it takes no
+     grid height and the felt does not know it is there — the south seat would sit
+     under it. Only measure it while it is actually shown. */
+  const tray = $("action-tray");
+  const rawLift = tray && tray.classList.contains("show") ? tray.offsetHeight : 0;
+  /* Lift your own plate clear of the tray only as far as the felt can spare it.
+     A tall felt steps the whole seat above the tray; a landscape phone's 130px
+     one cannot, and lifting there would have parked your nameplate above the
+     felt's top edge — so there the tray simply owns the bottom of the felt, and
+     the plate stays on it. 240 is the room the trick cross and the north seat
+     need between them once the plate has moved. */
+  const trayLift = Math.max(0, Math.min(rawLift, Math.round(tblH - 240)));
+
+  t.style.setProperty("--trickw", trkW + "px");
+  t.style.setProperty("--trickh", trkH + "px");
+  t.style.setProperty("--reach-x", Math.round(reachX) + "px");
+  t.style.setProperty("--reach-y", Math.round(reachY) + "px");
+  t.style.setProperty("--seat-scale", seatScale.toFixed(2));
+  t.style.setProperty("--tray-lift", trayLift + "px");
+
+  const med = $("medallion");
+  if (med) {
+    med.classList.toggle("tight", tblH < 200);
+    /* Below this the tray owns the bottom of the felt and the plaque would land on
+       the trick. Nothing is lost: the number it shows is already in the contract
+       rail and in the prompt. Inline display, not the .show class — that class is
+       renderTable()'s to own, and a resize must be able to bring the plaque back
+       without a re-render. */
+    med.style.display = tblH - trayLift < 200 ? "none" : "";
+  }
 }
 /* Registers the resize listener. Wrapped in a function (rather than run at module
    load) so this file can still be `import()`-ed under Node with no DOM — see
-   test/client-modules.test.js. Called once from index.html at boot. */
+   test/client-modules.test.js. Called once from main.js/solo.js at boot. */
 function initResize() {
   /* both fits are measured, so a resize has to re-measure them */
   addEventListener("resize", () => { const w = $("my-hand"); if (w && w.children.length) fitHand(w); fitTable(); });
 }
 
-// ---------- live countdowns (deadlines are absolute server ms) ----------
-let ringEl = null, tickHandle = null;
-/* renderGame() (index.html) points this at the on-clock seat's avatar on every
-   render, or clears it to null. ringEl itself stays module-private — this setter
-   is the only way in from outside, so nothing but tickTimers() below ever reads it. */
+/* ---------- live countdowns ----------
+   The deadlines are absolute ms, but on whose clock differs — the room's timers are
+   server ms, solo's are plain Date.now() — so the reading is the caller's to supply
+   along with the view rather than this module's to fetch. */
+let ringEl = null, tickHandle = null, chimedFor = null;
+/* renderTable() points this at the on-clock seat's avatar on every render, or
+   clears it to null. ringEl itself stays module-private — this setter is the only
+   way in from outside, so nothing but tickTimers() below ever reads it. */
 function setRingEl(el) { ringEl = el; }
-function tickTimers() {
-  if (!S.view || !S.view.room.started) return;
-  const now = serverNow();
-  if (ringEl && S.view.turnDeadline != null) {
-    const total = (S.view.settings.turnTimerSec || 45) * 1000;
-    const left = Math.max(0, S.view.turnDeadline - now);
-    ringEl.style.setProperty("--p", String(Math.max(0, Math.min(1, left / total))));
-    ringEl.classList.toggle("urgent", left <= 10000);
+/* The turn clock drawn as the header's own top edge. Exported for completeness,
+   but tickTimers() is what actually drives it — see below. */
+function setTurnBar(pct, urgent) {
+  const b = $("turn-bar");
+  if (!b) return;
+  b.style.width = (Math.max(0, Math.min(1, pct || 0)) * 100).toFixed(1) + "%";
+  b.classList.toggle("urgent", !!urgent);
+}
+function tickTimers(view, now) {
+  if (!view) return;                                // ticks start at boot, the first view lands later
+  const deadline = view.turnDeadline;
+  let frac = 0, urgent = false;
+  /* ringEl is null unless a human is on the clock, which is also the only time
+     there is anything to count down — a bot's think-time is not a deadline. */
+  if (ringEl && deadline != null) {
+    const total = (view.settings?.turnTimerSec || 45) * 1000;
+    const left = Math.max(0, deadline - now);
+    frac = Math.max(0, Math.min(1, left / total));
+    urgent = left <= 10000;
+    ringEl.style.setProperty("--p", String(frac));
+    ringEl.classList.toggle("urgent", urgent);
     ringEl.title = `${Math.ceil(left / 1000)}s left`;
   }
+  /* The design chimes on each of the last five seconds (TRUMP.dc.html:902), but
+     this clock is polled four times a second, so that rule literally applied would
+     fire four ticks a second. One chime as the clock turns urgent is the same
+     warning, delivered once. The latch is the deadline itself, so the next turn's
+     clock — any change of deadline — re-arms it without a separate reset. */
+  if (urgent && chimedFor !== deadline) { chimedFor = deadline; sfx("tick"); }
+  /* The bar and the ring are one clock drawn twice, so they are filled from one
+     computation on one tick — updating the bar from the renderer instead let it
+     sit a phase behind the ring it is meant to agree with. */
+  setTurnBar(frac, urgent);
+  /* Not in the page markup: the auto-advance countdown belongs to whichever panel
+     is currently offering "ready", so the lookup has to happen per tick. */
   const rc = $("ready-count");
-  if (rc && S.view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((S.view.roundDeadline - now) / 1000))}s`;
+  if (rc && view.roundDeadline != null) rc.textContent = `${Math.max(0, Math.ceil((view.roundDeadline - now) / 1000))}s`;
 }
-/* Wrapped rather than run at module load, same reason as initResize() above. */
-function startTicking() {
-  tickHandle = setInterval(tickTimers, 250);
+/* Wrapped rather than run at module load, same reason as initResize() above.
+   Thunks, not values: both clients replace the view object wholesale on every
+   update, so a view captured at boot would be a clock frozen at deal one. */
+function startTicking(getView, getNow) {
+  if (tickHandle) clearInterval(tickHandle);        // a second call re-arms the clock, it does not add a second one
+  tickHandle = setInterval(() => tickTimers(getView(), getNow()), 250);
 }
 
-export { fitTable, tickTimers, startTicking, setRingEl, initResize };
+export { fitTable, tickTimers, startTicking, setRingEl, initResize, setTurnBar };

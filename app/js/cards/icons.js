@@ -20,6 +20,12 @@ const ICONS = {
   moon:  '<path d="M20.4 13.4A8.4 8.4 0 1 1 10.6 3.6a6.6 6.6 0 0 0 9.8 9.8Z"/>',
   plug:  '<path d="M18.4 5.6 5.6 18.4M8.4 3.6v3.2M3.6 8.4h3.2M15.6 17.2v3.2M17.2 15.6h3.2"/><circle cx="12" cy="12" r="4.4"/>',
   cup:   '<path d="M7.4 3.6h9.2v5.6a4.6 4.6 0 0 1-9.2 0Z"/><path d="M7.4 5.4H4.9a2.3 2.3 0 0 0 0 4.6h2.5M16.6 5.4h2.5a2.3 2.3 0 0 1 0 4.6h-2.5M9.6 13.6h4.8l-.6 4.4H10.2ZM7.6 20.4h8.8"/>',
+  /* sound/mute share the cone so the toggle changes one thing — the waves become
+     a cross and the button does not jump when you press it */
+  sound: '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6M18.4 6.4a8 8 0 0 1 0 11.2"/>',
+  mute:  '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="m16 9.6 5.4 4.8M21.4 9.6 16 14.4"/>',
+  flip:  '<path d="M4 8.5 12 4l8 4.5"/><path d="M20 8.5v7L12 20l-8-4.5v-7"/>',
+  sort:  '<path d="M4 6h11"/><path d="M4 12h7"/><path d="M4 18h4"/><path d="M17 10v9"/><path d="M14 16l3 3 3-3"/>',
 };
 function icon(name, cls) {
   const d = ICONS[name]; if (!d) return "";

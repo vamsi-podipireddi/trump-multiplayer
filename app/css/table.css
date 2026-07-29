@@ -1,320 +1,397 @@
-/* ---- Game ---- */
-  /* 100dvh, not 100vh: iOS Safari sizes vh to the *largest* viewport, so with the
-     toolbars showing a 100vh layout hides its own bottom rows behind them. */
-  /* Three explicit rows for three row children. With `auto 1fr` the third (#bottom,
-     which carries an explicit grid-column) was auto-placed into an unsized implicit
-     row after 1fr had taken the height — so the hand overflowed 100dvh and was
-     clipped by body{overflow:hidden}. The phone block always had three rows, which
-     is why only desktop showed it. */
-  #game { height:100vh; height:100dvh; display:none; grid-template-columns:1fr clamp(300px,22vw,340px); grid-template-rows:auto 1fr auto; }
-  header { grid-column:1/3; display:flex; align-items:center; gap:16px; background:linear-gradient(180deg,var(--room-2),var(--room-1));
-    border-bottom:1px solid var(--line-2); box-shadow:0 1px 0 rgba(222,189,121,.14);
-    padding:9px 18px; padding-top:calc(9px + env(safe-area-inset-top)); padding-left:calc(18px + env(safe-area-inset-left)); padding-right:calc(18px + env(safe-area-inset-right)); }
-  header h1 { margin:0; font-family:var(--fd); font-weight:600; font-size:var(--t-xl); letter-spacing:.16em; color:var(--gold); line-height:1.15; }
-  header .tagline { font-size:var(--t-xs); color:var(--txt-3); letter-spacing:.04em; margin-top:1px; }
-  header .tagline b { color:var(--txt-2); font-weight:700; }
+/* ---- Game shell ----
+   100dvh, not 100vh: iOS Safari sizes vh to the *largest* viewport, so with the
+   toolbars showing a 100vh layout hides its own bottom rows behind them.
+
+   Three explicit rows for three row children (header / table / bottom). With
+   `auto 1fr` the third was auto-placed into an unsized implicit row after 1fr
+   had taken the height, so the hand overflowed 100dvh and body{overflow:hidden}
+   clipped it. Three columns now, too: contract rail · table · log rail. Both
+   rails collapse to sheets on the way down (see responsive.css); the row count
+   never changes. */
+  #game { height:100vh; height:100dvh; display:none;
+    grid-template-columns:284px minmax(0,1fr) 300px; grid-template-rows:auto 1fr auto; }
+
+  /* 1/-1, not 1/4: the column count changes twice on the way down (three rails,
+     two, one) and a fixed end line would span past the last explicit column,
+     which creates an implicit one — see the note on #table-wrap in the phone
+     block of responsive.css for what that costs. */
+  header { grid-column:1/-1; position:relative; display:flex; align-items:center; gap:16px;
+    background:var(--panel); border-bottom:1px solid var(--line); z-index:30;
+    padding:0 16px; min-height:58px;
+    padding-top:env(safe-area-inset-top); padding-left:calc(16px + env(safe-area-inset-left)); padding-right:calc(16px + env(safe-area-inset-right)); }
+  /* the turn clock, drawn as the header's own top edge — the one line of chrome
+     already spanning the whole width, so it needs no space of its own */
+  #turn-bar { position:absolute; left:0; top:0; height:2px; width:0%; background:var(--acc);
+    transition:width .22s linear,background .3s; box-shadow:0 0 12px var(--glow); }
+  #turn-bar.urgent { background:var(--bad); }
+  header h1 { margin:0; font-family:var(--fd); font-weight:400; font-size:var(--t-2xl); letter-spacing:.13em; flex:none; color:var(--txt); }
+  header .tagline { font-family:var(--fm); font-size:var(--t-xs); letter-spacing:.13em; text-transform:uppercase;
+    color:var(--txt3); white-space:nowrap; }
+  header .tagline b { color:var(--txt2); font-weight:500; }
   .hdr-actions { margin-left:auto; display:flex; align-items:center; gap:7px; }
-  /* One quiet family, differentiated by weight: toggles read as chrome, Leave reads as an exit. */
-  header button { font:inherit; font-size:var(--t-sm); letter-spacing:.01em; cursor:pointer; min-height:38px;
-    display:inline-flex; align-items:center; gap:7px;
-    color:var(--txt-2); background:rgba(255,255,255,.045); border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 12px; font-weight:600;
+  header button { font:inherit; font-size:var(--t-sm); cursor:pointer; min-height:38px;
+    display:inline-flex; align-items:center; gap:7px; white-space:nowrap;
+    color:var(--txt2); background:none; border:1px solid var(--line); border-radius:var(--r-sm); padding:8px 11px; font-weight:600;
     transition:background .15s,color .15s,border-color .15s; }
-  header button[aria-pressed="true"] { background:var(--gold); color:var(--on-gold); border-color:var(--gold); font-weight:700; }
-  header button.danger { color:var(--danger); border-color:rgba(228,112,94,.26); }
-  
+  header button[aria-pressed="true"] { color:var(--acc); border-color:var(--acc); }
+  header button.danger { color:var(--txt3); }
 
-  #table-wrap { position:relative; padding:16px; display:flex; align-items:center; justify-content:center; min-height:0; min-width:0; }
-  /* Sized, not stretched: at 100% width/height on a wide monitor the felt became a
-     stadium with the seats flung to its rim and a dead centre. */
-  /* The rail is five stacked shadows, not a 20px slab of brown: a hairline of
-     light, thin walnut, a brass line, then the dark that drops it into the room. */
-  #table { position:relative; width:min(100%,960px); aspect-ratio:1.72; height:auto; max-height:100%; border-radius:50%/44%;
+/* ---- the felt ----
+   A rounded slab lit from above, not an oval: at 16:9 the oval flung the seats
+   to its rim and left a dead centre, and on a phone it wasted the two corners
+   the hand actually needs. Sized by its container so the same insets work at
+   every width. */
+  #table-wrap { grid-column:2/3; grid-row:2/3; position:relative; min-height:0; min-width:0; overflow:hidden;
+    background:radial-gradient(120% 90% at 50% -12%,var(--panel2) 0%,var(--bg) 55%); }
+  #table { position:absolute; inset:0; max-width:1120px; margin:0 auto; }
+  #felt { position:absolute; inset:18px 26px 20px; border-radius:58px;
     background:
-      radial-gradient(52% 58% at 50% 40%, rgba(255,238,199,.14), rgba(255,238,199,0) 72%),
-      radial-gradient(80% 84% at 50% 42%, var(--felt-hi), var(--felt) 54%, var(--felt-lo) 100%);
-    box-shadow:
-      0 0 0 1px rgba(255,255,255,.05),
-      0 0 0 9px var(--rail),
-      0 0 0 10px rgba(222,189,121,.2),
-      0 0 0 15px var(--rail-lo),
-      0 26px 70px rgba(0,0,0,.6),
-      inset 0 0 90px rgba(0,0,0,.4); }
-  /* woven cloth, so the felt isn't a flat gradient under raking light */
-  #table::before { content:""; position:absolute; inset:0; border-radius:inherit; pointer-events:none; opacity:.55;
-    background-image:repeating-linear-gradient(90deg,rgba(0,0,0,.055) 0 1px,transparent 1px 3px),
-                     repeating-linear-gradient(0deg,rgba(255,255,255,.03) 0 1px,transparent 1px 3px); }
+      repeating-linear-gradient(45deg,rgba(255,255,255,.016) 0 1px,transparent 1px 3px),
+      repeating-linear-gradient(-45deg,rgba(0,0,0,.045) 0 1px,transparent 1px 3px),
+      radial-gradient(58% 62% at 50% 34%,rgba(46,190,124,.16) 0%,transparent 68%),
+      radial-gradient(74% 90% at 50% 6%,var(--felt) 0%,var(--felt2) 100%);
+    border:1px solid var(--rim);
+    box-shadow:inset 0 2px 54px -6px rgba(0,0,0,.82),inset 0 0 0 1px rgba(230,192,122,.07),
+               inset 0 -60px 90px -60px #000,0 40px 90px -50px #000; }
+  #felt-inner { position:absolute; inset:38px 50px 40px; border-radius:40px; border:1px solid var(--rim); opacity:.5; pointer-events:none; }
+  /* the whole surface lifts a little when it is your move */
+  #turn-glow { position:absolute; inset:0; pointer-events:none; box-shadow:inset 0 0 110px -34px var(--acc);
+    opacity:0; transition:opacity .5s var(--e); }
+  #turn-glow.on { opacity:.3; } #turn-glow.on.urgent { opacity:.55; }
+  /* a fat trick earns a flash of felt */
+  #flash { position:absolute; inset:18px 26px 20px; border-radius:58px; pointer-events:none; z-index:7; opacity:0;
+    background:radial-gradient(46% 52% at 50% 46%,var(--glow) 0%,transparent 72%); box-shadow:inset 0 0 90px -20px var(--acc); }
+  #flash.on { animation:feltFlash .95s var(--e) both; }
 
-  .seat { position:absolute; display:flex; flex-direction:column; align-items:center; gap:5px; z-index:3; }
-  .seat .nameplate { display:flex; align-items:center; gap:8px; background:rgba(7,12,10,.62); backdrop-filter:blur(6px);
-    border:1px solid var(--line-2); border-radius:var(--r-pill); padding:4px 12px 4px 4px; font-size:var(--t-md); font-weight:600; white-space:nowrap;
-    box-shadow:0 4px 14px rgba(0,0,0,.35);
-    transition:transform .15s,box-shadow .15s,border-color .15s,background .15s; }
+/* ---- seats ----
+   A plate, the cards still in that hand, and the tricks taken so far. The plate
+   is the only part that moves state: lit when it is that seat's turn, tinted
+   when the seat bought the contract. */
+  .seat { position:absolute; display:flex; flex-direction:column; align-items:center; gap:7px; z-index:6; }
+  .seat.south { left:50%; bottom:calc(8px + var(--tray-lift)); transform:translateX(-50%) scale(var(--seat-scale));
+    transition:bottom .34s var(--e); }
+  .seat.west  { left:16px;  top:46%; transform:translateY(-50%) scale(var(--seat-scale)); }
+  .seat.north { left:50%;   top:16px; transform:translateX(-50%) scale(var(--seat-scale)); transform-origin:50% 0; }
+  .seat.east  { right:16px; top:46%; transform:translateY(-50%) scale(var(--seat-scale)); }
+
+  .seat .nameplate { display:flex; align-items:center; gap:9px; padding:7px 13px 7px 7px; border-radius:var(--r-pill);
+    border:1px solid var(--line); background:var(--panel); backdrop-filter:blur(6px);
+    transition:border-color .35s var(--e),background .35s var(--e),box-shadow .35s var(--e); }
   /* The lift goes on the nameplate, never on .seat — .seat's transform is what
-     centres it on the felt edge (translateX/-Y 50%) and would be clobbered. */
-  .seat.active .nameplate { border-color:var(--gold); box-shadow:0 0 0 1px var(--gold),0 0 22px rgba(222,189,121,.4),0 4px 14px rgba(0,0,0,.4);
-    background:rgba(48,38,16,.72); transform:translateY(-2px); }
-  .seat.team-d .nameplate { border-color:rgba(222,189,121,.5); }
-  .seat.team-o .nameplate { border-color:rgba(139,176,224,.5); }
+     centres it on the felt edge and would be clobbered. */
+  .seat.active .nameplate { border-color:var(--acc); background:var(--panel2);
+    box-shadow:0 0 0 3px var(--glow),0 14px 34px -16px var(--shadow); }
+  .seat.won .nameplate { border-color:var(--ok); box-shadow:0 0 0 3px var(--glow); }
+  .seat.team-d .nameplate { border-color:var(--teambd); background:var(--teamtint); }
+  .seat.active.team-d .nameplate { background:var(--panel2); }
+  .seat .np-text { display:flex; flex-direction:column; min-width:0; }
+  .seat .np-line { display:flex; align-items:center; gap:6px; }
+  .seat .who { font-size:var(--t-md); font-weight:600; white-space:nowrap; color:var(--txt); }
+  .seat.south .who { font-weight:700; }
+  .seat .meta { font-family:var(--fm); font-size:var(--t-2xs); color:var(--txt3); letter-spacing:.04em; white-space:nowrap; margin-top:2px; }
   .seat .off { opacity:.5; }
+  .role { font-family:var(--fm); font-size:9px; letter-spacing:.12em; padding:2.5px 6px; border-radius:var(--r-xs);
+    background:var(--panel2); color:var(--txt3); text-transform:uppercase; }
+  .role.bidder, .role.partner { background:var(--teamtint); color:var(--acc); }
+  /* the seat holding the auction, before there is a contract to belong to */
+  .role.high { background:var(--teamtint); color:var(--acc); }
+  .role.def { background:var(--panel2); color:var(--txt3); }
+  .role.passed { background:transparent; color:var(--txt3); box-shadow:inset 0 0 0 1px var(--line2); }
   /* The dealer button is a physical object on a real table — a white puck that
      moves round the seats — so it is drawn as one rather than spelled out. */
-  .dealer-btn { display:inline-flex; align-items:center; justify-content:center; width:19px; height:19px; border-radius:50%;
-    background:linear-gradient(180deg,#fff,#d9d5c8); color:#1a1a1a; font-size:var(--t-2xs); font-weight:800; letter-spacing:0;
-    box-shadow:0 1px 3px rgba(0,0,0,.5); }
-  .role { font-size:var(--t-2xs); letter-spacing:.11em; padding:2px 8px; border-radius:var(--r-pill); font-weight:700; text-transform:uppercase; }
-  .role.bidder { background:var(--gold); color:var(--on-gold); }
-  .role.partner { background:rgba(222,189,121,.2); color:var(--gold); box-shadow:inset 0 0 0 1px rgba(222,189,121,.45); }
-  .role.def { background:rgba(139,176,224,.18); color:var(--team-o); box-shadow:inset 0 0 0 1px rgba(139,176,224,.4); }
-  .role.bidding { background:rgba(255,255,255,.1); color:var(--txt-2); }
-  /* a seat that folded used to render as nothing at all — indistinguishable from one yet to act */
-  .role.passed { background:transparent; color:var(--txt-3); box-shadow:inset 0 0 0 1px var(--line-2); }
-  .seat .bidchip { font-size:var(--t-sm); font-weight:700; color:var(--txt-2); letter-spacing:.02em;
-    background:rgba(7,12,10,.7); border:1px solid var(--line-2); border-radius:var(--r-pill); padding:2px 10px; }
-  .seat .bidchip.high { color:var(--gold); border-color:var(--line-gold); background:rgba(48,38,16,.7); }
-  .seat .meta { font-size:var(--t-xs); color:var(--txt-3); text-align:center; letter-spacing:.02em; }
-  .seat .meta b { color:var(--gold); font-size:var(--t-sm); font-weight:700; }
-  .seat.south { bottom:6px; left:50%; transform:translateX(-50%); }
-  .seat.west { left:14px; top:50%; transform:translateY(-50%); }
-  .seat.north { top:10px; left:50%; transform:translateX(-50%); }
-  .seat.east { right:14px; top:50%; transform:translateY(-50%); }
+  .dealer-btn { display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; border-radius:50%;
+    background:linear-gradient(180deg,#fff,#d9d5c8); color:#1a1a1a; font-size:9px; font-weight:800; flex:none; }
+  .seat .bidchip { font-family:var(--fm); font-size:var(--t-xs); font-weight:500; padding:3px 7px; border-radius:7px;
+    background:var(--acc); color:var(--on-acc); }
+  /* three dots while a bot decides — a bot about to spend a big card sits on it
+     a beat longer, and that hesitation is the only tell it has */
+  .seat .think { display:none; gap:3.5px; align-items:center; padding:0 3px 0 1px; }
+  .seat.thinking .think { display:inline-flex; }
+  .seat .think i { width:4px; height:4px; border-radius:50%; background:var(--acc); display:block; animation:dotBob 1.05s var(--e) infinite; }
+  .seat .think i:nth-child(2) { animation-delay:.16s; } .seat .think i:nth-child(3) { animation-delay:.32s; }
 
-  .hand-backs { display:flex; position:relative; } .hand-backs.vertical { flex-direction:column; }
-  /* A real back: a fine lattice inside a white margin, not a barber pole. */
-  .card-back { width:23px; height:33px; border-radius:3px; box-shadow:0 0 0 1.4px var(--stock),0 0 0 2.2px rgba(0,0,0,.5),0 2px 5px rgba(0,0,0,.45);
+  .hand-backs { display:flex; } .hand-backs.vertical { flex-direction:column; }
+  /* A real back: a fine lattice inside a brass margin, not a barber pole. */
+  .card-back { display:block; width:var(--backw); height:var(--backh); border-radius:3px; flex:none;
     background:
-      repeating-linear-gradient(45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
-      repeating-linear-gradient(-45deg,rgba(255,255,255,.13) 0 1px,transparent 1px 4px),
-      linear-gradient(155deg,#8d2f38,#5a1620); }
-  .hand-backs .card-back:not(:first-child) { margin-left:-16px; } .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-26px; }
-  .backs-count { position:absolute; right:-8px; bottom:-7px; font-size:var(--t-2xs); font-weight:700; line-height:1;
-    background:rgba(7,12,10,.85); border:1px solid var(--line-2); border-radius:var(--r-pill); padding:2px 6px; color:var(--txt-2); }
+      repeating-linear-gradient(45deg,rgba(0,0,0,.26) 0 1.5px,transparent 1.5px 4px),
+      repeating-linear-gradient(-45deg,rgba(0,0,0,.26) 0 1.5px,transparent 1.5px 4px),
+      linear-gradient(160deg,var(--acc2),var(--felt2));
+    border:1px solid var(--acc2); box-shadow:inset 0 0 0 1.2px rgba(255,255,255,.16),0 2px 5px -2px var(--shadow);
+    animation:backIn .4s var(--e) backwards; }
+  .hand-backs .card-back:not(:first-child) { margin-left:-10px; }
+  .hand-backs.vertical .card-back { width:var(--backh); height:var(--backw); }
+  .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-10px; }
 
-  /* ---- centre medallion: the felt used to be the largest, emptiest thing on screen ----
-     Two modes on one element. `full` is a centred plaque for the phases where the
-     middle of the table is otherwise blank; `strip` collapses to a single line above
-     the trick cross so the four played cards own the centre. Both are aria-hidden —
-     the action bar and the aria-live table log already narrate this state. */
-  /* width:max-content is load-bearing: an absolutely positioned box with left:50%
-     shrink-to-fits into the *remaining* half of its container, so the strip's rows
-     were being squeezed to 490px and wrapping mid-phrase. max-content opts out. */
-  #medallion { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:1; pointer-events:none;
-    display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
-    width:max-content; max-width:min(92%,520px); min-width:250px; padding:18px 30px; border-radius:var(--r-lg);
-    background:radial-gradient(ellipse at 50% 0%, rgba(4,10,7,.5), rgba(4,10,7,.34));
-    border:1px solid var(--line-gold); box-shadow:0 10px 34px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,255,255,.05);
-    transition:opacity .18s, padding .18s; }
-  .med-label { font-size:var(--t-xs); letter-spacing:.24em; font-weight:700; color:var(--txt-3); text-transform:uppercase;
-    display:flex; align-items:center; justify-content:center; gap:6px; }
-  .med-label .su { width:12px; height:12px; }
-  .med-main { font-size:var(--t-3xl); font-weight:700; line-height:1.05; color:var(--gold); letter-spacing:-.01em; }
-  .med-main.set { color:var(--team-o); }
-  .med-sub { font-size:var(--t-sm); color:var(--txt-3); } .med-sub b { color:var(--txt-2); font-weight:600; }
-  .med-bar { display:none; width:190px; height:5px; margin-top:7px; border-radius:var(--r-pill); background:rgba(0,0,0,.5); overflow:hidden; }
-  #medallion.has-bar .med-bar { display:block; }
-  .med-bar > i { display:block; height:100%; width:0; border-radius:inherit; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi)); transition:width .35s ease-out; }
-  .med-chips { display:flex; gap:6px; flex-wrap:wrap; justify-content:center; margin-top:7px; }
-  .med-chips span { font-size:var(--t-xs); letter-spacing:.02em; padding:3px 10px; border-radius:var(--r-pill); white-space:nowrap;
-    display:inline-flex; align-items:center; gap:4px;
-    background:rgba(0,0,0,.42); border:1px solid var(--line); color:var(--txt-3); }
-  /* --strip-top centres the strip in the band between the lowest trick card and the
-     south seat; fitTable() measures it, because that band is 110px on a desktop felt
-     and 22px on a phone's. */
-  #medallion[data-mode="strip"] { top:var(--strip-top,72%); flex-direction:row; align-items:center; gap:12px; min-width:0; padding:7px 16px; }
-  #medallion[data-mode="strip"] .med-label, #medallion[data-mode="strip"] .med-main { white-space:nowrap; }
-  #medallion[data-mode="strip"] .med-label { font-size:var(--t-sm); letter-spacing:2px; color:var(--gold); }
-  #medallion[data-mode="strip"] .med-main { font-size:var(--t-md); font-weight:700; color:var(--txt); text-shadow:none; }
-  #medallion[data-mode="strip"] .med-main b { color:var(--gold); }
-  #medallion[data-mode="strip"] .med-sub { display:none; }
-  #medallion[data-mode="strip"] .med-bar { width:110px; margin:0; }
-  #medallion[data-mode="strip"] .med-chips { margin:0; }
+  /* tricks taken, stacked in front of the seat that took them */
+  .pile { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; width:58px; max-width:110px; }
+  .seat.south .pile, .seat.north .pile { position:absolute; left:100%; top:50%; transform:translateY(-50%); margin-left:9px; }
+  .pile i { display:block; width:var(--pilew); height:var(--pileh); border-radius:2.5px; transform:rotate(var(--pr,0deg));
+    background:repeating-linear-gradient(45deg,rgba(0,0,0,.22) 0 1.5px,transparent 1.5px 4px),
+               linear-gradient(160deg,rgba(255,255,255,.5),var(--acc2));
+    border:1px solid rgba(255,255,255,.55);
+    box-shadow:2px -2px 0 -.5px rgba(255,255,255,.3),4px -4px 0 -1px rgba(255,255,255,.16),0 3px 8px -3px #000;
+    animation:pileIn .42s var(--e) both; }
+  .float-emote { position:absolute; bottom:100%; left:50%; pointer-events:none; animation:floatUp 1.9s ease-out forwards; z-index:20; color:var(--acc); }
+  .float-emote svg { width:30px; height:30px; filter:drop-shadow(0 3px 8px rgba(0,0,0,.6)); }
 
-  /* ---- the trick: four cards, one per seat, meeting in the middle ----
-     The old cross was laid out with four hand-picked pixel offsets that did not
-     agree with each other (south sat 62px below centre, north 74px above it),
-     so the pile was visibly lopsided. One radius per axis, applied symmetrically,
-     is the whole fix — and it lets each card fly in from its own seat. */
-  /* One radius per axis, declared here so both the layout and fitTable() read
-     the same number instead of each carrying its own copy of it. */
-  #trick { --reach-x:54px; --reach-y:47px;
-    position:absolute; top:50%; left:50%; transform:translate(-50%,-50%) scale(var(--trick-scale,1));
-    width:0; height:0; z-index:2; }
-  .trick-card { --tx:0px; --ty:0px; --tr:0deg; --ts:1;
-    position:absolute; top:0; left:0;
-    transform:translate(-50%,-50%) translate(var(--tx),var(--ty)) rotate(var(--tr)) scale(var(--ts));
-    transition:transform .22s ease-out, filter .22s ease-out; animation:dealIn .28s cubic-bezier(.2,.85,.3,1); }
-  @keyframes dealIn { from { opacity:0;
-    transform:translate(-50%,-50%) translate(calc(var(--tx) * 2.2),calc(var(--ty) * 2.2)) rotate(var(--tr)) scale(.9); } }
-  .trick-card.winner { --ts:1.07; z-index:5; filter:drop-shadow(0 0 14px rgba(222,189,121,.75)); }
-  .trick-card.pos-0 { --ty:var(--reach-y);                --tr:1.4deg; }
-  .trick-card.pos-1 { --tx:calc(-1 * var(--reach-x));     --tr:-1.4deg; }
-  .trick-card.pos-2 { --ty:calc(-1 * var(--reach-y));     --tr:-1.4deg; }
-  .trick-card.pos-3 { --tx:var(--reach-x);                --tr:1.4deg; }
-  #trick .trick-card { position:absolute; } /* beat the later, equal-specificity .card{position:relative} so cards form the N/E/S/W cross instead of stacking */
-  #trick .card { width:66px; height:93px; }
+/* ---- centre plaque ----
+   The middle of the felt is empty exactly while nothing is being played into
+   it, so that is when it carries the phase. aria-hidden: the action bar and
+   the aria-live table log already narrate all of it. */
+  #medallion { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:2; pointer-events:none;
+    display:none; flex-direction:column; align-items:center; gap:5px; text-align:center; }
+  #medallion.show { display:flex; }
+  .med-label { font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.26em; text-transform:uppercase; color:var(--txt3); }
+  .med-main { font-family:var(--fd); font-size:clamp(34px,7vh,62px); line-height:1; color:var(--txt); }
+  .med-sub { font-size:var(--t-sm); color:var(--txt2); max-width:220px; text-wrap:pretty; }
+  #medallion.tight .med-sub { display:none; }
 
-  /* ---- the card ----
-     The element is the physical object: stock, edge, shadow. The SVG inside is
-     the printing, and it is the only thing that knows what rank this is —
-     the old face drew one oversized suit glyph on every card in the deck, so a
-     2 and a 9 were indistinguishable and a King was just a crown-less club. */
-  .card { width:62px; height:88px; border-radius:4.5px; color:var(--ink); position:relative; user-select:none;
-    background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
-    box-shadow:0 1px 0 rgba(255,255,255,.7) inset, 0 0 0 1px rgba(21,23,26,.18), 0 3px 7px var(--shadow); }
-  .card.red { color:var(--red); }
-  .card > svg { display:block; width:100%; height:100%; border-radius:inherit; }
-  button.card { border:none; padding:0; margin:0; font:inherit; -webkit-appearance:none; }
-  /* The index is set in the grotesk, not the serif: Georgia's figures are
-     old-style, so a "10" would sit half below the baseline on every card. */
-  .card text, .mini-card text { font-family:var(--fu); font-weight:800; letter-spacing:-.02em; }
-  /* ink for the parts of a face that are never suit-coloured (frames, hair, outlines) */
-  .card .ci { fill:var(--ink); } .card .cs { fill:var(--stock); }
-  .card .cl { fill:none; stroke:var(--ink); stroke-width:2.4; stroke-linejoin:round; }
-  .card .cfr { fill:none; stroke:rgba(21,23,26,.26); stroke-width:2; }
-  .card:focus-visible, .mini-card:focus-visible, .emote-btn:focus-visible, .segbtn:focus-visible,
-  .mini-btn:focus-visible, .act-btn:focus-visible, .btn:focus-visible, button:focus-visible, input:focus-visible {
-    outline:3px solid var(--gold-hi); outline-offset:2px; }
-  /* 4-colour deck (♦ blue, ♣ green) — opt-in, persisted */
-  /* Kept here, not in tokens.css, despite the split table filing "4-colour deck
-     overrides" under tokens: rule 1 (a rule goes where its selector's subject
-     lives, not where the table files it) puts these in table.css, since the
-     subject is .card/.mini-card. They out-rank .card.red on specificity alone
-     (3 classes + body vs. 2 classes), so cascade position isn't what's at stake —
-     but a specificity-only guarantee is fragile against a future equal-or-higher
-     .card colour rule added lower in this same file, so they stay adjacent to
-     the base card rules they override rather than relying on that margin from
-     across a file boundary. Only --dia-4c/--club-4c themselves are tokens. */
+/* ---- the trick: four cards, one per seat, meeting in the middle ----
+   One radius per axis applied symmetrically, so the pile is never lopsided and
+   each card can fly in from its own seat. layout.js writes --reach-x/--reach-y
+   from the felt it just measured; the stylesheet only owns the fallback. */
+  #trick { position:absolute; top:50%; left:50%; width:0; height:0; z-index:8; }
+  /* --cardw/--cardh, not width/height: .card sizes its own box *and* its corner
+     index off those two (font-size is calc(var(--cardw) * .2)), so overriding the
+     box alone printed a hand-sized index on a 40px trick card. */
+  .trick-card { --tx:0px; --ty:0px; --tr:0deg; --ts:1; --cardw:var(--trickw); --cardh:var(--trickh);
+    position:absolute; left:0; top:0;
+    margin-left:calc(var(--trickw) / -2); margin-top:calc(var(--trickh) / -2);
+    transform:translate(var(--tx),var(--ty)) rotate(var(--tr)) scale(var(--ts));
+    transition:transform .55s cubic-bezier(.5,.05,.75,.3),opacity .5s;
+    animation:fly .42s var(--e) backwards; }
+  @keyframes fly { from { opacity:0;
+    transform:translate(calc(var(--tx) * .85),calc(var(--ty) * .85 + var(--fy0,0px))) rotate(calc(var(--tr) - 14deg)) scale(.6); } }
+  .trick-card.pos-0 { --ty:var(--reach-y);            --tr:3deg;  --fy0:70px; }
+  .trick-card.pos-1 { --tx:calc(-1 * var(--reach-x)); --ty:6px; --tr:-7deg; }
+  .trick-card.pos-2 { --ty:calc(-1 * var(--reach-y)); --tr:-2deg; }
+  .trick-card.pos-3 { --tx:var(--reach-x);            --ty:6px; --tr:6deg; }
+  .trick-card.winner { --ts:1.12; z-index:5; transition:transform .3s var(--e); }
+  .trick-card.winner .face { outline:2px solid var(--ok); outline-offset:2px; }
+  /* the whole trick slides to the seat that took it, then the pile grows by one */
+  .trick-card.sweeping { opacity:0;
+    transform:translate(var(--sx,0px),var(--sy,0px)) rotate(calc(var(--tr) * 2)) scale(.62); }
+  #points-chip { position:absolute; left:0; top:-6px; transform:translateX(-50%); display:none;
+    font-family:var(--fd); font-size:34px; color:var(--acc); text-shadow:0 4px 20px var(--glow); white-space:nowrap; }
+  #points-chip.show { display:block; animation:chipUp 1.5s var(--e) both; }
+  #trick-chips { position:absolute; left:0; top:0; }
+  .chip-fly { position:absolute; left:0; top:0; width:var(--sz,21px); height:var(--sz,21px); border-radius:50%;
+    display:grid; place-items:center; background:var(--stock); border:1.5px dashed rgba(20,18,15,.3); color:var(--cink);
+    font-family:var(--fm); font-size:9.5px; font-weight:600; box-shadow:0 6px 14px -6px #000; pointer-events:none; z-index:12;
+    animation:chipFly 1s var(--e) both; }
+  .chip-fly.big { background:var(--acc); color:var(--on-acc); border-color:rgba(23,17,5,.42); }
+
+/* ---- the card ----
+   The element is the physical object: stock, edge, shadow. The SVG inside is
+   the printing, and it is the only thing that knows what rank this is. The
+   corner index is HTML, not SVG text, so it takes the interface's lining
+   figures and scales off the card's own font-size. */
+  .card { position:relative; width:var(--cardw); height:var(--cardh); border-radius:8px; padding:0; border:none; background:none;
+    color:var(--cink); user-select:none; font-size:calc(var(--cardw) * .2); display:block; perspective:900px; }
+  .card.red { color:var(--cred); }
+  button.card { font:inherit; font-size:calc(var(--cardw) * .2); -webkit-appearance:none; }
+  .card .face, .card .back { position:absolute; inset:0; border-radius:8px; overflow:hidden;
+    transition:transform .24s var(--e); backface-visibility:hidden; }
+  .card .face { background:var(--stockbg); border:1px solid var(--cardline);
+    box-shadow:0 12px 26px -14px var(--shadow); }
+  .card .back { transform:scaleX(0);
+    background:
+      repeating-linear-gradient(45deg,rgba(0,0,0,.24) 0 2px,transparent 2px 6px),
+      repeating-linear-gradient(-45deg,rgba(0,0,0,.24) 0 2px,transparent 2px 6px),
+      linear-gradient(160deg,var(--acc2),var(--felt2));
+    border:1px solid var(--acc2); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.14),0 12px 26px -14px var(--shadow); }
+  /* face-down: the back opens as the face closes, so one card turns rather than
+     two cards cross-fading */
+  .card.down .face { transform:scaleX(0); transition-delay:0s; }
+  .card.down .back { transform:scaleX(1); transition-delay:.22s; }
+  .card:not(.down) .face { transition-delay:.22s; } .card:not(.down) .back { transition-delay:0s; }
+  .card > svg, .card .face > svg { position:absolute; inset:0; display:block; width:100%; height:100%; }
+  .card .idx { position:absolute; display:flex; flex-direction:column; align-items:center; line-height:.82;
+    color:currentColor; font-weight:700; }
+  .card .idx.tl { top:.2em; left:.34em; }
+  .card .idx.br { bottom:.2em; right:.34em; transform:rotate(180deg); }
+  .card .idx .su { width:.58em; height:.58em; margin-top:.14em; }
+  .card .cs { fill:var(--stock); } .card .ci { fill:var(--cink); }
+  .card .cl { fill:none; stroke:var(--cink); stroke-width:2.2; stroke-linejoin:round; stroke-linecap:round; }
+  .card .cfr { fill:none; stroke:rgba(0,0,0,.17); stroke-width:1.6; }
+  /* 4-colour deck (♦ blue, ♣ green) — opt-in, persisted. Kept beside the base
+     card rules they override rather than in tokens.css: the subject is .card. */
   body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:var(--dia-4c); }
   body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:var(--club-4c); }
-  /* .colophon .su and .sc .su (just below) are the order-dependent pair: both
-     are specificity (0,2,0) — one class from the ancestor, one from .su itself
-     — and both size the exact same element (the wordmark's suit glyphs are
-     literally .colophon > .sc > svg.su), so whichever comes LAST wins
-     width/height. Moved here from panels.css (where the rest of .colophon
-     still lives — see the wordmark section there) purely to keep this pair in
-     its original relative order across the file split: in the one stylesheet,
-     .colophon .su preceded .sc .su, so .sc .su's .82em size (~13.1px) won over
-     this rule's fixed 11px. Keep .colophon .su directly before .sc .su; do not
-     separate or reorder the two.
-     .colophon .su + .su, just below, is NOT part of that dependency: it's
-     (0,3,0) — three class selectors (.colophon, the first .su, the subject
-     .su); the + combinator itself adds nothing — so it outranks both of the
-     above regardless of position and needs no particular order to win. It
-     sets only margin-left and sits here as .colophon .su's sibling-spacing
-     companion (same component), not for any cascade reason. */
-  .colophon .su { width:11px; height:11px; opacity:.85; }
-  .colophon .su + .su { margin-left:7px; }
-  /* a suit named inside a sentence: the log, the medallion, a chip */
-  .sc { font-weight:700; color:var(--txt); white-space:nowrap; font-variant-numeric:tabular-nums lining-nums; }
-  .sc .su { margin-left:.1em; width:.82em; height:.82em; }
-  .sc.s-h, .sc.s-d { color:#f08b8b; }
-  body.fourcolor .sc.s-d { color:#8cc3ff; } body.fourcolor .sc.s-c { color:#6fdca9; }
 
-  /* min-width:0 on both column-1 rows: a grid track's `auto` minimum is its
-     min-content size, so a hand wider than the screen used to stretch the whole
-     column — which is what pushed the header and the felt off a phone. */
-  #bottom { grid-column:1/2; position:relative; display:flex; flex-direction:column; justify-content:flex-end; min-width:0; }
-  /* The only place you actually do something used to be the faintest thing on screen.
-     min-height keeps it from jumping between phases; the rail says whose turn it is. */
-  #action-bar { position:relative; display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:9px;
-    min-height:92px; width:min(100% - 32px,820px); margin:0 auto 12px; padding:12px 20px 12px 24px; text-align:center; border-radius:var(--r-md);
-    background:linear-gradient(180deg,var(--room-2),var(--room-1)); border:1px solid var(--line);
-    transition:border-color .2s,box-shadow .2s; }
-  #action-bar::before { content:""; position:absolute; left:0; top:10px; bottom:10px; width:3px; border-radius:var(--r-pill); background:var(--line-2); transition:background .2s,box-shadow .2s; }
-  #action-bar[data-turn="you"] { border-color:var(--line-gold); box-shadow:0 10px 30px rgba(0,0,0,.4); }
-  #action-bar[data-turn="you"]::before { background:var(--gold); box-shadow:0 0 14px rgba(222,189,121,.6); }
-  #action-bar .prompt { font-size:var(--t-lg); font-weight:600; color:var(--txt); width:100%; letter-spacing:-.005em; }
-  #action-bar .prompt b { color:var(--gold); }
-  #action-bar .status { font-size:var(--t-md); color:var(--txt-3); width:100%; }
-  #action-bar .banner { font-size:var(--t-md); width:100%; padding:2px 0; color:var(--txt-2); } #action-bar .banner b { color:var(--txt); font-weight:700; }
-  #action-bar .banner .d { color:var(--team-d); font-weight:700; } #action-bar .banner .o { color:var(--team-o); font-weight:700; }
-  .act-btn { font:inherit; font-size:var(--t-md); cursor:pointer; color:var(--on-gold); background:linear-gradient(180deg,var(--gold-hi),var(--gold));
-    border:1px solid var(--gold); border-radius:var(--r-sm); padding:9px 18px; min-height:42px; font-weight:700;
-    box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 4px 12px rgba(0,0,0,.3); transition:filter .15s,transform .08s; }
+  /* the two cards worth naming at a glance: trump, and the 3 that carries 30 */
+  .card.trumpcard .face { border-color:var(--acc2); box-shadow:inset 0 4px 0 var(--acc2),0 12px 28px -12px var(--glow); }
+  .card.bonuscard .face { border-color:var(--acc); box-shadow:inset 0 4px 0 var(--acc),0 12px 28px -12px var(--glow); }
+  .card .tag { position:absolute; top:-8px; left:50%; transform:translateX(-50%); z-index:2;
+    font-family:var(--fm); font-size:8.5px; font-weight:500; letter-spacing:.11em; padding:2.5px 6px; border-radius:var(--r-xs);
+    background:var(--acc2); color:var(--on-acc); white-space:nowrap; box-shadow:0 4px 10px -4px var(--shadow); }
+  .card .tag.bonus { background:var(--acc); }
+
+  /* the 44px call-partner card and the rail thumbnails: a full pip layout is
+     illegible at that size, so it gets the index and one centred pip — which is
+     what a real card shows through a fanned hand anyway */
+  .mini-card { position:relative; flex:none; width:var(--minw); height:var(--minh); border-radius:5px; padding:0; overflow:hidden;
+    background:var(--stockbg); border:1px solid var(--cardline); color:var(--cink); cursor:pointer;
+    font-size:11px; transition:transform .14s var(--e); }
+  .mini-card.red { color:var(--cred); }
+  .mini-card.static { cursor:default; }
+  .mini-card > svg { position:absolute; inset:0; display:block; width:100%; height:100%; }
+  .mini-card .idx { position:absolute; top:2px; left:3px; line-height:1; font-weight:700; color:currentColor; }
+  .mini-card.bonus { outline:2px solid var(--acc); outline-offset:1px; }
+  .mini-card.win { outline:1.5px solid var(--acc); outline-offset:1px; }
+  .mini-card.dim { opacity:.45; }
+
+/* ---- bottom: contract strip, tray, prompt, hand ---- */
+  /* min-width:0: a grid track's `auto` minimum is its min-content size, so a
+     hand wider than the screen used to stretch the whole column. */
+  #bottom { grid-column:2/3; grid-row:3/4; position:relative; display:flex; flex-direction:column; justify-content:flex-end;
+    min-width:0; padding-bottom:env(safe-area-inset-bottom); }
+  #contract-strip { display:none; flex:none; align-items:center; gap:10px; padding:8px 13px;
+    border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:var(--panel); }
+  #contract-strip .su { width:17px; height:17px; flex:none; }
+  #contract-strip .bid { font-family:var(--fm); font-size:var(--t-md); font-weight:500; white-space:nowrap; }
+  #contract-strip .bar { flex:1; height:5px; border-radius:var(--r-pill); background:var(--bg); overflow:hidden; min-width:34px; }
+  #contract-strip .bar > i { display:block; height:100%; width:0; background:var(--acc); transition:width .6s var(--e); }
+  #contract-strip .bar > i.ontrack { background:var(--ok); }
+  #contract-strip .cap { font-family:var(--fm); font-size:var(--t-xs); color:var(--txt2); white-space:nowrap; }
+
+  #hand-block { position:relative; flex:none;
+    background:linear-gradient(180deg,transparent,var(--bg) 34%); border-top:1px solid var(--line);
+    padding:10px 16px 14px; z-index:14; }
+  /* Whatever you have to decide rides on a raised tray above the bar. Out of flow
+     on purpose: the auction's five controls and the 20-card call grid used to grow
+     the bar and resize the felt underneath on every phase change. */
+  #action-tray { position:absolute; left:0; right:0; bottom:100%; display:none; justify-content:center;
+    padding:0 14px 9px; pointer-events:none; z-index:20; }
+  #action-tray.show { display:flex; }
+  #action-tray .tray { pointer-events:auto; display:flex; flex-direction:column; align-items:center; gap:9px;
+    max-width:min(790px,100%); padding:13px 16px; border-radius:var(--r-lg); border:1px solid var(--line2);
+    background:var(--panel); box-shadow:0 20px 50px -14px var(--shadow),0 0 0 4px var(--bg);
+    animation:trayUp .34s var(--e) both; }
+  #action-buttons { display:none; align-items:center; justify-content:center; gap:9px; flex-wrap:wrap; }
+  #action-buttons.show { display:flex; }
+  .act-btn { display:flex; align-items:center; gap:7px; padding:11px 17px; border-radius:var(--r-md);
+    border:1px solid var(--line2); background:none; color:var(--txt); font-size:var(--t-lg); font-weight:700;
+    white-space:nowrap; min-height:44px; transition:filter .16s,transform .16s var(--e),background .16s,border-color .16s; }
   .act-btn:active { transform:translateY(1px); }
-  /* Pass is not a mistake, but it is not the headline either — quiet, still tappable. */
-  .act-btn.pass { background:transparent; color:var(--txt-2); border-color:var(--line-2); box-shadow:none; }
-  /* the steppers flank the number; they are adjustments, not the decision */
-  .act-btn.step { background:rgba(255,255,255,.06); color:var(--txt); border-color:var(--line-2); box-shadow:none;
-    min-width:46px; font-variant-numeric:tabular-nums; }
-  
-  /* Choosing trump is the single biggest decision in a deal, so the four suits
-     are the biggest targets on screen and drawn, not typed. */
-  .act-btn.suit { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; line-height:1;
-    min-width:74px; min-height:74px; padding:8px 10px; background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
-    border-color:rgba(21,23,26,.2); color:var(--ink); }
-  .act-btn.suit .su { width:30px; height:30px; }
-  .act-btn.suit small { font-size:var(--t-2xs); letter-spacing:.11em; font-weight:700; text-transform:uppercase; color:var(--ink); opacity:.55; }
-  .act-btn.suit.red { color:var(--red); }
-  body.fourcolor .act-btn.suit.s-d { color:var(--dia-4c); } body.fourcolor .act-btn.suit.s-c { color:var(--club-4c); }
-  .bidval { font-size:var(--t-2xl); font-weight:700; color:var(--gold); min-width:72px; text-align:center; letter-spacing:-.02em; }
-  /* The old 150px cap hid half the callable cards behind a scrollbar nobody noticed;
-     no cap at all is worse — on a phone each suit wraps over four lines, the grid runs
-     to ~1000px, and #bottom squeezes the felt to nothing. Bound it generously instead. */
-  .call-grid { display:flex; flex-direction:column; gap:6px; width:100%; align-items:center;
-    max-height:min(44dvh,320px); overflow-y:auto; }
-  .call-row { display:flex; gap:5px; justify-content:center; align-items:center; flex-wrap:wrap; }
-  .call-row .call-suit { width:20px; display:flex; justify-content:center; }
-  .call-row .call-suit .su { width:15px; height:15px; }
-  .mini-card { width:44px; height:61px; border-radius:3.5px; color:var(--ink); position:relative; cursor:pointer; border:none; padding:0;
-    background:linear-gradient(158deg,#fffdf6,var(--stock) 45%,var(--stock-lo));
-    box-shadow:0 0 0 1px rgba(21,23,26,.16), 0 2px 5px var(--shadow); transition:transform .13s, box-shadow .13s; }
-  .mini-card > svg { display:block; width:100%; height:100%; }
-  .mini-card .ci { fill:var(--ink); }
-  .mini-card.red { color:var(--red); }
-  /* the two cards worth naming: the ace of a suit, and the 3 that carries 30 points */
-  .mini-card.ace { box-shadow:0 0 0 2px var(--gold), 0 2px 5px var(--shadow); }
-  .mini-card.bonus { box-shadow:0 0 0 2px #e0679c, 0 2px 5px var(--shadow); }
-  
+  .act-btn.primary { background:linear-gradient(180deg,var(--acc),var(--acc2)); color:var(--on-acc); border-color:transparent; }
+  .act-btn.ready { background:linear-gradient(180deg,#7fdcae,var(--ok)); color:#08281a; border-color:transparent; }
+  .act-btn.ready:disabled { opacity:.55; cursor:default; }
+  .act-btn.pass, .act-btn.step { color:var(--txt2); }
+  .act-btn:disabled { opacity:.4; }
+  .act-btn.suit .su { width:17px; height:17px; }
+  .act-btn.suit.s-h, .act-btn.suit.s-d { color:var(--cred); }
+  body.fourcolor .act-btn.suit.s-d { color:var(--dia-4c-ui); } body.fourcolor .act-btn.suit.s-c { color:var(--club-4c-ui); }
+  .bidval { font-family:var(--fd); font-size:26px; color:var(--txt); min-width:64px; text-align:center; padding:0 6px; }
 
-  /* padding-bottom clears the fan, not just the card box: rotation about an origin
-     below the card swings the outer bottom corners past the unrotated edge, and
-     transforms contribute nothing to layout, so the row can't size around them. */
-  #my-hand { --ml-base:-22px; --seam:16px; display:flex; justify-content:center; height:162px; align-items:flex-end; padding-bottom:30px; }
-  /* One composed transform driven by custom properties, so the fan (--rot/--dy, set
-     per card in renderHand) and the lift (--lift, set by state) cannot overwrite each
-     other — a plain `transform:translateY()` on hover would flatten the fan. */
-  #my-hand .card { --lift:0px; width:78px; height:110px; margin-left:var(--ml,var(--ml-base)); cursor:default;
-    transform-origin:50% 135%; transform:rotate(var(--rot,0deg)) translateY(calc(var(--dy,0px) + var(--lift)));
-    transition:transform .14s,box-shadow .14s,filter .14s; }
+  #call-grid { display:none; flex-direction:column; gap:5px; }
+  #call-grid.show { display:flex; }
+  .call-row { display:flex; align-items:center; gap:7px; }
+  .call-row .call-suit { width:15px; height:15px; flex:none; color:var(--txt); }
+  .call-row .call-suit.s-h, .call-row .call-suit.s-d { color:var(--cred); }
+  body.fourcolor .call-row .call-suit.s-d { color:var(--dia-4c-ui); }
+  body.fourcolor .call-row .call-suit.s-c { color:var(--club-4c-ui); }
+  .call-row .cards { display:flex; gap:4px; flex-wrap:wrap; }
+
+  /* The prompt is one balanced line: what you have to decide, or who you are
+     waiting for. It never changes height, so the felt above it never resizes. */
+  #action-bar { min-height:48px; display:flex; align-items:center; justify-content:center; margin-bottom:10px;
+    font-size:var(--t-lg); color:var(--txt2); text-align:center; line-height:1.4; text-wrap:balance; }
+  #action-bar .prompt { max-width:64ch; }
+  #action-bar[data-turn="you"] { color:var(--acc); }
+  #action-bar .prompt b { color:var(--txt); font-weight:700; }
+
+  #hand-tools { display:flex; align-items:center; justify-content:flex-end; gap:7px; min-height:32px; margin-bottom:6px;
+    visibility:hidden; }
+  #hand-tools.show { visibility:visible; }
+  #hand-tools button { display:grid; place-items:center; width:32px; height:32px; min-height:32px; padding:0;
+    border-radius:var(--r-sm); border:1px solid var(--line2); background:none; color:var(--txt3);
+    transition:border-color .16s,color .16s; }
+  #hand-tools button.on { border-color:var(--acc); color:var(--acc); }
+  #hand-tools button .ic { width:16px; height:16px; }
+
+  /* padding-bottom clears the fan, not just the card box: rotation about an
+     origin below the card swings the outer bottom corners past the unrotated
+     edge, and transforms contribute nothing to layout. */
+  #my-hand { --ml-base:-34px; --seam:12px; display:flex; justify-content:center; align-items:flex-end;
+    min-height:var(--cardh); padding-bottom:12px; }
+  /* One composed transform driven by custom properties, so the fan (--rot/--dy,
+     set per card by renderHand) and the lift (--lift, set by state) cannot
+     overwrite each other — a plain transform:translateY() on hover would
+     flatten the fan. */
+  /* flex:none is load-bearing. #my-hand is a flex row, so thirteen cards whose
+     summed width exceeds it are shrunk — and fitHand() measures offsetWidth to
+     decide the overlap, so a shrunken card fed it a width the layout then
+     contradicted and the fan hung a card off each edge of a phone. The overlap
+     is what absorbs the excess here, never the card. */
+  #my-hand .card { --lift:0px; flex:none; margin-left:var(--ml,var(--ml-base)); cursor:default;
+    transform-origin:50% 140%; transform:rotate(var(--rot,0deg)) translateY(calc(var(--dy,0px) + var(--lift)));
+    transition:transform .18s var(--e),margin-left .42s var(--e);
+    animation:dealFly .46s var(--e) backwards; }
   #my-hand .card:first-child { margin-left:0; }
-  /* a visible seam between suits — hands arrive sorted by suit, then rank */
+  /* a visible seam between suits — a sorted hand arrives grouped by suit */
   #my-hand .card.suit-start:not(:first-child) { margin-left:calc(var(--ml,var(--ml-base)) + var(--seam)); }
-  /* Trump and the bonus 3 are marked on the card's own edge rather than by
-     recolouring its shadow, so the marks survive the lift filters below. */
-  #my-hand .card.trumpcard { box-shadow:0 0 0 1.5px var(--gold),0 3px 7px var(--shadow); }
-  #my-hand .card.trumpcard::before { content:""; position:absolute; left:0; right:0; top:0; height:4px;
-    border-radius:4.5px 4.5px 0 0; background:linear-gradient(90deg,var(--gold-dim),var(--gold-hi),var(--gold-dim)); }
-  #my-hand .card.bonuscard::after { content:"30"; position:absolute; top:-7px; right:-6px; z-index:2;
-    font-size:9.5px; font-weight:800; line-height:1; letter-spacing:.02em; color:#fff; background:#c9457f;
-    border:1.5px solid var(--stock); border-radius:var(--r-pill); padding:3px 5px; box-shadow:0 2px 5px rgba(0,0,0,.5); }
-  /* legal cards sit proud and glow the moment it is your turn: the playable set
-     reads at a glance instead of by elimination. drop-shadow, not box-shadow —
-     the trump ring owns box-shadow and must survive. */
-  #my-hand .card.playable { --lift:-9px; cursor:pointer; filter:drop-shadow(0 0 10px rgba(222,189,121,.55)); }
-  
+  #my-hand .card.playable { --lift:-9px; cursor:pointer; }
+  #my-hand .card.down { cursor:pointer; }
   #my-hand .card.playable:focus-visible { --lift:-26px; z-index:10; }
   #my-hand .card.playable:active { --lift:-15px; }
-  /* An unplayable card must still be a *card*. It used to be 82% opaque, so the
-     card behind it showed straight through and the hand looked like it had
-     failed to load. Darken it, never make it transparent. */
-  #my-hand .card.illegal { filter:grayscale(.9) brightness(.55) contrast(1.05); }
+  /* An unplayable card must still be a *card*: darken it, never make it
+     transparent — at 82% opacity the card behind showed straight through and
+     the hand looked like it had failed to load. */
+  #my-hand .card.illegal .face { filter:grayscale(1) contrast(.4) brightness(.9); }
+  #my-hand .card.illegal { cursor:not-allowed; }
+  /* the playable set reads at a glance instead of by elimination — but only when
+     there is actually a choice being constrained */
+  #my-hand .card.legal-hint .face { outline:2px solid var(--acc); outline-offset:3px; }
+  #hand-hint { display:flex; justify-content:center; align-items:flex-start; min-height:15px; margin-top:10px;
+    font-size:var(--t-sm); line-height:1.25; color:var(--txt3); text-align:center; visibility:hidden; }
+  #hand-hint.show { visibility:visible; }
+
+/* ---- the partner reveal: the one beat where the table stops ---- */
+  #reveal { position:fixed; inset:0; z-index:58; display:none; flex-direction:column; align-items:center; justify-content:center;
+    gap:22px; padding:24px; overflow-y:auto; cursor:pointer;
+    background:radial-gradient(58% 58% at 50% 46%,rgba(8,14,10,.72) 0%,rgba(2,5,3,.94) 100%); backdrop-filter:blur(6px); }
+  #reveal.show { display:flex; }
+  .reveal-kicker { font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.3em; text-transform:uppercase; color:var(--acc);
+    animation:rise .45s var(--e) both; }
+  .reveal-card .card { --cardw:var(--revw,116px); --cardh:var(--revh,162px); animation:spinIn .82s cubic-bezier(.16,.9,.24,1) both; }
+  .reveal-card .card .face { border-color:var(--acc); box-shadow:0 26px 60px -18px #000,0 0 46px -8px var(--glow); }
+  .reveal-pair { display:flex; align-items:center; gap:16px; flex-wrap:wrap; justify-content:center; }
+  .reveal-who { display:flex; align-items:center; gap:9px; padding:8px 15px 8px 8px; border-radius:var(--r-pill);
+    border:1px solid var(--teambd); background:var(--teamtint); font-size:var(--t-lg); font-weight:600; white-space:nowrap;
+    animation:slideIn .5s var(--e) both; }
+  .reveal-who.a { --sx:-46px; } .reveal-who.b { --sx:46px; animation-delay:.1s; }
+  .reveal-amp { font-family:var(--fd); font-size:30px; color:var(--acc); animation:ampIn .55s var(--e) .12s both; }
+  .reveal-tail { display:flex; flex-direction:column; align-items:center; gap:5px; animation:rise .45s var(--e) both; }
+  .reveal-tail .line { font-size:var(--t-md); color:var(--txt2); text-align:center; text-wrap:pretty; }
+  .reveal-tail .tap { font-family:var(--fm); font-size:9.5px; letter-spacing:.2em; color:var(--txt3); }
 
 /* ---- away / autopilot ---- */
-  #awaybar { position:fixed; top:0; left:0; right:0; z-index:290; display:none; align-items:center; justify-content:center; gap:14px; flex-wrap:wrap;
-    background:linear-gradient(180deg,#7a5a18,#5f4611); color:#fff5df; font-size:var(--t-sm); text-align:center;
-    box-shadow:0 6px 20px rgba(0,0,0,.45);
+  #awaybar { position:fixed; top:0; left:0; right:0; z-index:290; display:none; align-items:center; justify-content:center;
+    gap:14px; flex-wrap:wrap; background:linear-gradient(180deg,#7a5a18,#5f4611); color:#fff5df; font-size:var(--t-sm);
+    text-align:center; box-shadow:0 6px 20px rgba(0,0,0,.45);
     padding:9px 14px; padding-top:calc(9px + env(safe-area-inset-top)); }
   #awaybar.show { display:flex; }
   #awaybar .msg { display:inline-flex; align-items:center; gap:8px; }
-  #awaybar button { font:inherit; font-size:var(--t-sm); font-weight:700; cursor:pointer; border:none; border-radius:var(--r-xs); padding:8px 16px; min-height:36px; background:#fff5df; color:#3a2a06; }
-  .seat.away-seat .nameplate { opacity:.62; } .seat .zzz { color:var(--txt-3); }
+  #awaybar button { font:inherit; font-size:var(--t-sm); font-weight:700; cursor:pointer; border:none; border-radius:var(--r-xs);
+    padding:8px 16px; min-height:36px; background:#fff5df; color:#3a2a06; }
+  .seat.away-seat .nameplate { opacity:.62; } .seat .zzz { color:var(--txt3); }
 
-  /* ---- turn timer: a ring around the player's own face, where the eye already is ---- */
+/* ---- turn timer: a ring around the player's own face, where the eye already is ---- */
   .avatar.ticking { position:relative; overflow:visible; }
   .avatar.ticking::after { content:""; position:absolute; inset:-3.5px; border-radius:50%; pointer-events:none;
-    background:conic-gradient(var(--gold) calc(var(--p,1) * 360deg), rgba(255,255,255,.14) 0);
+    background:conic-gradient(var(--acc) calc(var(--p,1) * 360deg), rgba(255,255,255,.09) 0);
     -webkit-mask:radial-gradient(circle, transparent 0 calc(50% - 2.5px), #000 calc(50% - 2.5px));
     mask:radial-gradient(circle, transparent 0 calc(50% - 2.5px), #000 calc(50% - 2.5px)); }
-  .avatar.ticking.urgent::after { background:conic-gradient(#ff7a6b calc(var(--p,1) * 360deg), rgba(255,255,255,.14) 0); }
-  .act-btn.ready { background:linear-gradient(180deg,#7fdcae,var(--ok)); border-color:var(--ok); color:#08281a; }
-  .act-btn.ready:disabled { opacity:.5; cursor:default; }
+  .avatar.ticking.urgent::after { background:conic-gradient(var(--bad) calc(var(--p,1) * 360deg), rgba(255,255,255,.09) 0); }
+
+/* a suit named inside a sentence: the log, the strip, a chip */
+  .sc { font-weight:700; color:var(--txt); white-space:nowrap; font-variant-numeric:tabular-nums lining-nums; }
+  .sc .su { margin-left:.1em; width:.86em; height:.86em; }
+  .sc.s-h, .sc.s-d { color:#f08b8b; }
+  body.fourcolor .sc.s-d { color:var(--dia-4c-ui); } body.fourcolor .sc.s-c { color:var(--club-4c-ui); }
+  .su-big { display:inline-flex; width:38px; height:38px; flex:none; color:var(--txt3); }
+  .su-big .su { width:100%; height:100%; }
+  .su-big.s-h, .su-big.s-d { color:var(--cred); }
+  body.fourcolor .su-big.s-d { color:var(--dia-4c-ui); } body.fourcolor .su-big.s-c { color:var(--club-4c-ui); }

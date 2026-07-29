@@ -15,8 +15,13 @@ function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add
    A name is the one thing you bring, so it gets a face. The hue comes from the
    name itself, so the same player is the same colour on everyone's screen. */
 function nameHue(name) {
+  const s = String(name || "").trim();
+  /* An empty field is not a player yet, and hue 0 — which is what the fold below
+     returns for one — is a hot pink that reads as an error on the join screen.
+     42 is the brass the rest of the interface is lit in. */
+  if (!s) return 42;
   let h = 0;
-  for (const ch of String(name || "")) h = (h * 31 + ch.codePointAt(0)) % 360;
+  for (const ch of s) h = (h * 31 + ch.codePointAt(0)) % 360;
   return h;
 }
 function paintAvatar(el, name, isAI) {

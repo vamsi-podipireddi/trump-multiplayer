@@ -1,5 +1,5 @@
 import { S, myUid, takeNotice } from "../session.js";
-import { $ } from "../util/dom.js";
+import { $, esc } from "../util/dom.js";
 import { WS_BASE, connect } from "../net.js";
 
 // ---------- join UI ----------
@@ -7,7 +7,7 @@ function doJoin(create) {
   const name = $("join-name").value.trim();
   if (!name) { $("join-err").textContent = "Enter a name."; return; }
   const code = create ? "" : $("join-code").value.trim().toUpperCase();
-  if (!create && !code) { $("join-err").textContent = "Enter a room code, or use Create New Room."; return; }
+  if (!create && !code) { $("join-err").textContent = "Enter a room code, or create a table."; return; }
   S.creating = !!create; S.createPrivate = create && $("join-private").checked; S.createTries = 0;
   S.roomCode = code || null;
   connect(name, code);
@@ -29,8 +29,10 @@ async function loadStats() {
     if (!r.ok) return;
     const j = await r.json();
     if (!j || !j.available || !j.games) return;
-    $("join-record").innerHTML = `Your record: <b>${j.games}</b> match${j.games === 1 ? "" : "es"} · ` +
-      `<b>${j.wins}</b> won · bids taken <b>${j.bidsWon}</b>, made <b>${j.bidsMade}</b>`;
+    // escaped like every other interpolation here: the counts are JSON off the
+    // wire, and this line lands in innerHTML for the <b> emphasis
+    $("join-record").innerHTML = `Your record: <b>${esc(j.games)}</b> match${j.games === 1 ? "" : "es"} · ` +
+      `<b>${esc(j.wins)}</b> won · bids taken <b>${esc(j.bidsWon)}</b>, made <b>${esc(j.bidsMade)}</b>`;
   } catch {}
 }
 /* A notice left by leaveRoom() (e.g. "the host removed you") survives the

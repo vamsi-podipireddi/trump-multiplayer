@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>TRUMP — Multiplayer</title>
 <meta name="description" content="Online multiplayer TRUMP: bid for points, call a hidden partner, capture tricks. 2–4 players plus AI, no signup." />
-<meta name="theme-color" content="#0d4d2e" />
+<meta name="theme-color" content="#08090a" />
 <meta name="color-scheme" content="dark" />
 <meta property="og:type" content="website" />
 <meta property="og:title" content="TRUMP — online 250-point bid &amp; capture" />
@@ -20,6 +20,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="TRUMP" />
+<!-- The three faces the design is drawn in. Cross-origin, so the service worker
+     cannot precache them: offline the stack below falls back to the system
+     grotesk / serif / mono, which is why every --f* token names real fallbacks. -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=Instrument+Serif&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/css/tokens.css" />
 <link rel="stylesheet" href="/css/base.css" />
 <link rel="stylesheet" href="/css/table.css" />
@@ -29,105 +35,175 @@
 <body>
 <div id="conn">Disconnected — reconnecting…</div>
 
-<!-- Join screen -->
+<!-- ══════════ JOIN ══════════ -->
 <div id="join-screen" class="screen show">
-  <div class="brand">
-    <!-- the hero is the deck: three real card faces, drawn by the same renderer
-         the table uses, so the first thing you see is the thing you came for -->
-    <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
-    <h1>TRUMP</h1>
-    <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
-    <p class="lede">Bid for points, call a hidden partner, capture tricks. Two to four players — AI takes whatever seats are left.</p>
-  </div>
-  <div class="panel slim">
-    <div class="field" style="margin-bottom:0;">
-      <label for="join-name">Your name</label>
-      <div class="name-row"><span class="avatar lg" id="join-avatar" aria-hidden="true"></span><input id="join-name" maxlength="16" placeholder="Alex" autocomplete="nickname" /></div>
+  <div class="join-grid">
+    <div class="join-hero">
+      <!-- the hero is the deck: three real card faces, drawn by the same renderer
+           the table uses, so the first thing you see is the thing you came for -->
+      <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
+      <h1>TRUMP</h1>
+      <div class="colophon" id="brand-colophon" aria-hidden="true"></div>
+      <p class="lede">Bid for points, name a trump suit, then call a card you don't hold — whoever has it becomes your secret partner. Four seats at the table; AI takes whatever's left.</p>
     </div>
-    <div class="err" id="join-err"></div>
-    <div id="join-record"></div>
-  </div>
-  <div class="join-cards">
-    <div class="panel">
-      <h2 data-ic="bot">Play solo</h2>
-      <p class="muted" style="margin:0 0 10px;">Straight into a deal against three AI opponents. No room, no waiting.</p>
-      <p class="muted" style="margin:0 0 14px;">They play easy, normal or hard — change it from the table settings whenever you like, even mid-match.</p>
-      <button class="btn" id="btn-solo" style="width:100%;">Deal me in</button>
-    </div>
-    <div class="panel">
-      <h2 data-ic="users">Play with friends</h2>
-      <p class="muted" style="margin:0 0 14px;">Start a table and share the code. Friends join from any device, and AI fills whatever seats are still empty.</p>
-      <button class="btn" id="btn-create" style="width:100%;">Create a table</button>
-      <label class="chk" for="join-private"><input type="checkbox" id="join-private" /><span>Private table — a longer code nobody can stumble into</span></label>
-      <div class="or">or join one</div>
-      <div class="row">
-        <input id="join-code" maxlength="8" placeholder="CODE" style="flex:1;" />
-        <button class="btn ghost" id="btn-join">Join</button>
+
+    <div class="join-forms">
+      <div class="panel slim">
+        <label class="lbl" for="join-name">Your name</label>
+        <div class="name-row"><span class="avatar lg" id="join-avatar" aria-hidden="true"></span><input id="join-name" maxlength="16" placeholder="Alex" autocomplete="nickname" /></div>
+        <div class="err" id="join-err"></div>
+        <div id="join-record"></div>
       </div>
+      <div class="join-cards">
+        <div class="panel">
+          <h2>Play solo</h2>
+          <p class="muted">Straight into a deal against three AI opponents. No room, no waiting.</p>
+          <button class="btn" id="btn-solo">Deal me in</button>
+        </div>
+        <div class="panel">
+          <h2>With friends</h2>
+          <p class="muted">Start a table, share the code. AI fills the empty seats.</p>
+          <button class="btn ghost" id="btn-create">Create a table</button>
+          <label class="chk" for="join-private"><input type="checkbox" id="join-private" /><span>Private table — a longer code nobody can stumble into</span></label>
+          <div class="row">
+            <input id="join-code" maxlength="8" placeholder="CODE" />
+            <button class="btn ghost" id="btn-join">Join</button>
+          </div>
+        </div>
+      </div>
+      <div class="join-meta"><span>NO SIGNUP</span><span>WORKS OFFLINE</span><span>FOUR SEATS</span></div>
     </div>
   </div>
 </div>
 
-<!-- Lobby screen -->
+<!-- ══════════ LOBBY ══════════ -->
 <div id="lobby-screen" class="screen">
-  <div class="brand"><h1>TRUMP</h1><div class="colophon" id="lobby-colophon" aria-hidden="true"></div></div>
-  <div class="panel">
-    <h2 data-ic="table">Table</h2>
-    <div class="code-ticket">
-      <div><div class="lbl">ROOM CODE</div><div class="code-big" id="lobby-code">----</div></div>
-      <div class="ticket-actions">
-        <button class="btn ghost" id="btn-copy">Copy invite link</button>
-        <button class="btn ghost" id="btn-share" style="display:none;">Share…</button>
-      </div>
+  <div class="lobby-grid">
+    <div class="lobby-head">
+      <h1>TRUMP</h1>
+      <div class="colophon" id="lobby-colophon" aria-hidden="true"></div>
+      <button class="linkish danger" id="btn-lobby-leave">Leave table</button>
     </div>
-    <p class="muted" style="text-align:center;margin-top:0;">Anyone with the link — or the code — can take a seat.</p>
-    <div class="seatlist" id="lobby-seats"></div>
-    <h2 data-ic="gear">Table settings</h2>
-    <div class="settings" id="lobby-settings"></div>
-    <div id="lobby-controls"></div>
-    <p class="muted" id="lobby-note"></p>
+    <div class="panel flush">
+      <div class="code-ticket">
+        <div class="lbl">Room code</div>
+        <div class="code-row">
+          <div class="code-big" id="lobby-code">----</div>
+          <div class="ticket-actions">
+            <button class="btn ghost" id="btn-copy">Copy invite link</button>
+            <button class="btn ghost" id="btn-share" style="display:none;">Share…</button>
+          </div>
+        </div>
+        <p class="muted">Anyone with the link — or the code — can take a seat.</p>
+      </div>
+      <div class="seatlist" id="lobby-seats"></div>
+    </div>
+    <div class="lobby-side">
+      <div class="panel">
+        <div class="lbl">Table settings</div>
+        <div class="settings" id="lobby-settings"></div>
+      </div>
+      <div id="lobby-controls"></div>
+      <p class="muted centred" id="lobby-note"></p>
+    </div>
   </div>
 </div>
 
-<!-- Game -->
+<!-- ══════════ TABLE ══════════ -->
 <div id="game">
   <header>
-    <div>
-      <h1>TRUMP</h1>
-      <div class="tagline" id="header-state">250-point bid &amp; capture</div>
-    </div>
+    <div id="turn-bar" aria-hidden="true"></div>
+    <h1>TRUMP</h1>
+    <div class="tagline" id="header-state">250-point bid &amp; capture</div>
     <!-- the icon carries the button on a phone, the label on a desktop;
          aria-label keeps the accessible name stable across both -->
     <div class="hdr-actions">
+      <button id="btn-sound" data-ic="sound" aria-pressed="false" aria-label="Table sound" title="Table sound"><span class="wide">Sound</span></button>
       <button id="btn-colors" data-ic="deck" aria-pressed="false" aria-label="Four-colour deck" title="Colour diamonds blue and clubs green"><span class="wide">4-Colour</span></button>
       <button id="btn-help" data-ic="help" aria-label="How to play"><span class="wide">How to play</span></button>
       <button id="btn-stand" data-ic="stand" aria-label="Stand up" title="Give up your seat — an AI takes over"><span class="wide">Stand up</span></button>
       <button class="danger" id="btn-leave" data-ic="exit"><span class="wide">Leave</span></button>
     </div>
   </header>
+
+  <!-- ─── left rail: contract · score · tricks you won ─── -->
+  <aside id="rail-left" data-tab="score">
+    <div class="panel-section" id="sec-contract">
+      <div class="lbl">Contract</div>
+      <div class="contract-head">
+        <span class="su-big" id="contract-suit" aria-hidden="true"></span>
+        <span class="contract-bid" id="contract-bid">—</span>
+        <span class="contract-tomake">TO<br />MAKE</span>
+      </div>
+      <div class="contract-side" id="contract-side">not set yet</div>
+      <div class="cbar"><i id="contract-fill"></i></div>
+      <div class="contract-foot"><span id="contract-captured">0 captured</span><span id="contract-remain"></span></div>
+      <div class="contract-card" id="called-card-row">
+        <div class="mini-card static" id="called-card"></div>
+        <div><div class="lbl">Called card</div><div class="sub" id="called-sub"></div></div>
+      </div>
+      <div class="contract-card" id="bonus-card-row">
+        <div class="mini-card static" id="bonus-card"></div>
+        <div><div class="lbl">Bonus · 30 pts</div><div class="sub" id="bonus-sub"></div></div>
+      </div>
+    </div>
+    <div class="panel-section" id="sec-score">
+      <h2 id="score-title">Scoreboard</h2>
+      <table class="score" id="scoreboard"></table>
+      <div class="contract-line" id="contract-line"></div>
+      <div class="contract-line" id="settings-line"></div>
+    </div>
+    <div class="panel-section" id="sec-tricks">
+      <h2>Tricks you won<span class="count" id="my-tricks-count">0</span></h2>
+      <div class="note" id="last-trick-note">Nothing taken yet.</div>
+      <div id="my-tricks"></div>
+      <div class="note empty" id="my-tricks-empty">Every trick you take lands here — and as a pile in front of your seat.</div>
+    </div>
+  </aside>
+
   <div id="table-wrap">
     <div id="table">
+      <div id="felt" aria-hidden="true"></div>
+      <div id="felt-inner" aria-hidden="true"></div>
+      <div id="turn-glow" aria-hidden="true"></div>
+      <div id="flash" aria-hidden="true"></div>
       <!-- medallion before #trick: played cards must stack above it -->
-      <div id="medallion" data-mode="full" aria-hidden="true">
+      <div id="medallion" aria-hidden="true">
         <div class="med-label"></div>
         <div class="med-main"></div>
         <div class="med-sub"></div>
-        <div class="med-bar"><i></i></div>
-        <div class="med-chips"></div>
       </div>
-      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
-      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs" data-backs></div><div class="meta"></div></div>
-      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="who"></span></div><div class="bidchip"></div><div class="hand-backs vertical" data-backs></div><div class="meta"></div></div>
-      <div id="trick"></div>
+      <div class="seat south" id="seat-south"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat west" id="seat-west"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs vertical" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat north" id="seat-north"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs" data-backs></div><div class="pile" data-pile></div></div>
+      <div class="seat east" id="seat-east"><div class="nameplate"><span class="avatar"></span><span class="np-text"><span class="np-line"><span class="who"></span></span><span class="meta"></span></span><span class="bidchip"></span><span class="think" aria-hidden="true"><i></i><i></i><i></i></span></div><div class="hand-backs vertical" data-backs></div><div class="pile" data-pile></div></div>
+      <div id="trick"><div id="points-chip"></div><div id="trick-chips" aria-hidden="true"></div></div>
     </div>
   </div>
-  <div id="bottom"><div id="action-bar"></div><div id="my-hand"></div></div>
-  <aside data-tab="score">
-    <div class="panel-section" id="sec-score"><h2 id="score-title">Scoreboard</h2><table class="score" id="scoreboard"></table><div class="contract-line" id="contract-line"></div><div class="contract-line" id="settings-line"></div></div>
+
+  <div id="bottom">
+    <!-- the contract rail is a sheet on a phone, so its two numbers ride here instead -->
+    <div id="contract-strip" aria-hidden="true"></div>
+    <div id="hand-block">
+      <!-- Whatever you have to decide rides on a raised tray above the bar. Out of flow on
+           purpose: the auction's five controls and the 20-card call grid used to grow the
+           bar and resize the felt underneath on every phase change. -->
+      <div id="action-tray"><div class="tray"><div id="action-buttons"></div><div id="call-grid"></div></div></div>
+      <div id="action-bar"></div>
+      <div id="hand-tools">
+        <button type="button" id="btn-flip" data-ic="flip" aria-label="Turn over all face-down cards" title="Turn over all face-down cards"></button>
+        <button type="button" id="btn-sort" data-ic="sort" aria-pressed="false" aria-label="Arrange hand by suit and rank" title="Arrange by suit and rank"></button>
+      </div>
+      <div id="my-hand"></div>
+      <div id="hand-hint"></div>
+    </div>
+  </div>
+
+  <!-- ─── right rail: log · chat ─── -->
+  <aside id="rail-right" data-tab="log">
     <div class="panel-section" id="sec-log"><h2>Table log</h2><div id="log" role="log" aria-live="polite" aria-label="Table log"></div></div>
     <div id="chat-section" class="panel-section">
-      <h2 style="padding:0 15px;">Chat</h2>
+      <h2>Chat</h2>
       <div id="chat-empty">Nothing said yet. Say hello.</div>
       <div id="chat-log" aria-live="polite" aria-label="Chat messages"></div>
       <div id="emote-bar" aria-label="Reactions"></div>
@@ -137,7 +213,16 @@
       </form>
     </div>
   </aside>
+
+  <!-- the one beat where the table stops: the called card turns over and names the pair -->
+  <div id="reveal">
+    <div class="reveal-kicker"></div>
+    <div class="reveal-card"></div>
+    <div class="reveal-pair"></div>
+    <div class="reveal-tail"></div>
+  </div>
 </div>
+
 <nav id="sheet-tabs" aria-label="Table panels">
   <button type="button" data-tab="score" aria-expanded="false">SCORE</button>
   <button type="button" data-tab="log" aria-expanded="false">LOG</button>
