@@ -43,7 +43,12 @@
    every width. */
   #table-wrap { grid-column:2/3; grid-row:2/3; position:relative; min-height:0; min-width:0; overflow:hidden;
     background:radial-gradient(120% 90% at 50% -12%,var(--panel2) 0%,var(--bg) 55%); }
-  #table { position:absolute; inset:0; max-width:1120px; margin:0 auto; }
+  /* The felt is the room, so it takes the whole room: a max-width here left a
+     band of bare floor between the slab and each rail on any window wider than
+     ~1700px, and the seats drew themselves against the cap rather than against
+     the space they had. Everything that has to fit on it — the trick cross, the
+     seats, the backs — is measured from the slab by ui/layout.js instead. */
+  #table { position:absolute; inset:0; }
   #felt { position:absolute; inset:18px 26px 20px; border-radius:58px;
     background:
       repeating-linear-gradient(45deg,rgba(255,255,255,.016) 0 1px,transparent 1px 3px),
@@ -119,9 +124,14 @@
       linear-gradient(160deg,var(--acc2),var(--felt2));
     border:1px solid var(--acc2); box-shadow:inset 0 0 0 1.2px rgba(255,255,255,.16),0 2px 5px -2px var(--shadow);
     animation:backIn .4s var(--e) backwards; }
-  .hand-backs .card-back:not(:first-child) { margin-left:-10px; }
+  /* The overlap is a fraction of the back, not a fixed 10px: ui/layout.js sizes
+     the backs off the felt, and a fixed overlap made a big screen's hand of
+     thirteen sprawl and a small one's bunch. Both rows stack along --backw —
+     the vertical ones are the same card turned, so its short edge is still what
+     the pile advances by. */
+  .hand-backs .card-back:not(:first-child) { margin-left:calc(var(--backw) * -.52); }
   .hand-backs.vertical .card-back { width:var(--backh); height:var(--backw); }
-  .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:-10px; }
+  .hand-backs.vertical .card-back:not(:first-child) { margin-left:0; margin-top:calc(var(--backw) * -.52); }
 
   /* tricks taken, stacked in front of the seat that took them */
   .pile { display:flex; flex-wrap:wrap; gap:4px; justify-content:center; width:58px; max-width:110px; }
@@ -155,7 +165,11 @@
   /* --cardw/--cardh, not width/height: .card sizes its own box *and* its corner
      index off those two (font-size is calc(var(--cardw) * .2)), so overriding the
      box alone printed a hand-sized index on a 40px trick card. */
-  .trick-card { --tx:0px; --ty:0px; --tr:0deg; --ts:1; --cardw:var(--trickw); --cardh:var(--trickh);
+  /* .card.trick-card, not .trick-card: `.card { position:relative }` is declared
+     further down this file at the same specificity, so it won, every played card
+     stayed in flow, and the four of them came out as a staircase down the middle
+     of the felt instead of a cross around it. */
+  .card.trick-card { --tx:0px; --ty:0px; --tr:0deg; --ts:1; --cardw:var(--trickw); --cardh:var(--trickh);
     position:absolute; left:0; top:0;
     margin-left:calc(var(--trickw) / -2); margin-top:calc(var(--trickh) / -2);
     transform:translate(var(--tx),var(--ty)) rotate(var(--tr)) scale(var(--ts));
@@ -163,10 +177,13 @@
     animation:fly .42s var(--e) backwards; }
   @keyframes fly { from { opacity:0;
     transform:translate(calc(var(--tx) * .85),calc(var(--ty) * .85 + var(--fy0,0px))) rotate(calc(var(--tr) - 14deg)) scale(.6); } }
-  .trick-card.pos-0 { --ty:var(--reach-y);            --tr:3deg;  --fy0:70px; }
-  .trick-card.pos-1 { --tx:calc(-1 * var(--reach-x)); --ty:6px; --tr:-7deg; }
-  .trick-card.pos-2 { --ty:calc(-1 * var(--reach-y)); --tr:-2deg; }
-  .trick-card.pos-3 { --tx:var(--reach-x);            --ty:6px; --tr:6deg; }
+  /* Mirrored, not merely opposite: the four offsets pair up across both axes and
+     so do the four tilts, because a trick that is off-centre by 6px on two of
+     its four cards reads as a mistake rather than as a hand-dealt table. */
+  .trick-card.pos-0 { --ty:var(--reach-y);            --tr:4deg;  --fy0:70px; }
+  .trick-card.pos-1 { --tx:calc(-1 * var(--reach-x)); --tr:-6deg; }
+  .trick-card.pos-2 { --ty:calc(-1 * var(--reach-y)); --tr:-4deg; }
+  .trick-card.pos-3 { --tx:var(--reach-x);            --tr:6deg; }
   .trick-card.winner { --ts:1.12; z-index:5; transition:transform .3s var(--e); }
   .trick-card.winner .face { outline:2px solid var(--ok); outline-offset:2px; }
   /* the whole trick slides to the seat that took it, then the pile grows by one */
@@ -188,24 +205,14 @@
    corner index is HTML, not SVG text, so it takes the interface's lining
    figures and scales off the card's own font-size. */
   .card { position:relative; width:var(--cardw); height:var(--cardh); border-radius:8px; padding:0; border:none; background:none;
-    color:var(--cink); user-select:none; font-size:calc(var(--cardw) * .2); display:block; perspective:900px; }
+    color:var(--cink); user-select:none; font-size:calc(var(--cardw) * .2); display:block; }
   .card.red { color:var(--cred); }
   button.card { font:inherit; font-size:calc(var(--cardw) * .2); -webkit-appearance:none; }
-  .card .face, .card .back { position:absolute; inset:0; border-radius:8px; overflow:hidden;
-    transition:transform .24s var(--e); backface-visibility:hidden; }
-  .card .face { background:var(--stockbg); border:1px solid var(--cardline);
+  /* One face and no second side: your own hand arrives face-up, and the cards
+     other people hold are .card-back, a different element entirely. */
+  .card .face { position:absolute; inset:0; border-radius:8px; overflow:hidden;
+    background:var(--stockbg); border:1px solid var(--cardline);
     box-shadow:0 12px 26px -14px var(--shadow); }
-  .card .back { transform:scaleX(0);
-    background:
-      repeating-linear-gradient(45deg,rgba(0,0,0,.24) 0 2px,transparent 2px 6px),
-      repeating-linear-gradient(-45deg,rgba(0,0,0,.24) 0 2px,transparent 2px 6px),
-      linear-gradient(160deg,var(--acc2),var(--felt2));
-    border:1px solid var(--acc2); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.14),0 12px 26px -14px var(--shadow); }
-  /* face-down: the back opens as the face closes, so one card turns rather than
-     two cards cross-fading */
-  .card.down .face { transform:scaleX(0); transition-delay:0s; }
-  .card.down .back { transform:scaleX(1); transition-delay:.22s; }
-  .card:not(.down) .face { transition-delay:.22s; } .card:not(.down) .back { transition-delay:0s; }
   .card > svg, .card .face > svg { position:absolute; inset:0; display:block; width:100%; height:100%; }
   .card .idx { position:absolute; display:flex; flex-direction:column; align-items:center; line-height:.82;
     color:currentColor; font-weight:700; }
@@ -220,25 +227,40 @@
   body.fourcolor .card.s-d, body.fourcolor .mini-card.s-d { color:var(--dia-4c); }
   body.fourcolor .card.s-c, body.fourcolor .mini-card.s-c { color:var(--club-4c); }
 
-  /* the two cards worth naming at a glance: trump, and the 3 that carries 30 */
-  .card.trumpcard .face { border-color:var(--acc2); box-shadow:inset 0 4px 0 var(--acc2),0 12px 28px -12px var(--glow); }
-  .card.bonuscard .face { border-color:var(--acc); box-shadow:inset 0 4px 0 var(--acc),0 12px 28px -12px var(--glow); }
-  .card .tag { position:absolute; top:-8px; left:50%; transform:translateX(-50%); z-index:2;
-    font-family:var(--fm); font-size:8.5px; font-weight:500; letter-spacing:.11em; padding:2.5px 6px; border-radius:var(--r-xs);
-    background:var(--acc2); color:var(--on-acc); white-space:nowrap; box-shadow:0 4px 10px -4px var(--shadow); }
-  .card .tag.bonus { background:var(--acc); }
+  /* ---- the two cards worth naming at a glance ----
+     Trump and the 3 that carries 30 are *lit*, not labelled: a printed flag and
+     a coloured edge are both things a real card does not have, and thirteen
+     cards can't all wear one. The bloom is doubled — outward, which is what
+     reads across the felt, and inset, which is the only half that survives the
+     fan, since the next card in the hand paints over its neighbour's outside
+     edge. Brass is trump; the 30 takes the felt's green (see tokens.css). */
+  /* The halo hangs on .card and the tint on .face, which is not a detail: an
+     unplayable card greyscales its face, and a mark that lived there went grey
+     with it — you would lose sight of your own trumps on somebody else's turn. */
+  .card.trumpcard { box-shadow:0 0 20px 1px var(--trump-glow); }
+  .card.bonuscard { box-shadow:0 0 20px 1px var(--bonus-glow); }
+  .card.trumpcard .face { box-shadow:inset 0 0 20px -5px var(--trump-glow),0 12px 26px -14px var(--shadow); }
+  .card.bonuscard .face { box-shadow:inset 0 0 20px -5px var(--bonus-glow),0 12px 26px -14px var(--shadow); }
 
-  /* the 44px call-partner card and the rail thumbnails: a full pip layout is
-     illegible at that size, so it gets the index and one centred pip — which is
-     what a real card shows through a fanned hand anyway */
-  .mini-card { position:relative; flex:none; width:var(--minw); height:var(--minh); border-radius:5px; padding:0; overflow:hidden;
+  /* The call-partner card and the rail thumbnails. Same printing as the hand —
+     see cards/deck.js — at a fraction of the size, with one corner index rather
+     than two. That index is the one part that cannot scale off the viewBox, so
+     the card is its own query container and the index is sized in cqw: the rail
+     thumbnails are flex-sized (no --minw to do arithmetic on) and would
+     otherwise print an 11px index on a 42px card and a 42px one. The px
+     font-size stays as the fallback where cqw is not understood. */
+  .mini-card { container-type:inline-size;
+    position:relative; flex:none; width:var(--minw); height:var(--minh); border-radius:5px; padding:0; overflow:hidden;
     background:var(--stockbg); border:1px solid var(--cardline); color:var(--cink); cursor:pointer;
     font-size:11px; transition:transform .14s var(--e); }
   .mini-card.red { color:var(--cred); }
   .mini-card.static { cursor:default; }
   .mini-card > svg { position:absolute; inset:0; display:block; width:100%; height:100%; }
-  .mini-card .idx { position:absolute; top:2px; left:3px; line-height:1; font-weight:700; color:currentColor; }
-  .mini-card.bonus { outline:2px solid var(--acc); outline-offset:1px; }
+  .mini-card .idx { position:absolute; top:.16em; left:.24em; font-size:23cqw; line-height:.82; font-weight:700;
+    display:flex; flex-direction:column; align-items:center; color:currentColor; }
+  .mini-card .idx .su { width:.62em; height:.62em; margin-top:.12em; }
+  /* the 30-pointer, marked the way it is marked in the hand */
+  .mini-card.bonus { box-shadow:0 0 13px 1px var(--bonus-glow),inset 0 0 14px -3px var(--bonus-glow); }
   .mini-card.win { outline:1.5px solid var(--acc); outline-offset:1px; }
   .mini-card.dim { opacity:.45; }
 
@@ -302,15 +324,6 @@
   #action-bar[data-turn="you"] { color:var(--acc); }
   #action-bar .prompt b { color:var(--txt); font-weight:700; }
 
-  #hand-tools { display:flex; align-items:center; justify-content:flex-end; gap:7px; min-height:32px; margin-bottom:6px;
-    visibility:hidden; }
-  #hand-tools.show { visibility:visible; }
-  #hand-tools button { display:grid; place-items:center; width:32px; height:32px; min-height:32px; padding:0;
-    border-radius:var(--r-sm); border:1px solid var(--line2); background:none; color:var(--txt3);
-    transition:border-color .16s,color .16s; }
-  #hand-tools button.on { border-color:var(--acc); color:var(--acc); }
-  #hand-tools button .ic { width:16px; height:16px; }
-
   /* padding-bottom clears the fan, not just the card box: rotation about an
      origin below the card swings the outer bottom corners past the unrotated
      edge, and transforms contribute nothing to layout. */
@@ -333,7 +346,6 @@
   /* a visible seam between suits — a sorted hand arrives grouped by suit */
   #my-hand .card.suit-start:not(:first-child) { margin-left:calc(var(--ml,var(--ml-base)) + var(--seam)); }
   #my-hand .card.playable { --lift:-9px; cursor:pointer; }
-  #my-hand .card.down { cursor:pointer; }
   #my-hand .card.playable:focus-visible { --lift:-26px; z-index:10; }
   #my-hand .card.playable:active { --lift:-15px; }
   /* An unplayable card must still be a *card*: darken it, never make it
@@ -341,9 +353,17 @@
      the hand looked like it had failed to load. */
   #my-hand .card.illegal .face { filter:grayscale(1) contrast(.4) brightness(.9); }
   #my-hand .card.illegal { cursor:not-allowed; }
-  /* the playable set reads at a glance instead of by elimination — but only when
-     there is actually a choice being constrained */
-  #my-hand .card.legal-hint .face { outline:2px solid var(--acc); outline-offset:3px; }
+  /* The playable set reads at a glance instead of by elimination — but only when
+     there is actually a choice being constrained. The lamp falls on the cards
+     you may play: no ring around them, just the light. An outline drew a second
+     rectangle a few pixels outside every card and turned a fanned hand into a
+     row of boxes. */
+  #my-hand .card.legal-hint { box-shadow:0 0 20px 0 rgba(255,250,238,.42); }
+  #my-hand .card.legal-hint .face { filter:brightness(1.07); }
+  /* One halo per card, so a playable trump is a brighter trump rather than a
+     white glow over a brass one. */
+  #my-hand .card.legal-hint.trumpcard { box-shadow:0 0 24px 2px var(--trump-glow); }
+  #my-hand .card.legal-hint.bonuscard { box-shadow:0 0 24px 2px var(--bonus-glow); }
   #hand-hint { display:flex; justify-content:center; align-items:flex-start; min-height:15px; margin-top:10px;
     font-size:var(--t-sm); line-height:1.25; color:var(--txt3); text-align:center; visibility:hidden; }
   #hand-hint.show { visibility:visible; }

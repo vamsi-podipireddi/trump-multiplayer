@@ -27,6 +27,11 @@
     --glow:rgba(230,192,122,.24); --shadow:rgba(0,0,0,.76);
     /* the bidding side */
     --teamtint:rgba(230,192,122,.13); --teambd:rgba(230,192,122,.6);
+    /* The two cards worth naming in a hand are lit rather than labelled, and the
+       lamp cannot name both — so trump keeps the brass and the 3 that carries 30
+       takes the felt's own green. Both are already in the room; a third hue
+       invented for one card would be the only foreign colour on screen. */
+    --trump-glow:rgba(230,192,122,.62); --bonus-glow:rgba(92,201,143,.62);
     /* type */
     --txt:#f4f2ec; --txt2:rgba(244,242,236,.64); --txt3:rgba(244,242,236,.37);
     /* the felt */
@@ -106,3 +111,22 @@
   @keyframes sheen   { from { transform:translateX(-130%) skewX(-18deg); } to { transform:translateX(260%) skewX(-18deg); } }
   @keyframes floatUp { 0% { opacity:0; transform:translate(-50%,10px) scale(.6); } 15% { opacity:1; transform:translate(-50%,-6px) scale(1.15); }
                        100% { opacity:0; transform:translate(-50%,-70px) scale(1); } }
+  /* ---- the landing's ambient loop ----
+     Four looping frames, and the only ones in the app that never end. They move
+     `translate`/`rotate`/`scale` — the individual properties, not `transform` —
+     so each composes with whatever `transform` the element already carries: the
+     hero cards keep the inline rotate() that fans them, and the lamp keeps its
+     own centring. responsive.css hides the whole layer under reduced motion;
+     the blanket .01ms rule up there is stillness for a one-shot but a strobe
+     for these. */
+  @keyframes lampBreathe { from { opacity:.6; scale:.94; } to { opacity:1; scale:1.06; } }
+  @keyframes fxDeal  { 0% { opacity:0; translate:-50% -50%; rotate:0deg; scale:.32; }
+                       14%,68% { opacity:var(--o,.18); }
+                       100% { opacity:0; translate:calc(-50% + var(--dx,0px)) calc(-50% + var(--dy,0px));
+                              rotate:var(--r,0deg); scale:var(--s,1); } }
+  @keyframes fxRise  { 0% { opacity:0; translate:0 0; rotate:0deg; }
+                       12%,84% { opacity:var(--o,.1); }
+                       100% { opacity:0; translate:var(--dx,20px) -118vh; rotate:var(--r,140deg); } }
+  @keyframes heroFloat { from { translate:0 0; rotate:0deg; } to { translate:0 -9px; rotate:1.1deg; } }
+  @keyframes fanSheen { 0%,58% { opacity:0; translate:-130% 0; } 63% { opacity:1; }
+                        84%,100% { opacity:0; translate:130% 0; } }

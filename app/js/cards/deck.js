@@ -60,13 +60,20 @@ function courtFigure(rank) {
   );
 }
 
-/* `compact` is the call-partner card and the rail thumbnails: a full pip layout
-   is illegible at 34px, so it gets the index and one centred pip — which is what
-   a real card shows through a fanned hand anyway. */
+/* `compact` is the call-partner card and the rail thumbnails. The *printing* is
+   the same at every size: a thumbnail that shows one centred pip is a different
+   card from the one in your hand, and the rail exists to be read against the
+   hand — "the 8 I played" has to look like an eight. Only the index differs,
+   because two corner indices collide with the pips on a 40px card. */
 function cardFace(card, compact) {
   const s = card.suit, r = esc(rankLabel(card.rank));   // a wire rank now prints as HTML, not SVG <text>
   let body;
-  if (compact) body = suitPath(s, 126, 220, 112);
+  /* The one exception, and the reason `compact` still exists: a court is a
+     framed panel and two half figures, which at 40px is a solid black rectangle
+     — the rank it is hiding is already in the corner, so the thumbnail shows the
+     suit instead. Every pip card keeps its own count, which is the thing a
+     thumbnail is read for ("the eight I played"). */
+  if (compact && card.rank >= 11 && card.rank <= 13) body = suitPath(s, 120, 176, 116);
   else if (card.rank >= 11 && card.rank <= 13) {
     body = `<rect class="cfr" x="42" y="40" width="156" height="256" rx="9"/>` +
            `<g>${courtFigure(card.rank)}</g>` +
@@ -84,10 +91,9 @@ function cardFace(card, compact) {
      lining figures and its size from the card's own font-size, which is what
      lets one string print the 124px hero card and the 34px thumbnail. SVG text
      had to be re-measured for every card size instead. */
-  const idx = r + suitSvg(s);
+  const idx = `<span class="idx tl">${r}${suitSvg(s)}</span>`;
   return `<svg viewBox="0 0 240 336" fill="currentColor" aria-hidden="true">${body}</svg>` +
-         (compact ? `<span class="idx">${r}</span>`
-                  : `<span class="idx tl">${idx}</span><span class="idx br">${idx}</span>`);
+         idx + (compact ? "" : idx.replace("idx tl", "idx br"));
 }
 
 /* `asButton` gives keyboard users a real focusable control instead of a clickable div. */
@@ -95,9 +101,10 @@ function cardEl(card, asButton) {
   const el = document.createElement(asButton ? "button" : "div");
   if (asButton) el.type = "button";
   el.className = "card " + suitClass(card.suit);
-  /* Both sides always exist and `.card.down` picks which is showing, so turning
-     a card over is one object rotating rather than two cards cross-fading. */
-  el.innerHTML = `<span class="face">${cardFace(card)}</span><span class="back"></span>`;
+  /* The printing is a child rather than the element itself: the element is the
+     object that tilts, lifts and glows, and .face is the surface those marks
+     are applied to without touching the transform that fans the hand. */
+  el.innerHTML = `<span class="face">${cardFace(card)}</span>`;
   if (!asButton) el.setAttribute("aria-hidden", "true"); // table furniture; the log narrates play
   return el;
 }
@@ -109,8 +116,8 @@ function miniCardEl(card, asButton) {
   if (asButton) el.type = "button";
   el.className = "mini-card " + suitClass(card.suit) + (asButton ? "" : " static");
   el.innerHTML = cardFace(card, true);
-  // a compact index carries no suit, so it would read as a bare "A"; the row it
-  // sits in names the card in words
+  // the row it sits in names the card in words; two readings of the same card
+  // is one too many
   if (!asButton) el.setAttribute("aria-hidden", "true");
   return el;
 }

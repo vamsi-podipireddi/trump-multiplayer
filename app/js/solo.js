@@ -27,11 +27,12 @@ import { cardEl } from "./cards/deck.js";
 import { paintIcons } from "./cards/icons.js";
 import { renderTable, resetTable } from "./ui/table.js";
 import { renderContract, renderScoreboard, renderTricks } from "./ui/rails.js";
-import { renderHand, initHandTools, resetHandFor } from "./ui/hand.js";
+import { renderHand, resetHandFor } from "./ui/hand.js";
 import { renderActionBar, resetActionBar, phaseLabel } from "./ui/actionbar.js";
 import { renderLog } from "./ui/log.js";
 import { showMatchOver, showHelp, showRoundResult, maybeShowReveal, hideReveal, hideOverlay, setRenderHandler } from "./ui/modals.js";
 import { fitTable, initResize } from "./ui/layout.js";
+import { startAmbient } from "./ui/ambient.js";
 import { openSheet, closeSheet } from "./ui/chat.js";
 import { setFourColor, initPrefs } from "./util/prefs.js";
 import { initSound, toggleSound } from "./ui/sound.js";
@@ -264,13 +265,14 @@ function boot() {
   paintIcons(document);
   (function dressChrome() {
     const fan = $("brand-fan");
-    [{ suit: "♠", rank: 14 }, { suit: "♥", rank: 13 }, { suit: "♦", rank: 10 }].forEach((c, i) => {
+    [{ suit: "♠", rank: 14 }, { suit: "♥", rank: 13 }, { suit: "♣", rank: 12 }].forEach((c, i) => {
       const el = cardEl(c);
       el.style.transform = `rotate(${(i - 1) * 7}deg)`;
       el.style.animationDelay = (0.1 + i * 0.11).toFixed(2) + "s";
       fan.appendChild(el);
     });
     $("brand-colophon").innerHTML = `<i class="bar"></i><span>250 points · bid &amp; capture</span>`;
+    startAmbient($("join-fx"));
   })();
 
   $("btn-start").onclick = () => startSolo({ difficulty: $("sel-difficulty").value, targetDeals: Number($("sel-deals").value) });
@@ -281,7 +283,6 @@ function boot() {
   initSound();
   $("btn-colors").onclick = () => setFourColor(!document.body.classList.contains("fourcolor"));
   $("btn-sound").onclick = toggleSound;
-  initHandTools(() => { if (G) paint(); });
 
   document.querySelectorAll("#sheet-tabs button").forEach(b => { b.onclick = () => openSheet(b.dataset.tab); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });

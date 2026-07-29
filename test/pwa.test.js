@@ -264,6 +264,37 @@ test("iOS/iPad: dynamic viewport, safe areas, and touch-only pointers are handle
   assert.ok(/visualViewport/.test(CLIENT), "the on-screen keyboard must not cover the chat sheet");
 });
 
+/* The join screen's ambient layer (ui/ambient.js) is the app's only set of
+   animations that never end. The blanket reduced-motion rule flattens every
+   duration to .01ms, which is stillness for a one-shot and ~100k repeats a
+   second for a loop — so these have to be *removed* under that query, not
+   flattened, and this is the test that says so out loud. */
+test("the landing's looping animations are removed under reduced motion, not flattened", () => {
+  const rm = mediaBlock(CSS, "(prefers-reduced-motion:reduce)");
+  assert.ok(declared(rm, ".fx", "display").includes("none"),
+    "the ambient layer must be display:none under prefers-reduced-motion");
+  const hero = declared(rm, ".brand-fan .card, .brand-fan::after", "animation")
+    .concat(declared(rm, ".brand-fan .card", "animation"));
+  assert.ok(hero.some(v => /^none/.test(v)),
+    `the hero fan's loop must be switched off, not shortened (declares ${JSON.stringify(hero)})`);
+  // and the loops themselves must still exist outside the query, or the rule above guards nothing
+  const outside = splitMedia(CSS, "(prefers-reduced-motion:reduce)").outside;
+  for (const sel of [".fx-card", ".fx-mote", ".fx-lamp"])
+    assert.ok(declared(outside, sel, "animation").some(v => /infinite/.test(v)),
+      `${sel} declares no looping animation — the reduced-motion guard is vacuous`);
+});
+
+/* A seat row is a disc, a dot, a seat label, two pills and a button. The name is
+   the only flexible item, so with min-width:0 it lost every fight and printed
+   each player as one letter and an ellipsis inside a 383px panel. */
+test("a lobby seat row gives the player's name room to be a name", () => {
+  const [w] = declared(CSS, ".seatrow .who", "min-width");
+  assert.ok(w && w !== "0" && w !== "0px",
+    `the seat name needs a min-width floor or it shrinks to nothing (declares "${w}")`);
+  assert.ok(declared(CSS, ".seatrow", "flex-wrap").includes("wrap"),
+    "with a floor on the name the row must be able to wrap, or the button overflows the panel");
+});
+
 test("live regions are updated incrementally, not rebuilt", () => {
   /* A polite live region that is cleared and refilled counts every row as an
      insertion, so a screen reader re-reads the whole backlog on every state

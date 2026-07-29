@@ -10,7 +10,7 @@ import { registerServiceWorker } from "./pwa.js";
 import { showEmote, openSheet, closeSheet, initKeyboardHandling } from "./ui/chat.js";
 import { showHelp, setRenderHandler } from "./ui/modals.js";
 import { startTicking, initResize } from "./ui/layout.js";
-import { initHandTools } from "./ui/hand.js";
+import { startAmbient } from "./ui/ambient.js";
 import { initSound, toggleSound } from "./ui/sound.js";
 import { doJoin, doSolo, loadStats, showNotice } from "./screens/join.js";
 import { render, posOfSeat } from "./screens/game.js";
@@ -74,7 +74,7 @@ function boot() {
   paintIcons(document);
   (function dressChrome() {
     const fan = $("brand-fan");
-    [{ suit:"♠", rank:14 }, { suit:"♥", rank:13 }, { suit:"♦", rank:10 }].forEach((c, i) => {
+    [{ suit:"♠", rank:14 }, { suit:"♥", rank:13 }, { suit:"♣", rank:12 }].forEach((c, i) => {
       const el = cardEl(c);
       el.style.transform = `rotate(${(i - 1) * 7}deg)`;
       el.style.animationDelay = (0.1 + i * 0.11).toFixed(2) + "s";
@@ -88,15 +88,13 @@ function boot() {
     const syncFace = () => paintAvatar(face, nameField.value.trim(), false);
     nameField.addEventListener("input", syncFace);
     syncFace();
+    startAmbient($("join-fx"));
   })();
 
   initPrefs();
   initSound();
   $("btn-colors").onclick = () => setFourColor(!document.body.classList.contains("fourcolor"));
   $("btn-sound").onclick = toggleSound;
-  /* The flip and sort toggles change nothing on the server, so they repaint
-     locally rather than waiting for a state message that will never come. */
-  initHandTools(render);
 
   document.querySelectorAll("#sheet-tabs button").forEach(b => { b.onclick = () => openSheet(b.dataset.tab); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });

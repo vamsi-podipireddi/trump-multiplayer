@@ -1,4 +1,13 @@
 @media (prefers-reduced-motion:reduce) { * { animation-duration:.01ms !important; transition-duration:.01ms !important; } }
+/* The blanket rule above is stillness for a one-shot and a strobe for a loop:
+   the landing's ambient animations (see ui/ambient.js) never end, so at .01ms
+   they would repeat ~100k times a second. They are removed, not flattened —
+   and with them the parallax that reads the pointer. */
+@media (prefers-reduced-motion:reduce) {
+    .fx { display:none; }
+    .brand-fan { translate:none !important; }
+    .brand-fan .card, .brand-fan::after { animation:none !important; }
+  }
 
 /* ---- hover, and only where hover exists ----
    On iOS the state sticks after a tap, so every lift and every colour change
@@ -17,7 +26,6 @@
     .mini-card:not(.static):hover { transform:translateY(-4px); }
     .emote-btn:hover { color:var(--acc); border-color:var(--acc); }
     #chat-send:hover { color:var(--acc); border-color:var(--acc); }
-    #hand-tools button:hover { border-color:var(--acc); color:var(--acc); }
     #sheet-tabs button:hover { color:var(--txt2); }
   }
   /* the one lift that has to be named explicitly: the hand card */
@@ -35,7 +43,9 @@
     #rail-right.open { transform:translateY(0); }
     #rail-right > .panel-section { display:none; }
     #rail-right[data-tab="log"] #sec-log { display:flex; flex:1; border-bottom:none; }
-    #rail-right[data-tab="chat"] #chat-section { display:flex; flex:1; }
+    /* one section per sheet, so it takes the whole sheet: the desktop rail's
+       share-of-the-column cap has nothing left to divide with */
+    #rail-right[data-tab="chat"] #chat-section { display:flex; flex:1; max-height:none; }
     #chat-log { max-height:none; }
     #bottom { padding-bottom:calc(52px + env(safe-area-inset-bottom)); }
   }
@@ -66,8 +76,10 @@
     header .wide { display:none; } header button { padding:8px 9px; }
     .hdr-actions { gap:6px; }
 
-    :root { --cardw:60px; --cardh:84px; --minw:30px; --minh:42px;
-      --pilew:11px; --pileh:15px; --backw:13px; --backh:19px; }
+    /* --backw/--backh/--pilew/--pileh are not here: ui/layout.js measures those
+       off the felt on every resize, so a breakpoint copy of them would only ever
+       be the value in force for the first frame. */
+    :root { --cardw:60px; --cardh:84px; --minw:30px; --minh:42px; }
     #felt { inset:10px 10px 12px; border-radius:26px; }
     #felt-inner { inset:20px 20px 22px; border-radius:15px; }
     #flash { inset:10px 10px 12px; border-radius:26px; }
@@ -82,9 +94,15 @@
     .seat.west .nameplate, .seat.east .nameplate { flex-wrap:wrap; justify-content:center; }
     .seat .who { min-width:0; overflow:hidden; text-overflow:ellipsis; }
     .med-main { font-size:40px; } .med-sub { max-width:150px; }
-    .brand-fan { height:150px; } .brand-fan .card { --cardw:98px; --cardh:138px; margin-left:-22px; }
+    .brand-fan { height:166px; margin-bottom:24px; } .brand-fan .card { --cardw:106px; --cardh:149px; margin-left:-23px; }
     .join-grid { padding:26px 18px 34px; padding-top:calc(26px + env(safe-area-inset-top)); gap:30px; }
+    .join-forms .panel { padding:19px; }
+    .join-forms .panel h2 { font-size:var(--t-2xl); }
     .lede { font-size:var(--t-lg); }
+    /* the deal thins out rather than stopping: seven blurred 84px cards on a
+       phone GPU is the one part of the ambient layer that costs anything */
+    .fx-card:nth-child(n+4) { display:none; }
+    .fx-mote:nth-child(even) { display:none; }
     .lobby-grid { padding:26px 18px 34px; padding-top:calc(26px + env(safe-area-inset-top)); }
 
     #contract-strip { display:flex; }
@@ -94,7 +112,6 @@
     .act-btn { padding:10px 14px; font-size:var(--t-md); min-height:44px; }
     .bidval { font-size:22px; min-width:56px; }
     #my-hand { --ml-base:-24px; --seam:8px; padding-bottom:10px; }
-    #hand-tools button { width:44px; height:44px; min-height:44px; }
     .modal { padding:20px; }
 
     body.in-game #sheet-tabs { display:grid; grid-template-columns:1fr 1fr 1fr; }
@@ -129,10 +146,6 @@
        number and the bar carry it alone here. */
     #contract-strip { padding:5px 11px; }
     #contract-strip .mini-card { display:none; }
-    /* Out of flow, tucked beside the prompt (which is centred and rarely reaches
-       the right edge): a 48px row of two buttons is the difference between a felt
-       you can read four seats on and one you cannot. The 44px targets survive. */
-    #hand-tools { position:absolute; right:10px; top:2px; min-height:0; margin:0; z-index:15; }
   }
 
 /* Any touch device: controls stay thumb-sized regardless of width. iPad
@@ -144,7 +157,6 @@
     .btn { min-height:48px; }
     .emote-btn { min-width:44px; min-height:44px; }
     #chat-input, #chat-send { min-height:44px; }
-    #hand-tools button { width:44px; height:44px; min-height:44px; }
     .act-btn { min-height:46px; }
   }
 

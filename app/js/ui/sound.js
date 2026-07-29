@@ -14,7 +14,6 @@ let enabled = null;   // null until the stored pref is read — module load must
    the numbers (and only the numbers) live here. */
 const KIT = {
   deal:   (tone, air)        => air(0, .085, 2900, 780, .085, 1.1),
-  flip:   (tone, air)        => { air(0, .07, 3600, 1300, .07, 1.35); tone(880, .008, .002, .05, .022, "triangle"); },
   play:   (tone, air)        => { air(0, .085, 2100, 460, .13, 1.6); tone(165, .006, .002, .075, .05, "triangle"); },
   sweep:  (tone, air)        => air(0, .42, 1600, 240, .1, .8),
   big:    (tone, air)        => { air(0, .11, 2500, 300, .16, 1.4); tone(110, .012, .003, .3, .065, "triangle"); },

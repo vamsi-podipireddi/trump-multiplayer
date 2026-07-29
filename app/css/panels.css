@@ -5,18 +5,32 @@
     background:radial-gradient(120% 80% at 50% -20%,var(--panel2) 0%,var(--bg) 62%); }
   .screen.show { display:flex; }
 
-  .join-grid { margin:auto; width:100%; max-width:1180px; display:grid; gap:64px; align-items:center;
-    grid-template-columns:1.05fr .95fr;
-    padding:48px 40px 56px;
-    padding-top:calc(48px + env(safe-area-inset-top)); padding-bottom:calc(56px + env(safe-area-inset-bottom)); }
+  /* position/z-index: the whole grid rides above the ambient layer below, which
+     is a fixed sibling filling the same screen */
+  .join-grid { position:relative; z-index:1; margin:auto; width:100%; max-width:1320px; display:grid; gap:68px;
+    align-items:center; grid-template-columns:1fr 1fr;
+    padding:56px 44px 64px;
+    padding-top:calc(56px + env(safe-area-inset-top)); padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
   .join-hero { animation:rise .6s var(--e) both; }
-  .join-forms { display:flex; flex-direction:column; gap:14px; animation:rise .6s var(--e) .12s both; }
+  .join-forms { display:flex; flex-direction:column; gap:18px; animation:rise .6s var(--e) .12s both; }
 
-  /* the hero is the deck itself — the most characteristic object this game owns */
-  .brand-fan { display:flex; align-items:flex-end; height:190px; margin-bottom:26px; }
-  .brand-fan .card { --cardw:124px; --cardh:174px; margin-left:-26px; transform-origin:50% 100%;
-    animation:fanIn .8s var(--e) backwards; }
+  /* the hero is the deck itself — the most characteristic object this game owns.
+     Once it has landed it keeps breathing: heroFloat moves `translate`/`rotate`,
+     the individual properties, so it composes with the inline transform:rotate()
+     that main.js fans the three cards out with instead of replacing it. */
+  .brand-fan { position:relative; display:flex; align-items:flex-end; height:216px; margin-bottom:30px;
+    translate:calc(var(--px,0) * -9px) calc(var(--py,0) * -6px); transition:translate .45s var(--e); }
+  .brand-fan .card { --cardw:138px; --cardh:194px; margin-left:-28px; transform-origin:50% 100%;
+    animation:fanIn .8s var(--e) backwards, heroFloat 7.4s var(--e) infinite alternate; }
   .brand-fan .card:first-child { margin-left:0; }
+  /* three durations, one per card: main.js's inline animation-delay lands all
+     three within .22s of each other, so equal periods would breathe in unison */
+  .brand-fan .card:nth-child(2) { animation-duration:.8s,8.6s; }
+  .brand-fan .card:nth-child(3) { animation-duration:.8s,9.8s; }
+  /* one pass of the lamp across the fan, on the deal's own cycle */
+  .brand-fan::after { content:""; position:absolute; inset:-5% -10%; pointer-events:none; opacity:0;
+    background:linear-gradient(102deg,transparent 40%,rgba(255,255,255,.13) 50%,transparent 60%);
+    animation:fanSheen 9s var(--e) 1.6s infinite; }
   .screen h1 { margin:0; font-family:var(--fd); font-weight:400; font-size:clamp(48px,9vw,86px); line-height:.92;
     letter-spacing:.06em; color:var(--txt); }
   .colophon { display:flex; align-items:center; gap:10px; margin:14px 0 20px; }
@@ -30,38 +44,86 @@
   .panel h2 { margin:0 0 8px; font-family:var(--fd); font-weight:400; font-size:var(--t-2xl); letter-spacing:.01em; color:var(--txt); }
   .panel > .lbl { display:block; margin-bottom:10px; }
   .panel .muted { margin:0 0 16px; }
-  .join-cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  /* minmax(0,1fr), not 1fr: a bare 1fr floors each column at its own min-content,
+     and "With friends" has a code field and a button on one row — so it took
+     ~90px off "Play solo" and the two doors into the game were different sizes */
+  .join-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
   .join-cards .panel { display:flex; flex-direction:column; }
   /* bottom-align the two cards' final row, but take the slack after the copy */
   .join-cards .panel .muted { flex:1; }
-  .join-meta { display:flex; gap:20px; flex-wrap:wrap; padding:2px 4px; font-family:var(--fm); font-size:var(--t-xs);
-    letter-spacing:.06em; color:var(--txt3); }
+  /* ---- the join screen's own weight ----
+     The lobby's panels are a list of seats and settings and want to stay tight;
+     these three are the whole page, and at the lobby's 18px they read as a
+     control strip parked beside the wordmark rather than as the two doors into
+     the game. Scoped to .join-forms so the lobby keeps its own scale. */
+  .join-forms .panel { padding:24px; border-radius:var(--r-xl); }
+  .join-forms .panel h2 { margin:0 0 10px; font-size:var(--t-3xl); }
+  .join-forms .panel .muted { font-size:var(--t-md); margin:0 0 22px; }
+  .join-forms .btn { min-height:52px; font-size:var(--t-lg); }
 
-  .name-row { display:flex; align-items:center; gap:12px; }
-  .name-row input { flex:1; min-width:0; }
+  .name-row { display:flex; align-items:center; gap:14px; }
+  .name-row input { flex:1; min-width:0; padding:14px 16px; min-height:52px; }
   .field { display:flex; flex-direction:column; gap:7px; margin-bottom:14px; }
   .field label { font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.2em; text-transform:uppercase; color:var(--txt3); }
   /* min-width:0 on both: a flex item's automatic minimum is its content, and an
      <input>'s is ~20 characters — so the code field refused to shrink and shoved
      the Join button out through the side of the panel. */
-  .row { display:flex; gap:8px; min-width:0; margin-top:10px; }
-  .row > input { flex:1; min-width:0; font-family:var(--fm); font-size:var(--t-md); letter-spacing:.16em; text-transform:uppercase; padding:11px 12px; }
-  .row > .btn { width:auto; flex:none; padding:11px 15px; min-height:44px; font-size:var(--t-md); }
+  .row { display:flex; gap:10px; min-width:0; margin-top:12px; }
+  .row > input { flex:1; min-width:0; font-family:var(--fm); font-size:var(--t-md); letter-spacing:.16em; text-transform:uppercase; padding:13px 14px; min-height:50px; }
+  .row > .btn { width:auto; flex:none; padding:11px 20px; min-height:50px; font-size:var(--t-md); }
   #join-code { text-transform:uppercase; }
-  .chk { display:flex; align-items:center; gap:10px; font-size:var(--t-sm); color:var(--txt2); margin:12px 0 0; cursor:pointer; min-height:40px; }
+  /* the placeholder says ENTER CODE, which at .16em is wider than the box's
+     automatic minimum — without this the button gets pushed out of the panel */
+  #join-code::placeholder { letter-spacing:.1em; }
+  .chk { display:flex; align-items:center; gap:12px; font-size:var(--t-sm); color:var(--txt2); margin:14px 0 0; cursor:pointer; min-height:40px; }
   .chk input { width:17px; height:17px; flex:none; accent-color:var(--acc); }
   #join-record { text-align:center; font-size:var(--t-sm); color:var(--txt3); }
   #join-record b { color:var(--acc); font-weight:700; }
 
   /* ---- identity: a name is the one thing you bring, so it gets a face. The
-     disc takes a hue from the name itself, so the same person is the same
-     colour to everyone in the room. ---- */
+     disc takes a hue and an emblem from the name itself (util/dom.js, and FACES
+     in cards/icons.js), so the same person is the same colour and the same mark
+     to everyone in the room. ---- */
   .avatar { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:50%; flex:none;
     background:oklch(.72 .13 var(--h,42)); color:var(--on-acc); font-size:var(--t-md); font-weight:700; overflow:hidden; }
-  .avatar .ic { width:17px; height:17px; opacity:.9; }
+  .avatar .ic { width:19px; height:19px; opacity:.92; }
   .avatar.ai { background:oklch(.62 .05 var(--h,240)); }
-  .avatar.lg { width:46px; height:46px; font-size:var(--t-xl); }
-  .avatar.lg .ic { width:22px; height:22px; }
+  .avatar.ai .ic { width:17px; height:17px; }
+  .avatar.lg { width:54px; height:54px; font-size:var(--t-xl); }
+  .avatar.lg .ic { width:29px; height:29px; }
+
+/* ---- the landing's cinematic ----
+   Built by ui/ambient.js into the empty aria-hidden element each shell reserves
+   for it; see that file for the choreography and why none of it is random. The
+   layer is fixed rather than absolute because .screen is a scroll container: an
+   absolute child would scroll the lamp off the top of a short viewport. It is
+   inert (pointer-events:none, aria-hidden) and contained, so nothing in here can
+   lay out, paint over, or be tabbed into from the panels above it.
+   responsive.css hides the whole thing under prefers-reduced-motion. */
+  .fx { position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden; contain:strict; }
+  .fx > * { position:absolute; display:block; }
+  /* the lamp, and the felt it hangs over — just out of frame at the bottom */
+  .fx-lamp { left:50%; top:-30vh; width:min(1180px,132vw); height:84vh; translate:-50% 0;
+    background:radial-gradient(50% 50% at 50% 50%,rgba(230,192,122,.2) 0%,rgba(230,192,122,.05) 44%,transparent 72%);
+    transform:translate(calc(var(--px,0) * 14px),calc(var(--py,0) * 9px)); transition:transform .5s var(--e);
+    animation:lampBreathe 11s var(--e) infinite alternate; }
+  .fx-felt { left:50%; bottom:-32vh; width:min(1500px,160vw); height:66vh; translate:-50% 0;
+    background:radial-gradient(50% 50% at 50% 50%,rgba(15,112,69,.2) 0%,rgba(15,112,69,.05) 46%,transparent 72%);
+    animation:lampBreathe 13s var(--e) 1.5s infinite alternate; }
+  /* the deal: card backs crossing the room and off the edges of it */
+  .fx-deal { inset:0; transform:translate(calc(var(--px,0) * -18px),calc(var(--py,0) * -11px)); transition:transform .5s var(--e); }
+  .fx-card { position:absolute; left:50%; top:47%; width:84px; height:118px; border-radius:7px; opacity:0;
+    background:
+      repeating-linear-gradient(45deg,rgba(0,0,0,.26) 0 2px,transparent 2px 6px),
+      repeating-linear-gradient(-45deg,rgba(0,0,0,.26) 0 2px,transparent 2px 6px),
+      linear-gradient(160deg,var(--acc2),var(--felt2));
+    border:1px solid var(--acc2); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.12),0 24px 50px -20px #000;
+    filter:blur(.7px);
+    animation:fxDeal var(--dur,10s) var(--e) var(--d,0s) infinite; }
+  /* suit pips drifting up through the light — the deck's own drawn paths */
+  .fx-mote { left:var(--x,50%); bottom:-10vh; width:var(--sz,14px); height:var(--sz,14px); color:var(--acc); opacity:0;
+    animation:fxRise var(--dur,28s) linear var(--d,0s) infinite; }
+  .fx-mote svg { display:block; width:100%; height:100%; fill:currentColor; }
 
 /* ---- lobby ---- */
   .lobby-grid { margin:auto; width:100%; max-width:880px; display:grid; gap:14px; align-items:start;
@@ -81,10 +143,16 @@
   .ticket-actions { display:flex; gap:8px; flex-wrap:wrap; }
   .ticket-actions .btn { width:auto; padding:9px 14px; min-height:40px; font-size:var(--t-sm); }
   .seatlist { padding:8px; display:flex; flex-direction:column; gap:4px; }
-  .seatrow { display:flex; align-items:center; gap:12px; padding:11px 12px; border-radius:var(--r-md);
+  .seatrow { display:flex; align-items:center; gap:10px; padding:11px 12px; border-radius:var(--r-md);
     border:1px solid transparent; flex-wrap:wrap; }
   .seatrow.you { border-color:var(--line2); }
-  .seatrow .who { flex:1; min-width:0; font-size:var(--t-md); font-weight:600; overflow:hidden; text-overflow:ellipsis; }
+  /* min-width:0 let the name lose every fight: a seat row is a disc, a dot, a
+     seat label, two pills and a button, which together overflow the 383px panel
+     — so the one flexible item shrank to ~10px and printed every player as a
+     single letter and an ellipsis. A floor of 7ch instead makes the row overflow
+     for real, which is what flex-wrap is there for: the trailing button drops to
+     a second line and the name stays a name. */
+  .seatrow .who { flex:1 1 auto; min-width:7ch; font-size:var(--t-md); font-weight:600; overflow:hidden; text-overflow:ellipsis; }
   .seatrow .tag { font-family:var(--fm); font-size:var(--t-xs); color:var(--txt3); letter-spacing:.08em; }
   .seatrow .spacer { margin-left:auto; }
   .seatrow .dot { width:7px; height:7px; border-radius:50%; background:var(--txt3); flex:none; }
@@ -107,8 +175,15 @@
   #rail-right { grid-column:3/4; border-left:1px solid var(--line); overflow:hidden; }
   #rail-left .panel-section { flex:none; background:var(--panel); border:1px solid var(--line); border-radius:15px; padding:15px; }
   #rail-right .panel-section { display:flex; flex-direction:column; min-height:0; }
-  #rail-right #sec-log { flex:1.4 1 auto; border-bottom:1px solid var(--line); min-height:60px; }
-  #rail-right #chat-section { flex:1 1 auto; }
+  /* flex-basis 0, not auto. Both sections used to be sized from their content and
+     then shrunk in proportion to it — so a table log of 60 entries claimed most
+     of the rail, chat was squeezed to a fraction of its own height, and the send
+     button was clipped off the bottom of the column by #rail-right's overflow.
+     The log takes whatever is left over and scrolls inside itself instead. */
+  #rail-right #sec-log { flex:1 1 0; border-bottom:1px solid var(--line); min-height:74px; }
+  /* Chat keeps its natural height — a header, the messages, the reactions and the
+     form — and gives ground only down to that floor, never past the form. */
+  #rail-right #chat-section { flex:0 0 auto; max-height:58%; }
   .panel-section h2 { margin:0 0 11px; display:flex; align-items:baseline; justify-content:space-between; gap:8px;
     font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.22em; text-transform:uppercase; color:var(--txt3); font-weight:400; }
   #rail-right .panel-section h2 { flex:none; padding:13px 15px 9px; margin:0; }
@@ -128,7 +203,7 @@
   .contract-foot span:first-child { color:var(--txt2); } .contract-foot span:last-child { color:var(--txt3); }
   .contract-card { display:none; gap:9px; align-items:center; margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
   .contract-card.show { display:flex; }
-  .contract-card .mini-card { --minw:38px; --minh:53px; border-radius:6px; font-size:9px; }
+  .contract-card .mini-card { --minw:44px; --minh:62px; border-radius:6px; font-size:10px; }
   .contract-card .sub { font-size:var(--t-sm); color:var(--txt2); margin-top:3px; line-height:1.4; }
   .contract-card .sub.live { color:var(--acc); }
 
@@ -162,8 +237,11 @@
   .trickrow { display:flex; align-items:center; gap:7px; animation:logIn .3s var(--e) both; }
   .trickrow .no { font-family:var(--fm); font-size:9.5px; color:var(--txt3); width:13px; flex:none; text-align:right; }
   .trickrow .cards { display:flex; gap:4px; flex:1; min-width:0; }
+  /* Sized by the row, not by --minw: the rail is 284px on a desktop, 268px in
+     the middle band and the full width of a sheet on a phone, and four cards
+     that fill whatever that is stay four cards. Their indices ride the card's
+     own container query — see .mini-card in table.css. */
   .trickrow .cards .mini-card { --minw:auto; --minh:auto; flex:1; width:auto; height:auto; aspect-ratio:5/7; border-radius:4px; font-size:10px; }
-  .trickrow .cards .mini-card .idx { top:1.5px; left:3px; }
   .trickrow .pts { font-family:var(--fm); font-size:var(--t-xs); color:var(--txt3); width:26px; text-align:right; flex:none; }
   .trickrow .pts.fat { color:var(--acc); }
 
@@ -178,8 +256,11 @@
   #log .entry.bid { color:var(--txt2); }
   #log .entry.round { color:var(--acc); }
 
-/* ---- chat + emotes ---- */
-  #chat-log { flex:1; min-height:60px; max-height:168px; overflow-y:auto; padding:0 15px 8px;
+/* ---- chat + emotes ----
+   min-height:0, not 60px: the messages are the one part of the column that may
+   give way, and a floor here is a floor the emote bar and the form get pushed
+   out through. They are flex:none; this is what shrinks. */
+  #chat-log { flex:1 1 auto; min-height:0; max-height:168px; overflow-y:auto; padding:0 15px 8px;
     display:flex; flex-direction:column; gap:7px; }
   #chat-log .msg { flex:none; align-self:flex-start; max-width:88%; padding:7px 11px; border-radius:12px;
     background:var(--panel2); color:var(--txt2); font-size:var(--t-sm); line-height:1.45; word-break:break-word; }

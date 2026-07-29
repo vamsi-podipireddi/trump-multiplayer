@@ -22,6 +22,8 @@
 
 <!-- Start screen: difficulty + match length, chosen once before startSolo() runs -->
 <div id="start-screen" class="screen show">
+  <!-- same room as index.html's join screen; filled by ui/ambient.js -->
+  <div class="fx" id="join-fx" aria-hidden="true"></div>
   <div class="join-grid">
     <div class="join-hero">
       <div class="brand-fan" id="brand-fan" aria-hidden="true"></div>
@@ -49,7 +51,6 @@
         </div>
         <button class="btn" id="btn-start">Deal me in</button>
       </div>
-      <div class="join-meta"><span>NO SIGNUP</span><span>WORKS OFFLINE</span><span>THREE BOTS</span></div>
     </div>
   </div>
 </div>
@@ -125,10 +126,6 @@
     <div id="hand-block">
       <div id="action-tray"><div class="tray"><div id="action-buttons"></div><div id="call-grid"></div></div></div>
       <div id="action-bar"></div>
-      <div id="hand-tools">
-        <button type="button" id="btn-flip" data-ic="flip" aria-label="Turn over all face-down cards" title="Turn over all face-down cards"></button>
-        <button type="button" id="btn-sort" data-ic="sort" aria-pressed="false" aria-label="Arrange hand by suit and rank" title="Arrange by suit and rank"></button>
-      </div>
       <div id="my-hand"></div>
       <div id="hand-hint"></div>
     </div>

@@ -21,14 +21,39 @@ function fitTable() {
   const compact = innerWidth < 900;
   const shortFelt = tblH < 300;
 
-  const trkW = Math.round(Math.max(40, Math.min(compact ? 60 : 84, Math.min(tblW * 0.19, tblH * (shortFelt ? 0.19 : 0.25)))));
+  /* A card on the felt is sized against the card in your hand — responsive.css
+     moves --cardw per breakpoint and per pointer, and a second copy of those
+     numbers here is how the two drift apart — then capped by the slab itself,
+     so a 380px felt and a 1600px one both look like the same table. */
+  const cardW = parseFloat(getComputedStyle(t).getPropertyValue("--cardw")) || 92;
+  const trkW = Math.round(Math.max(40, Math.min(cardW * 1.05, tblW * 0.16, tblH * (shortFelt ? 0.24 : 0.28))));
   const trkH = Math.round(trkW * 1.4);
-  /* The subtrahends are the room the seats themselves take: a nameplate plus its
-     pile is ~230px wide on a desktop and ~88px on a phone, and ~74px tall. What
-     is left after that is how far a played card may reach from centre. */
-  const reachX = Math.max(44, Math.min(compact ? 78 : 134, tblW / 2 - trkW / 2 - (compact ? 88 : 230)));
-  const reachY = Math.max(24, Math.min(compact ? 62 : 104, tblH / 2 - trkH / 2 - (shortFelt ? 60 : compact ? 54 : 74)));
+
+  /* ---- the trick, as a symmetric cross ----
+     Four cards on one circle about the middle of the felt, at the radius that
+     puts each one's corner just over its neighbour's: the reach is a property
+     of the *card*, not of the felt, or the same trick reads as a tight cross on
+     one window and four scattered cards on the next. Because a card is taller
+     than it is wide these two numbers differ, and that difference is the whole
+     point — measured in pixels the ring is very nearly round.
+
+     The felt only ever *takes room away*: each axis is the ideal or what fits,
+     whichever is smaller. Scaling both by one factor instead would keep the
+     shape perfect and collapse the whole trick into a 50px pile on a landscape
+     phone, where the width was never the problem. The subtrahends are the room
+     the seats themselves take — a nameplate plus its pile is ~230px wide on a
+     desktop and ~88px on a phone, and ~74px tall. */
+  const roomX = tblW / 2 - trkW / 2 - (compact ? 88 : 230);
+  const roomY = tblH / 2 - trkH / 2 - (shortFelt ? 56 : compact ? 54 : 74);
+  const reachX = Math.max(26, Math.round(Math.min(trkW * 0.92, roomX)));
+  const reachY = Math.max(20, Math.round(Math.min(trkH * 0.68, roomY)));
   const seatScale = Math.max(0.7, Math.min(compact ? 0.88 : 1, tblW / 470));
+
+  /* Somebody else's hand and the pile in front of them are the same object at
+     two removes, so both scale off the card on the felt rather than sitting at
+     a fixed px that looks right on exactly one screen. */
+  const backW = Math.max(9, Math.round(trkW * 0.22));
+  const pileW = Math.max(8, Math.round(trkW * 0.19));
 
   /* The tray is out of flow (it hangs off the top of #hand-block), so it takes no
      grid height and the felt does not know it is there — the south seat would sit
@@ -49,6 +74,10 @@ function fitTable() {
   t.style.setProperty("--reach-y", Math.round(reachY) + "px");
   t.style.setProperty("--seat-scale", seatScale.toFixed(2));
   t.style.setProperty("--tray-lift", trayLift + "px");
+  t.style.setProperty("--backw", backW + "px");
+  t.style.setProperty("--backh", Math.round(backW * 1.45) + "px");
+  t.style.setProperty("--pilew", pileW + "px");
+  t.style.setProperty("--pileh", Math.round(pileW * 1.4) + "px");
 
   const med = $("medallion");
   if (med) {

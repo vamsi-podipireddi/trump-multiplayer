@@ -1,7 +1,7 @@
 /* DOM helpers shared across the client: element lookup, HTML escaping, the
    toast, and the per-player avatar (a coloured disc whose hue comes from the
    name itself, so the same player reads as the same colour to everyone). */
-import { icon } from "../cards/icons.js";
+import { icon, faceIcon } from "../cards/icons.js";
 
 const $ = id => document.getElementById(id);
 
@@ -12,8 +12,9 @@ let toastT = null;
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove("show"), 2200); }
 
 /* ---------- who you are at this table ----------
-   A name is the one thing you bring, so it gets a face. The hue comes from the
-   name itself, so the same player is the same colour on everyone's screen. */
+   A name is the one thing you bring, so it gets a face: an emblem from
+   cards/icons.js FACES and a hue, both folded out of the name itself, so the
+   same player is the same face and the same colour on everyone's screen. */
 function nameHue(name) {
   const s = String(name || "").trim();
   /* An empty field is not a player yet, and hue 0 — which is what the fold below
@@ -27,12 +28,13 @@ function nameHue(name) {
 function paintAvatar(el, name, isAI) {
   el.className = "avatar" + (isAI ? " ai" : "") + (el.classList.contains("lg") ? " lg" : "");
   if (isAI) { el.innerHTML = icon("bot"); el.style.removeProperty("--h"); return; }
-  const initial = (String(name || "").trim()[0] || "").toUpperCase();
   el.style.setProperty("--h", nameHue(name));
-  el.textContent = initial || "·";
+  el.innerHTML = faceIcon(name);
 }
+/* No esc() on the name any more: neither the hue nor the face key reaches the
+   markup — one is a number, the other picks a path out of a fixed table. */
 const avatarHtml = (name, isAI) => isAI
   ? `<span class="avatar ai">${icon("bot")}</span>`
-  : `<span class="avatar" style="--h:${nameHue(name)}">${esc((String(name || "").trim()[0] || "·").toUpperCase())}</span>`;
+  : `<span class="avatar" style="--h:${nameHue(name)}">${faceIcon(name)}</span>`;
 
 export { $, esc, toast, nameHue, paintAvatar, avatarHtml };

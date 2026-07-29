@@ -24,11 +24,55 @@ const ICONS = {
      a cross and the button does not jump when you press it */
   sound: '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6M18.4 6.4a8 8 0 0 1 0 11.2"/>',
   mute:  '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="m16 9.6 5.4 4.8M21.4 9.6 16 14.4"/>',
-  flip:  '<path d="M4 8.5 12 4l8 4.5"/><path d="M20 8.5v7L12 20l-8-4.5v-7"/>',
-  sort:  '<path d="M4 6h11"/><path d="M4 12h7"/><path d="M4 18h4"/><path d="M17 10v9"/><path d="M14 16l3 3 3-3"/>',
 };
 function icon(name, cls) {
   const d = ICONS[name]; if (!d) return "";
+  return `<svg class="ic ${cls || ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ` +
+         `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+}
+
+/* ---------- the faces ----------
+   A player used to be the first letter of their name, which is not a face: half a
+   table reads "A · A · A", and a letter carries nothing you can recognise across
+   the felt at 28px. These are emblems instead — the kind of mark that gets printed
+   on a chip — drawn on the same 24-unit grid and the same single stroke weight as
+   the icons above, so a seat is one silhouette rather than a character in a font.
+
+   Which one you get is derived from the name, not chosen: nothing about an avatar
+   travels over the wire (the room sends names, and only names), so deriving it is
+   the only way the same player wears the same face on every screen at the table.
+   Twelve marks against 360 hues — the pair is what identifies you, and the hue is
+   folded from a different multiplier so the two don't move together. */
+const FACES = {
+  chip:      '<circle cx="12" cy="12" r="8.4"/><circle cx="12" cy="12" r="3.9"/><path d="M12 3.6v2.6M12 17.8v2.6M3.6 12h2.6M17.8 12h2.6"/>',
+  crown:     '<path d="M4.5 17.4 3.3 7.6l5.1 3.5L12 5l3.6 6.1 5.1-3.5-1.2 9.8Z"/><path d="M5.2 20.2h13.6"/>',
+  dice:      '<rect x="3.7" y="3.7" width="16.6" height="16.6" rx="4.2"/><circle cx="8.2" cy="8.2" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.8" cy="8.2" r="1.15" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.2" cy="15.8" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.8" cy="15.8" r="1.15" fill="currentColor" stroke="none"/>',
+  /* two concentric arcs, not one stroke and two nail heads: at 19px the heads
+     merged into the ends and the whole mark read as a plain arch */
+  horseshoe: '<path d="M7.4 20.4c-1.9-2.1-2.9-4.5-2.9-7.2a7.5 7.5 0 0 1 15 0c0 2.7-1 5.1-2.9 7.2"/><path d="M9.9 19.9c-1.4-1.7-2.1-3.6-2.1-5.7a4.2 4.2 0 0 1 8.4 0c0 2.1-.7 4-2.1 5.7"/>',
+  anchor:    '<circle cx="12" cy="4.8" r="2.3"/><path d="M12 7.1v13.5M7.8 10.4h8.4"/><path d="M5.2 14.2a6.8 6.8 0 0 0 13.6 0"/>',
+  compass:   '<circle cx="12" cy="12" r="8.4"/><path d="m15.5 8.5-2.2 5-5 2.2 2.2-5Z"/>',
+  /* the inner ring is what keeps this a key: a bow with no hole and short teeth
+     reads as a magnifying glass at avatar size */
+  key:       '<circle cx="8.8" cy="8.8" r="4.4"/><circle cx="8.8" cy="8.8" r="1.35"/><path d="m11.9 11.9 7.3 7.3M15.1 15.1l-2.7 2.7M17.5 17.5l-2.7 2.7"/>',
+  bolt:      '<path d="M13.4 2.8 5.2 13.6h6.2l-.8 7.6 8.2-10.8h-6.2Z"/>',
+  flame:     '<path d="M12 21.2a6.5 6.5 0 0 0 6.5-6.5c0-4.7-4.3-6.5-4.3-10.8 0 0-3.3 2-3.3 5.7 0 1.6-1 2.5-1.8 1.8-.8-.6-.8-2.3-.8-2.3-1.7 2-3.1 3.9-3.1 6.3a6.5 6.5 0 0 0 6.5 6.5Z"/>',
+  moon:      '<path d="M20 13.6A8.3 8.3 0 1 1 10.4 4a6.5 6.5 0 0 0 9.6 9.6Z"/><path d="M6 3.6v2.4M4.8 4.8h2.4"/>',
+  cat:       '<path d="M4.6 10.2 4.2 4.4l4.7 3.1a8.6 8.6 0 0 1 6.2 0l4.7-3.1-.4 5.8a7.7 7.7 0 1 1-14.8 0Z"/><circle cx="9.3" cy="12.4" r="1.05" fill="currentColor" stroke="none"/><circle cx="14.7" cy="12.4" r="1.05" fill="currentColor" stroke="none"/><path d="M10.7 16.2c.8.7 1.8.7 2.6 0"/>',
+  owl:       '<path d="M4.6 11.2a7.4 7.4 0 0 1 14.8 0v2.2a7.4 7.4 0 0 1-14.8 0Z"/><circle cx="9.2" cy="11" r="2.1"/><circle cx="14.8" cy="11" r="2.1"/><path d="m10.9 14.4 1.1 1.6 1.1-1.6"/><path d="M5.4 6.6 7.2 3.8M18.6 6.6 16.8 3.8"/>',
+};
+const FACE_KEYS = Object.keys(FACES);
+/* An empty field is not a player yet, so it gets the blank token — the same
+   reason nameHue() hands an empty name the brass the interface is lit in. */
+function faceKey(name) {
+  const s = String(name || "").trim();
+  if (!s) return "chip";
+  let h = 0;
+  for (const ch of s) h = (h * 131 + ch.codePointAt(0)) % 100003;
+  return FACE_KEYS[h % FACE_KEYS.length];
+}
+function faceIcon(name, cls) {
+  const d = FACES[faceKey(name)];
   return `<svg class="ic ${cls || ""}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" ` +
          `stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
 }
@@ -56,4 +100,4 @@ function paintIcons(root) {
   });
 }
 
-export { ICONS, REACTIONS, icon, reactionIcon, reactionName, paintIcons };
+export { ICONS, REACTIONS, FACES, icon, faceKey, faceIcon, reactionIcon, reactionName, paintIcons };

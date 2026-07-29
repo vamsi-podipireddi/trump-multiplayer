@@ -71,6 +71,10 @@ for ♥/♦).
 ### `app/js/cards/deck.js`
 ```js
 cardFace(card, compact)   // inner HTML: <svg viewBox="0 0 240 336">…</svg> + .idx spans
+                         // superseded: `compact` no longer flattens a card to one centred pip.
+                         // Every rank prints its own layout at every size (courts excepted —
+                         // two half figures are an ink blot at 40px); compact only drops the
+                         // second corner index. See .mini-card's container query in table.css.
 cardEl(card, asButton)    // <div|button class="card s-x [red]"><span class="face">…</span><span class="back"></span></div>
 miniCardEl(card, asButton)// <div|button class="mini-card s-x [red]"> + cardFace(card,true)
 cardBackEl()              // <i class="card-back">
@@ -171,8 +175,16 @@ renderContract(v, o) · renderScoreboard(v, o) · renderTricks(v, o)
   each with four `miniCardEl(card)` (the winning card gets `.win`).
 
 ### `app/js/ui/hand.js`
+
+> **Superseded (2026-07-29, follow-up pass).** The face-down ritual, the sort/flip toggles and the
+> printed `.tag` marks were all removed after review: the hand now arrives face-up and arranged,
+> `#hand-tools` is gone from both shells, and trump / the 30-point 3 are marked by a bloom
+> (`--trump-glow` / `--bonus-glow` in `tokens.css`) rather than by a label and a coloured edge.
+> The rest of this section — the fan, the deal-in, `fitHand`, the focus-preserving rebuild —
+> still holds. Read `app/js/ui/hand.js` for what ships.
+
 ```js
-renderHand(view, onPlay) · fitHand(wrap) · initHandTools(onChange) · resetHandFor(roundNumber)
+renderHand(view, onPlay) · fitHand(wrap) · resetHandFor()
 ```
 * Module state: `faceUp` (a `Set` of `suit+rank`), `sorted` (persisted `trump_sort`), and the
   round number the `faceUp` set belongs to — a new deal clears it.

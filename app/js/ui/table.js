@@ -129,10 +129,11 @@ function renderSeats(v, o) {
     ava.classList.toggle("urgent", onClock && wasUrgent);
     if (onClock) { setRingEl(ava); if (seat === o.mySeat) myUrgent = wasUrgent; }
 
-    // tricks, not deals: deal-wins are pips in the scoreboard, where "first to N" reads
-    const tricks = v.tricksWon[seat];
+    /* Points, and only points: the contract is a points target, the pile of
+       slivers in front of the seat already counts its tricks, and a plate is
+       read across the felt at a glance rather than studied. */
     const meta = el.querySelector(".meta");
-    meta.textContent = `${v.capturedPoints[seat]} pts · ${tricks} ${tricks === 1 ? "trick" : "tricks"}`;
+    meta.textContent = `${v.capturedPoints[seat]} pts`;
     const zzz = info.away ? "on autopilot" : offline ? "offline" : "";
     if (zzz) {
       const z = document.createElement("span");

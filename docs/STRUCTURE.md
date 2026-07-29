@@ -23,8 +23,9 @@ reasoning behind these choices, see `docs/superpowers/specs/2026-07-27-project-s
 | `app/js/ui/table.js` | Seats, medallion, trick, piles, the trick-end beat |
 | `app/js/ui/rails.js` | Contract card, scoreboard, "tricks you won", phone contract strip |
 | `app/js/ui/sound.js` | Synthesised table cues (no audio assets) + the mute preference |
+| `app/js/ui/ambient.js` | The join/start screen's ambient loop — lamp, deal, suit motes, pointer parallax |
 | `app/js/ui/*` | Hand, action bar/tray, chat, log, modals, layout |
-| `app/js/cards/*` | SVG deck, icons, text labels |
+| `app/js/cards/*` | SVG deck, chrome icons, the avatar emblems (`FACES`), text labels |
 | `app/js/util/*` | DOM helpers, persisted preferences |
 | `app/js/main.js` | Bootstrap, first paint, `?room=` handling |
 | `app/js/solo.js` | Single-player controller over `core/engine` |

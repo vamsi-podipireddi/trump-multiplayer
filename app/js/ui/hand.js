@@ -1,14 +1,12 @@
 import { $ } from "../util/dom.js";
 import { SUIT_NAME, cardName } from "../cards/labels.js";
 import { cardEl } from "../cards/deck.js";
-import { getPref, setPref } from "../util/prefs.js";
 import { sfx } from "./sound.js";
 
-/* Sorted, the hand reads ♠ ♥ ♣ ♦, high to low, whatever order the wire used.
+/* The hand reads ♠ ♥ ♣ ♦, high to low, whatever order the wire used.
    Alternating the colours is what makes a fanned hand scannable, and a fixed
    order means your ace of hearts is in the same place every single deal —
-   the engine's habit of shuffling trump to the end moved it mid-hand. The
-   toggle exists because the other order is the one a real hand arrives in. */
+   the engine's habit of shuffling trump to the end moved it mid-hand. */
 const HAND_ORDER = { "♠":0, "♥":1, "♣":2, "♦":3 };
 
 /* The fly-in comes from the dealer's seat, by its position relative to you —
@@ -22,33 +20,15 @@ const DEAL_ROT = [-6, -26, 2, 26];
    then. The cap is the hand — no view may queue an unbounded pile of timers. */
 const DEAL_GAP = 46, DEAL_CUE_LEAD = 120, MAX_DEAL_CUES = 13;
 
-/* Which cards you have turned over, and the deal that answer belongs to:
-   a new deal puts the whole hand back face-down. Module-local rather than on
-   the view because the server neither knows nor cares which of your own cards
-   you have looked at. */
-const faceUp = new Set();
-let faceUpRound = null;
 let dealtRound = null;        // the deal whose fly-in has already played
-let sorted = null;            // resolved on first use: reading the pref touches localStorage
-let lastHand = [];            // the keys currently in the hand, so the tools can repaint alone
-let repaint = null;           // rebound per render — a card tap has no view of its own
 let dealCues = [];            // pending sound timers for the deal currently landing
 
-function isSorted() {
-  if (sorted === null) sorted = getPref("trump_sort", "1") !== "0";
-  return sorted;
-}
-
-/* A fresh deal: nothing is face-up, and the cards get thrown at you again.
-   Called with no argument (or null) when the *match* restarts, not just the
-   deal: solo's next match deals round 1 all over again, so a memo left on
-   round 1 would hand the new deal the old match's face-up cards and count its
-   fly-in as already played. A null memo can't match any round number, so the
-   next render is a fresh deal whatever it is numbered. */
-function resetHandFor(roundNumber = null) {
-  faceUp.clear();
+/* A fresh deal: the cards get thrown at you again. Called with no argument when
+   the *match* restarts, not just the deal — solo's next match deals round 1 all
+   over again, and a memo left on round 1 would count the new deal's fly-in as
+   already played. */
+function resetHandFor() {
   cancelDealCues();
-  faceUpRound = roundNumber;
   dealtRound = null;
 }
 
@@ -82,106 +62,76 @@ function dealOrigin(pos) {
 }
 
 /* Everything about one card that depends on state rather than on which card it
-   is. Split out of the build loop because a turn-over has to be applied to the
-   *existing* element: the flip is a CSS transition between .down and not, and a
-   replaced element has no previous state to transition from. */
+   is. Split out of the build loop so a change of turn repaints the existing
+   elements instead of replacing them — a replaced card has no previous state to
+   transition its lift and its glow from, and loses keyboard focus with it. */
 function paintCard(el, card, i, hand, ctx, onPlay) {
-  const n = hand.length, key = card.suit + card.rank;
-  const up = faceUp.has(key);
+  const key = card.suit + card.rank;
   const isTrump = !!ctx.trump && card.suit === ctx.trump;
   const isBonus = !!ctx.bonusSuit && card.suit === ctx.bonusSuit && card.rank === 3;
   const isLegal = ctx.legal.has(key);
-  const tappable = !up || (ctx.canPlay && isLegal);
 
-  el.classList.toggle("down", !up);
   el.classList.toggle("suit-start", i > 0 && hand[i - 1].suit !== card.suit); // seam between suits
-  /* Every mark that names the card waits for the card to be face-up — the gold
-     edge and the TRUMP flag are answers to the question a face-down card is
-     asking, and giving them away would make turning it over pointless. */
-  el.classList.toggle("trumpcard", up && isTrump);
-  el.classList.toggle("bonuscard", up && isBonus);
-  el.classList.toggle("playable", up && ctx.canPlay && isLegal);
-  el.classList.toggle("illegal", up && ctx.canPlay && !isLegal);
-  el.classList.toggle("legal-hint", up && ctx.constrained && isLegal);
+  /* The two cards worth naming are lit rather than labelled — table.css owns
+     both blooms; nothing here writes a word onto a card. */
+  el.classList.toggle("trumpcard", isTrump);
+  el.classList.toggle("bonuscard", isBonus);
+  el.classList.toggle("playable", ctx.canPlay && isLegal);
+  el.classList.toggle("illegal", ctx.canPlay && !isLegal);
+  el.classList.toggle("legal-hint", ctx.constrained && isLegal);
 
-  let label;
-  if (!up) {
-    label = `Turn over card ${i + 1} of ${n}`;
-    el.removeAttribute("title");
-    el.onclick = () => { faceUp.add(key); sfx("flip"); if (repaint) repaint(); };
-  } else {
-    const notes = [];
-    if (isTrump) notes.push("trump");
-    if (isBonus) notes.push("bonus 30");
-    label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
-    el.onclick = null;
-    el.removeAttribute("title");
-    if (ctx.canPlay && isLegal) {
-      label = "Play " + label;
-      el.onclick = () => onPlay(card);
-    } else if (ctx.canPlay) {
-      // grayscale says "not this one"; only the title says why
-      el.title = label = `${label} — you must follow ${SUIT_NAME[ctx.leadSuit] || ctx.leadSuit}`;
-    }
+  const notes = [];
+  if (isTrump) notes.push("trump");
+  if (isBonus) notes.push("bonus 30");
+  let label = cardName(card) + (notes.length ? ` (${notes.join(", ")})` : "");
+  el.onclick = null;
+  el.removeAttribute("title");
+  if (ctx.canPlay && isLegal) {
+    label = "Play " + label;
+    el.onclick = () => onPlay(card);
+  } else if (ctx.canPlay) {
+    // grayscale says "not this one"; only the title says why
+    el.title = label = `${label} — you must follow ${SUIT_NAME[ctx.leadSuit] || ctx.leadSuit}`;
   }
   el.setAttribute("aria-label", label);
   // still focusable when inert, so the hand can be read out on someone else's turn
-  el.setAttribute("aria-disabled", tappable ? "false" : "true");
+  el.setAttribute("aria-disabled", ctx.canPlay && isLegal ? "false" : "true");
   el.dataset.k = key;
-
-  /* One label for the whole trump run, on its middle card: thirteen cards each
-     shouting TRUMP is noise, and the gold edge already marks the rest. */
-  const text = !up ? "" : isBonus ? "+30" : i === ctx.trumpTagAt ? "TRUMP" : "";
-  let tag = el.querySelector(".tag");
-  if (text) {
-    if (!tag) { tag = document.createElement("span"); el.appendChild(tag); }
-    tag.className = "tag" + (isBonus ? " bonus" : "");
-    tag.textContent = text;
-  } else if (tag) tag.remove();
 }
 
 function renderHand(view, onPlay) {
   const wrap = $("my-hand");
   const you = view.you || {};
-  if (view.roundNumber !== faceUpRound) resetHandFor(view.roundNumber);
-  repaint = () => renderHand(view, onPlay);
 
-  const raw = (you.hand || []).slice();
-  const hand = isSorted()
-    ? raw.sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank))
-    : raw;
+  const hand = (you.hand || []).slice()
+    .sort((a, b) => (HAND_ORDER[a.suit] - HAND_ORDER[b.suit]) || (b.rank - a.rank));
   const n = hand.length;
-  lastHand = hand.map(c => c.suit + c.rank);
+  const keys = hand.map(c => c.suit + c.rank);
   const canPlay = !!you.toAct && you.actKind === "play";
   const legal = new Set((canPlay ? (you.legal || []) : []).map(x => x.suit + x.rank));
   /* The playable set is only worth highlighting when something is actually
      constraining it — outlining all thirteen teaches nothing. */
   const constrained = canPlay && legal.size < n;
-  const trumpRun = [];
-  hand.forEach((c, i) => {
-    if (view.trump && c.suit === view.trump && !(c.rank === 3 && c.suit === view.bonusSuit)) trumpRun.push(i);
-  });
   const ctx = { canPlay, legal, constrained, trump: view.trump, bonusSuit: view.bonusSuit,
-                leadSuit: view.leadSuit, trumpTagAt: trumpRun.length ? trumpRun[Math.floor(trumpRun.length / 2)] : -1 };
+                leadSuit: view.leadSuit };
 
   /* Rebuilding the hand blows away keyboard focus, and a state message arrives
      for every action at the table — including other people's chat. Skip the
      rebuild when nothing about the hand changed, and when it does change put
      focus back on the same card (or its position) instead of dropping the user
-     out to <body> mid-turn. Which cards are face-up is in the signature too, or
-     turning one over would not repaint at all. */
-  const struct = JSON.stringify([lastHand, canPlay, [...legal].sort(),
-                                 view.trump, view.bonusSuit, view.leadSuit, view.roundNumber]);
-  const sig = struct + "|" + lastHand.map(k => faceUp.has(k) ? 1 : 0).join("");
+     out to <body> mid-turn. */
+  const held = JSON.stringify(keys);
+  const sig = held + "|" + JSON.stringify([canPlay, [...legal].sort(),
+                                           view.trump, view.bonusSuit, view.leadSuit, view.roundNumber]);
   if (wrap._sig === sig) return;
-  const inPlace = wrap._struct === struct && wrap.children.length === n;
+  /* The same cards under a new turn: repaint them in place rather than replacing
+     them, so the lift and the glow have a previous state to transition from and
+     focus never leaves the card it is on. */
+  const inPlace = wrap._held === held && wrap.children.length === n;
   wrap._sig = sig;
-  wrap._struct = struct;
+  wrap._held = held;
   if (inPlace) {
-    // only the face-up set moved: repaint the existing elements so the turn-over
-    // has a previous state to transition from, and focus never leaves the card
     hand.forEach((card, i) => paintCard(wrap.children[i], card, i, hand, ctx, onPlay));
-    syncTools();
     return;
   }
 
@@ -216,7 +166,6 @@ function renderHand(view, onPlay) {
   });
   if (fresh) { dealtRound = view.roundNumber; scheduleDealCues(n); }
   fitHand(wrap);
-  syncTools();
 
   if (hadFocus && wrap.children.length) {
     let target = null;
@@ -257,47 +206,4 @@ function fitHand(wrap) {
   wrap.style.setProperty("--ml", ml.toFixed(2) + "px");
 }
 
-/* The two buttons above the hand. Their lit state is a function of the hand, so
-   it is repainted from renderHand as well as from the clicks themselves. */
-function syncTools() {
-  const tools = $("hand-tools");
-  if (!tools) return;
-  tools.classList.toggle("show", lastHand.length > 0);
-  const down = lastHand.filter(k => !faceUp.has(k)).length;
-  const flip = $("btn-flip"), sort = $("btn-sort");
-  if (flip) {
-    flip.classList.toggle("on", down > 0);
-    const t = down ? `Turn over all ${down} face-down card${down === 1 ? "" : "s"}` : "Turn every card face-down";
-    flip.setAttribute("aria-label", t);
-    flip.title = t;
-  }
-  if (sort) {
-    sort.classList.toggle("on", isSorted());
-    sort.setAttribute("aria-pressed", String(isSorted()));
-  }
-}
-
-/* Neither toggle means anything to the server, so both repaint locally through
-   onChange rather than waiting for a state message that will never arrive. */
-function initHandTools(onChange) {
-  const flip = $("btn-flip"), sort = $("btn-sort");
-  if (flip) flip.onclick = () => {
-    // one button, two jobs: turn the rest of the hand over, or — once it is all
-    // face-up — put it back down, which is the only way to get the ritual back
-    const anyDown = lastHand.some(k => !faceUp.has(k));
-    faceUp.clear();
-    if (anyDown) for (const k of lastHand) faceUp.add(k);
-    sfx("flip");
-    syncTools();
-    if (onChange) onChange();
-  };
-  if (sort) sort.onclick = () => {
-    sorted = !isSorted();
-    setPref("trump_sort", sorted ? "1" : "0");
-    syncTools();
-    if (onChange) onChange();
-  };
-  syncTools();
-}
-
-export { renderHand, fitHand, initHandTools, resetHandFor };
+export { renderHand, fitHand, resetHandFor };
