@@ -11,7 +11,7 @@
    module; leaves import each other directly (the barrel would be a cycle). */
 export { SUITS, RANKS, NUM_PLAYERS, MIN_BID, MAX_BID, BID_STEP,
          TOTAL_POINTS, TARGET_GAMES, MAX_REDEALS } from "./constants.js";
-export { randomInt } from "./random.js";
+export { randomInt, mulberry32 } from "./random.js";
 export { sameCard, cardStr, rankLabel } from "./cards.js";
 export { cardPoints, sideOf, defenders } from "./scoring.js";
 export { createMatch, startMatch, nextDeal, publicView } from "./match.js";

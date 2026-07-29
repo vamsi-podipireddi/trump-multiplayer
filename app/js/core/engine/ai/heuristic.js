@@ -24,9 +24,9 @@ function aiBidEstimate(G, p) {
   pts += 60;
   return { suit: best, points: pts };
 }
-function aiBidDecision(G, p, easy) {
+function aiBidDecision(G, p, easy, rnd = Math.random) {
   const est = aiBidEstimate(G, p);
-  const noisy = est.points + (easy ? -18 : 0) + (Math.random() * 16 - 8);
+  const noisy = est.points + (easy ? -18 : 0) + (rnd() * 16 - 8);
   const target = Math.round(noisy / BID_STEP) * BID_STEP;
   const need = minNextBid(G);
   return (need <= MAX_BID && target >= need) ? need : null;
@@ -50,7 +50,7 @@ function aiPickPartner(G, p) {
   for (const s of sideSuits) if (!have.has(s + 13)) return { suit: s, rank: 13 };
   return callableCards(G, p)[0];
 }
-function chooseAICard(G, p, easy) {
+function chooseAICard(G, p, easy, rnd = Math.random) {
   const legal = legalCards(G, p);
   if (legal.length === 1) return legal[0];
   const trump = G.trump, lead = G.leadSuit;
@@ -61,7 +61,7 @@ function chooseAICard(G, p, easy) {
   const dumpLow = () => lowestBy(legal, c => pts(c) * 1000 + (c.suit === trump ? 1000 : 0) + c.rank);
 
   if (G.trick.length === 0) {
-    if (easy) return legal[Math.floor(Math.random() * legal.length)];
+    if (easy) return legal[Math.floor(rnd() * legal.length)];
     const myTrumps = legal.filter(c => c.suit === trump);
     if (sideOf(G, p) === "D" && myTrumps.length >= 4) return highestBy(myTrumps, c => c.rank);
     const nonTrump = legal.filter(c => c.suit !== trump);
@@ -87,7 +87,7 @@ function chooseAICard(G, p, easy) {
     if (!allyWinning && sameSuitWins.length) return lowestBy(sameSuitWins, c => c.rank);
     const pool = allyWinning ? legal.filter(c => !beats(c, bestCard, lead, trump)) : legal;
     const pick = pool.length ? pool : legal;
-    return pick[Math.floor(Math.random() * pick.length)];
+    return pick[Math.floor(rnd() * pick.length)];
   }
 
   if (allyWinning) {

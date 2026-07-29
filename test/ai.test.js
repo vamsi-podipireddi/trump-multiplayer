@@ -2,8 +2,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as E from "../app/js/core/engine/index.js";
+import { mulberry32 } from "../app/js/core/engine/random.js";
 
 const key = c => c.suit + c.rank;
+
+/* Drive whichever actor is currently due, one action at a time, via
+   aiActionFor. Unlike gameAtPlay() below (which loops internally straight
+   through to "playing"), this takes a single step so a caller can halt on
+   any phase boundary — the seeded-search tests below stop as soon as play
+   begins, without caring how the auction went. */
+function stepAI(G) {
+  const ra = E.requiredActor(G);
+  const act = E.aiActionFor(G, ra.seat, "normal");
+  if (act.type === "bid") E.applyBid(G, ra.seat, act.value);
+  else if (act.type === "trump") E.applyTrump(G, act.suit);
+  else if (act.type === "call") E.applyCall(G, act.card);
+  else if (act.type === "play") E.applyPlay(G, ra.seat, act.card);
+}
 
 /* Drive a fresh match to the start of play with the heuristic AI. */
 function gameAtPlay() {
@@ -136,4 +151,34 @@ test("hard AI is not weaker than the heuristic (paired-deal comparison)", () => 
   // tolerance: paired but still stochastic — require "not clearly worse"
   assert.ok(pimcAvg >= heurAvg - 8,
     `PIMC declaring side averaged ${pimcAvg.toFixed(1)} vs heuristic ${heurAvg.toFixed(1)}`);
+});
+
+test("mulberry32 is deterministic and in range", () => {
+  const a = mulberry32(12345), b = mulberry32(12345);
+  const xs = Array.from({ length: 200 }, () => a());
+  const ys = Array.from({ length: 200 }, () => b());
+  assert.deepEqual(xs, ys, "same seed must produce the same stream");
+  for (const x of xs) assert.ok(x >= 0 && x < 1, `out of range: ${x}`);
+  assert.notDeepEqual(xs, Array.from({ length: 200 }, mulberry32(999)), "different seeds must differ");
+});
+
+test("a seeded search is reproducible on one position", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  while (G.phase !== "playing") stepAI(G);          // helper already in this file
+  const seat = G.turn;
+  const a = E.choosePIMCCard(G, seat, { rnd: mulberry32(7), determinizations: 8 });
+  const b = E.choosePIMCCard(G, seat, { rnd: mulberry32(7), determinizations: 8 });
+  assert.deepEqual(a, b, "same seed, same position, same card");
+});
+
+test("determinize honours a supplied rng and stays legal", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  while (G.phase !== "playing") stepAI(G);
+  const seat = G.turn;
+  // the barrel exports this as `_determinize` (app/js/core/engine/index.js:23)
+  const w1 = E._determinize(G, seat, mulberry32(3));
+  const w2 = E._determinize(G, seat, mulberry32(3));
+  assert.deepEqual(w1, w2, "seeded determinization must repeat");
+  for (const p of [0, 1, 2, 3]) if (p !== seat)
+    assert.equal(w1[p].length, G.hands[p].length, `seat ${p} got the wrong number of cards`);
 });

@@ -17,7 +17,7 @@ const cardKey = c => c.suit + c.rank;
 /* Deal the unseen cards to the other three seats, honoring hand counts,
    observed voids, and the called card's known holder. Falls back to
    ignoring voids if constrained sampling keeps failing (rare). */
-function determinize(G, me) {
+function determinize(G, me, rnd = Math.random) {
   const seen = new Set(G.hands[me].map(cardKey));
   for (const c of (G.playedCards || [])) seen.add(cardKey(c));
   const unseen = buildDeck().filter(c => !seen.has(cardKey(c)));
@@ -33,7 +33,7 @@ function determinize(G, me) {
     const allowedCount = (c) => others.reduce((n, p) => n + (useVoids && voids[p][c.suit] ? 0 : 1), 0);
     const need = {}; others.forEach(p => { need[p] = G.hands[p].length; });
     const out = {}; others.forEach(p => { out[p] = []; });
-    const pool = shuffleFast(unseen.slice()); // AI-internal sampling: no need for the CSPRNG
+    const pool = shuffleFast(unseen.slice(), rnd); // AI-internal sampling: no need for the CSPRNG
     let ok = true;
     if (forcedTo != null && need[forcedTo] > 0) {
       const i = pool.findIndex(c => sameCard(c, G.calledCard));
@@ -43,7 +43,7 @@ function determinize(G, me) {
     for (const c of pool) {
       const cand = others.filter(p => need[p] > 0 && !(useVoids && voids[p][c.suit]));
       if (!cand.length) { ok = false; break; }
-      const p = cand[Math.floor(Math.random() * cand.length)];
+      const p = cand[Math.floor(rnd() * cand.length)];
       out[p].push(c); need[p]--;
     }
     if (ok && others.every(p => need[p] === 0)) return out;
@@ -66,11 +66,11 @@ function rolloutClone(G) {
     targetGames: G.targetGames,
   };
 }
-function playOutRound(sim) {
+function playOutRound(sim, rnd = Math.random) {
   for (let guard = 0; guard < 300; guard++) {
     if (sim.phase === "trickEnd") { advanceTrick(sim); continue; }
     if (sim.phase !== "playing") return;
-    applyPlay(sim, sim.turn, chooseAICard(sim, sim.turn, false));
+    applyPlay(sim, sim.turn, chooseAICard(sim, sim.turn, false, rnd));
   }
 }
 
@@ -87,6 +87,7 @@ function choosePIMCCard(G, me, opts) {
   if (legal.length <= 1) return legal[0];
   const timeMs = (opts && opts.timeMs) || 25;
   const budget = (opts && opts.playBudget) || PIMC_PLAY_BUDGET;
+  const rnd = (opts && opts.rnd) || Math.random; // the coach seeds this to replay a search's numbers
   const cardsLeft = G.hands.reduce((n, h) => n + h.length, 0) || 1;
   const affordable = Math.max(1, Math.floor(budget / (legal.length * cardsLeft)));
   const maxDet = Math.min((opts && opts.determinizations) || 24, affordable);
@@ -96,13 +97,13 @@ function choosePIMCCard(G, me, opts) {
 
   for (let d = 0; d < maxDet; d++) {
     if (d >= 4 && Date.now() - started > timeMs) break; // secondary guard; a no-op on Workers
-    const world = determinize(G, me);
+    const world = determinize(G, me, rnd);
     if (!world) return chooseAICard(G, me, false);
     for (let i = 0; i < legal.length; i++) {
       const sim = rolloutClone(G);
       for (const p of [0, 1, 2, 3]) if (p !== me) sim.hands[p] = world[p].slice();
       applyPlay(sim, me, legal[i]);
-      playOutRound(sim);
+      playOutRound(sim, rnd);
       const dPts = sim.capturedPoints[sim.declarer] + sim.capturedPoints[sim.partner];
       const made = dPts >= sim.bid;
       const win = (iAmDeclaring === made) ? 1 : 0;
