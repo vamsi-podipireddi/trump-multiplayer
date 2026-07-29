@@ -2,6 +2,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as E from "../app/js/core/engine/index.js";
+/* Deliberate exception to "consumers import the barrel" (docs/STRUCTURE.md rule 1):
+   chooseAICard has no barrel export path (only aiActionFor does, and it never
+   forwards a seedable rnd for the "play" case — see ai/index.js), and at ~60
+   lines of live trick-following strategy it's exactly the kind of thing the
+   frozen oracle below must NOT duplicate. It is unmodified by this task, so
+   importing the live function is safe: only the oracle's own accumulator math
+   needs to be frozen, not everything it calls. */
+import { chooseAICard as legacyChooseAICard } from "../app/js/core/engine/ai/heuristic.js";
 
 const key = c => c.suit + c.rank;
 
@@ -215,4 +223,102 @@ test("choosePIMCCard still short-circuits a forced play", () => {
   const seat = G.turn;
   G.hands[seat] = [G.hands[seat][0]];                       // exactly one card
   assert.deepEqual(E.choosePIMCCard(G, seat), G.hands[seat][0]);
+});
+
+/* ============================================================
+   Frozen oracle — pre-refactor choosePIMCCard, for a one-time equivalence
+   proof against the post-refactor evaluateMoves/choosePIMCCard split.
+   Copied verbatim from commit 1dd30ad (Task 1's accepted rnd-threading
+   baseline — the correct "before" to diff against, since that threading is
+   not itself in question here). This is NOT a second implementation to
+   maintain: nobody should ever "fix" it to track pimc.js again. Its only
+   job is to run its own independent determinize+rollout+accumulate loop —
+   using the OLD fused `totals[i] += win*1000 + margin` accumulator instead
+   of evaluateMoves' split wins[]/pts[] — so that a bug inside evaluateMoves'
+   loop (swapped wins/pts, a flipped iAmDeclaring branch, a broken split-vs-
+   fused identity) would move only ONE side of the comparison and actually
+   get caught. (The existing "argmax of winProb*1000 + meanPoints" test above
+   cannot catch those: both its sides call evaluateMoves itself, so a bug
+   there moves both sides together and the test stays green regardless.)
+
+   rolloutClone/playOutRound are copied alongside it, byte-identical to
+   pimc.js's current versions (diffed against HEAD to confirm), because
+   pimc.js exports neither of them anywhere and adding exports solely to
+   serve this test isn't warranted for ~20 lines of object-shape plumbing
+   with no game-strategy logic in it — low risk to freeze. chooseAICard is
+   the one piece imported live rather than duplicated; see the import
+   comment above for why. */
+function legacyRolloutClone(G) {
+  return {
+    _silent: true,
+    phase: G.phase, trump: G.trump, bonusSuit: G.bonusSuit,
+    declarer: G.declarer, partner: G.partner, teamsRevealed: true, bid: G.bid,
+    calledCard: G.calledCard, dealer: G.dealer, roundNumber: G.roundNumber,
+    hands: G.hands.map(h => h.slice()),
+    trick: G.trick.map(t => ({ player: t.player, card: t.card })),
+    leadSuit: G.leadSuit, turn: G.turn, leader: G.leader, trickNumber: G.trickNumber,
+    tricksWon: G.tricksWon.slice(), capturedPoints: G.capturedPoints.slice(),
+    scores: G.scores.slice(), names: G.names, log: [],
+    lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot, lastResult: null,
+    targetGames: G.targetGames,
+  };
+}
+function legacyPlayOutRound(sim, rnd) {
+  for (let guard = 0; guard < 300; guard++) {
+    if (sim.phase === "trickEnd") { E.advanceTrick(sim); continue; }
+    if (sim.phase !== "playing") return;
+    E.applyPlay(sim, sim.turn, legacyChooseAICard(sim, sim.turn, false, rnd));
+  }
+}
+const LEGACY_PIMC_PLAY_BUDGET = 8000; // pimc.js's PIMC_PLAY_BUDGET at 1dd30ad — still 8000 today, unchanged by this task
+
+function legacyChoosePIMCCard(G, me, opts) {
+  const legal = E.legalCards(G, me);
+  if (legal.length <= 1) return legal[0];
+  const timeMs = (opts && opts.timeMs) || 25;
+  const budget = (opts && opts.playBudget) || LEGACY_PIMC_PLAY_BUDGET;
+  const rnd = (opts && opts.rnd) || Math.random;
+  const cardsLeft = G.hands.reduce((n, h) => n + h.length, 0) || 1;
+  const affordable = Math.max(1, Math.floor(budget / (legal.length * cardsLeft)));
+  const maxDet = Math.min((opts && opts.determinizations) || 24, affordable);
+  const started = Date.now();
+  const iAmDeclaring = E.sideOf(G, me) === "D";
+  const totals = legal.map(() => 0), counts = legal.map(() => 0);
+
+  for (let d = 0; d < maxDet; d++) {
+    if (d >= 4 && Date.now() - started > timeMs) break; // secondary guard; a no-op on Workers
+    const world = E._determinize(G, me, rnd);
+    if (!world) return legacyChooseAICard(G, me, false);
+    for (let i = 0; i < legal.length; i++) {
+      const sim = legacyRolloutClone(G);
+      for (const p of [0, 1, 2, 3]) if (p !== me) sim.hands[p] = world[p].slice();
+      E.applyPlay(sim, me, legal[i]);
+      legacyPlayOutRound(sim, rnd);
+      const dPts = sim.capturedPoints[sim.declarer] + sim.capturedPoints[sim.partner];
+      const made = dPts >= sim.bid;
+      const win = (iAmDeclaring === made) ? 1 : 0;
+      const margin = iAmDeclaring ? dPts : E.TOTAL_POINTS - dPts;
+      totals[i] += win * 1000 + margin; counts[i]++;
+    }
+  }
+  let best = 0, bestAvg = -Infinity;
+  for (let i = 0; i < legal.length; i++) {
+    if (!counts[i]) continue;
+    const avg = totals[i] / counts[i];
+    if (avg > bestAvg) { bestAvg = avg; best = i; }
+  }
+  return legal[best];
+}
+
+test("choosePIMCCard agrees with a frozen pre-refactor oracle (genuine equivalence, not read-back)", () => {
+  for (let trial = 0; trial < 12; trial++) {
+    const G = E.createMatch(); E.startMatch(G);
+    while (G.phase !== "playing") stepAI(G);
+    const seat = G.turn;
+    // each call gets its own freshly-seeded generator — sharing one instance
+    // would desynchronise the two streams and fail this for the wrong reason
+    const a = E.choosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial) });
+    const b = legacyChoosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial) });
+    assert.deepEqual(a, b, "refactored search must agree with the pre-refactor fused-accumulator oracle");
+  }
 });
