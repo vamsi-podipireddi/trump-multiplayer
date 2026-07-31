@@ -35,7 +35,7 @@ function shadowFromView(v) {
     names: v.names.slice(), scores: v.scores.slice(),
     targetGames: v.consts ? v.consts.TARGET_GAMES : 5,
     hands,
-    trick: v.trick.map(t => ({ player: t.player, card: { suit: t.card.suit, rank: t.card.rank } })),
+    trick: (v.trick || []).map(t => ({ player: t.player, card: { suit: t.card.suit, rank: t.card.rank } })),
     leadSuit: v.leadSuit, turn: v.turn, leader: v.leader,
     // publicView has no trickNumber field, but completed-tricks count is the same
     // fact: applyPlay/advanceTrick keep G.trickNumber === G.tricks.length in sync

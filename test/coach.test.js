@@ -83,3 +83,12 @@ test("a spectator view yields no position", () => {
   const { pid } = R.join(room, { name: "watcher" }, 0);
   assert.equal(shadowFromView(R.buildView(room, pid, 0)), null);
 });
+
+test("a seated player yields no position before the match starts", () => {
+  const room = R.createRoom("TEST");
+  const { pid } = R.join(room, { name: "P0" }, 0);
+  R.message(room, pid, { type: "sit", seat: 0 }, 0);
+  const v = R.buildView(room, pid, 0);
+  assert.equal(v.you.hand, undefined, "buildView only deals out a hand once room.started");
+  assert.equal(shadowFromView(v), null);
+});
