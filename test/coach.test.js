@@ -104,15 +104,30 @@ test("points live plus points captured is always 250", () => {
   });
 });
 
-test("the bonus three is reported exactly when it has fallen", () => {
+/* fallen tracks playedCards, which includes the trick still in flight; takenBy
+   names a trick's winner, which nothing can before that trick resolves. So
+   there is a real window — the bonus three led or sitting mid-trick, not yet
+   the trick's last card — where fallen is true and takenBy is honestly still
+   null. midTrickSamples pins that this window is actually exercised by the
+   drive, not just theoretically possible: a branch a property test never
+   reaches is a branch it never actually checked. */
+test("the bonus three is reported exactly when it has fallen, and taken only once its trick resolves", () => {
+  let midTrickSamples = 0;
   drive((room, pids) => {
     if (room.G.phase !== "playing") return;
     const v = R.buildView(room, pids[0], 0);
     const r = tableRead(v);
-    const fell = room.G.playedCards.some(c => c.rank === 3 && c.suit === room.G.bonusSuit);
-    assert.equal(r.bonus.fallen, fell, "bonus.fallen disagrees with the played cards");
-    if (fell) assert.ok(r.bonus.takenBy != null && r.bonus.takenBy >= 0, "a fallen bonus must name its taker");
+    const played = shadowFromView(v).playedCards.some(c => c.rank === 3 && c.suit === v.bonusSuit);
+    const settled = (v.tricks || []).some(t => t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit));
+    assert.equal(r.bonus.fallen, played, "bonus.fallen must track the played cards, in-flight trick included");
+    if (settled) {
+      assert.ok(r.bonus.takenBy != null && r.bonus.takenBy >= 0, "a settled bonus must name its taker");
+    } else {
+      assert.equal(r.bonus.takenBy, null, "nobody has taken the bonus until its trick resolves");
+      if (played) midTrickSamples++;
+    }
   });
+  assert.ok(midTrickSamples > 0, "expected the fallen-but-unresolved window to occur at least once in this run");
 });
 
 test("outstanding counts exclude my own hand and everything played", () => {

@@ -3,30 +3,19 @@
    unaccounted for. Pure derivation from public state, no search: every
    number here is something every seat at the table already watched
    happen, which is also why this is never gated behind the coach setting. */
-import { SUITS, RANKS, TOTAL_POINTS, winningIndex } from "../core/engine/index.js";
+import { SUITS, RANKS, TOTAL_POINTS } from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
 
 /* The 30 goes to whoever captured the trick the 3 fell in. The wire carries no
-   "bonus taken by", so the trick history is where that is written down. */
+   "bonus taken by", so the trick history is where that is written down.
+   Answers only once that trick has resolved: a bonus that has fallen but
+   whose trick is still in progress is a real, honest "nobody yet" — not
+   something to paper over with a guess at who is currently ahead in it. */
 function bonusTakenBy(v) {
   for (const t of v.tricks) {
     if (t.cards.some(p => p.card.rank === 3 && p.card.suit === v.bonusSuit)) return t.winner;
   }
   return null;
-}
-
-/* bonusTakenBy() only answers once the bonus three's trick has resolved, but a
-   card is "fallen" the instant it's played (playedCards, below) — so there is a
-   real window, mid-trick, where the bonus has fallen and no completed trick
-   holds it yet. Whoever is currently ahead in that unfinished trick is still an
-   honest public fact (every seat watched those cards land), even though a
-   later card in the same trick could still beat it. */
-function bonusHolder(v) {
-  const resolved = bonusTakenBy(v);
-  if (resolved != null) return resolved;
-  const trick = v.trick || [];
-  if (!trick.some(p => p.card.rank === 3 && p.card.suit === v.bonusSuit)) return null;
-  return trick[winningIndex(trick, v.leadSuit, v.trump)].player;
 }
 
 function tableRead(v) {
@@ -52,7 +41,7 @@ function tableRead(v) {
   }
 
   const fallen = playedCards.some(c => c.rank === 3 && c.suit === v.bonusSuit);
-  const bonus = { suit: v.bonusSuit, fallen, takenBy: fallen ? bonusHolder(v) : null };
+  const bonus = { suit: v.bonusSuit, fallen, takenBy: bonusTakenBy(v) };
 
   // reshaped from the shadow's per-seat suit->bool map; your own seat isn't a "known void", it's just your hand
   const voids = [0, 1, 2, 3]
