@@ -7,6 +7,7 @@ import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead } from "../app/js/coach/read.js";
+import { handleRequest } from "../app/js/coach/worker.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -118,10 +119,13 @@ test("the bonus three is reported exactly when it has fallen, and taken only onc
     const v = R.buildView(room, pids[0], 0);
     const r = tableRead(v);
     const played = shadowFromView(v).playedCards.some(c => c.rank === 3 && c.suit === v.bonusSuit);
-    const settled = (v.tricks || []).some(t => t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit));
+    // the trick that actually holds the bonus three, not just "some trick is settled" —
+    // a wrong-trick winner would slip past a bare non-null check
+    const bonusTrick = (v.tricks || []).find(t => t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit));
     assert.equal(r.bonus.fallen, played, "bonus.fallen must track the played cards, in-flight trick included");
-    if (settled) {
+    if (bonusTrick) {
       assert.ok(r.bonus.takenBy != null && r.bonus.takenBy >= 0, "a settled bonus must name its taker");
+      assert.equal(r.bonus.takenBy, bonusTrick.winner, "the bonus must be credited to the trick it actually fell in");
     } else {
       assert.equal(r.bonus.takenBy, null, "nobody has taken the bonus until its trick resolves");
       if (played) midTrickSamples++;
@@ -140,5 +144,121 @@ test("outstanding counts exclude my own hand and everything played", () => {
       const gone = room.G.playedCards.filter(c => c.suit === s).length;
       assert.equal(r.outstanding[s].count, 13 - mine - gone, `${s} outstanding count is wrong`);
     }
+  });
+});
+
+/* captured.mine/.theirs, voids, outstanding.top and trumpLeft previously had no
+   value-level regression coverage. The two identities the suite already checked
+   (points live + captured == 250, mine + theirs == captured) hold no matter which
+   side "mine" names — a mine/theirs swap would sail through both. This pins the
+   side assignment against the view's own declarer/partner, and spot-checks
+   outstanding.top / trumpLeft against values computed a different way than
+   read.js computes them, so a shared bug in read.js can't hide behind a shared
+   formula in the test. */
+test("captured sides, voids, outstanding.top and trumpLeft are independently correct", () => {
+  let checked = 0;
+  drive((room, pids) => {
+    if (room.G.phase !== "playing") return;
+    const seat = 2;
+    const v = R.buildView(room, pids[seat], 0);
+    if (!v.teamsRevealed) return;
+    const r = tableRead(v);
+    const shadow = shadowFromView(v);
+
+    const declaring = new Set([v.declarer, v.partner]);
+    const declPts = [...declaring].reduce((s, p) => s + v.capturedPoints[p], 0);
+    const restPts = [0, 1, 2, 3].filter(p => !declaring.has(p)).reduce((s, p) => s + v.capturedPoints[p], 0);
+    const onDeclaringSide = declaring.has(seat);
+    assert.equal(r.captured.mine, onDeclaringSide ? declPts : restPts,
+      "captured.mine must be my own declarer/partner side's total");
+    assert.equal(r.captured.theirs, onDeclaringSide ? restPts : declPts,
+      "captured.theirs must be the opposing side's total");
+
+    for (const entry of r.voids) {
+      assert.notEqual(entry.seat, seat, "my own seat must never be reported as a known void");
+      const want = E.SUITS.filter(s => shadow.voids[entry.seat][s]);
+      assert.deepEqual(entry.suits.slice().sort(), want.slice().sort(), `voids for seat ${entry.seat} drifted`);
+    }
+
+    for (const s of E.SUITS) {
+      const accounted = new Set();
+      for (const c of v.you.hand) if (c.suit === s) accounted.add(c.rank);
+      for (const c of shadow.playedCards) if (c.suit === s) accounted.add(c.rank);
+      const remaining = E.RANKS.filter(rk => !accounted.has(rk));
+      // Math.max rather than read.js's "RANKS is ascending, take the last
+      // element" — a different technique, so an index bug there wouldn't
+      // also be baked into this expectation.
+      const wantTop = remaining.length ? Math.max(...remaining) : null;
+      assert.equal(r.outstanding[s].top, wantTop, `${s}'s outstanding top drifted`);
+    }
+
+    if (v.trump) {
+      const mine = v.you.hand.filter(c => c.suit === v.trump).length;
+      const gone = shadow.playedCards.filter(c => c.suit === v.trump).length;
+      assert.equal(r.trumpLeft, 13 - mine - gone, "trumpLeft drifted from an independently computed count");
+    } else {
+      assert.equal(r.trumpLeft, null, "trumpLeft must be null with no trump suit");
+    }
+    checked++;
+  });
+  assert.ok(checked > 0, "no positions with a revealed team were exercised");
+});
+
+test("the worker answers a hint request from a view alone", () => {
+  let answered = 0;
+  drive((room, pids) => {
+    if (room.G.phase !== "playing" || answered > 3) return;
+    const seat = room.G.turn;
+    const v = R.buildView(room, pids[seat], 0);
+    if (!v.you.toAct) return;
+    const res = handleRequest({ id: 7, kind: "hint", view: v, seed: 42 });
+    assert.equal(res.id, 7);
+    assert.ok(res.ok, `hint failed: ${res.error}`);
+    assert.ok(res.result.best && res.result.best.card, "a hint must name a card");
+    const legal = v.you.legal.map(c => c.suit + c.rank);
+    assert.ok(legal.includes(res.result.best.card.suit + res.result.best.card.rank),
+      "the hint must be a legal card");
+    answered++;
+  });
+  assert.ok(answered > 0, "no hint request was exercised");
+});
+
+test("the worker refuses a request it cannot serve", () => {
+  const res = handleRequest({ id: 1, kind: "hint", view: { you: {} }, seed: 1 });
+  assert.equal(res.ok, false);
+  assert.ok(typeof res.error === "string" && res.error.length, "a failure must explain itself");
+});
+
+/* A bidding/trump/call view has a real dealt hand and a real seat — shadowFromView
+   happily builds a position from it — so only an explicit phase/actKind check stops
+   evaluateMoves from rolling out a non-"playing" position and quietly handing back an
+   all-zero "best" card instead of refusing (playOutRound no-ops the instant
+   sim.phase !== "playing", per ai/pimc.js). */
+test("the worker refuses a hint request outside a card-play decision, even with a real dealt hand", () => {
+  let checked = 0;
+  drive((room, pids) => {
+    if (room.G.phase === "playing" || checked > 3) return;
+    const ra = E.requiredActor(room.G);
+    if (!ra || ra.kind === "play") return;   // only the pre-play decisions: bid, trump, call
+    const v = R.buildView(room, pids[ra.seat], 0);
+    if (!v.you.toAct) return;
+    assert.ok(Array.isArray(v.you.hand) && v.you.hand.length, "this decision point must carry a real hand");
+    const res = handleRequest({ id: 3, kind: "hint", view: v, seed: 1 });
+    assert.equal(res.ok, false, `a "${ra.kind}" decision must not answer a card-play hint`);
+    assert.match(res.error, /card-play/i);
+    checked++;
+  });
+  assert.ok(checked > 0, "no bid/trump/call decision point was exercised");
+});
+
+test("a seeded hint repeats", () => {
+  drive((room, pids) => {
+    if (room.G.phase !== "playing") return;
+    const seat = room.G.turn;
+    const v = R.buildView(room, pids[seat], 0);
+    if (!v.you.toAct) return;
+    const a = handleRequest({ id: 1, kind: "hint", view: v, seed: 9 });
+    const b = handleRequest({ id: 2, kind: "hint", view: v, seed: 9 });
+    assert.deepEqual(a.result, b.result, "same seed, same answer");
   });
 });
