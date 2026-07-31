@@ -12,7 +12,7 @@
 export { SUITS, RANKS, NUM_PLAYERS, MIN_BID, MAX_BID, BID_STEP,
          TOTAL_POINTS, TARGET_GAMES, MAX_REDEALS } from "./constants.js";
 export { randomInt, mulberry32 } from "./random.js";
-export { sameCard, cardStr, rankLabel } from "./cards.js";
+export { sameCard, cardStr, rankLabel, winningIndex } from "./cards.js";
 export { cardPoints, sideOf, defenders } from "./scoring.js";
 export { createMatch, startMatch, nextDeal, publicView } from "./match.js";
 export { applyBid, bidIsLegal, minNextBid, findBidActor } from "./bidding.js";

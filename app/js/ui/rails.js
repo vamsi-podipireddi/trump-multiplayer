@@ -13,6 +13,7 @@ import { $, esc } from "../util/dom.js";
 import { SUIT_KEY, suitSvg, suitSpan, suitClass } from "../cards/labels.js";
 import { cardFace, miniCardEl } from "../cards/deck.js";
 import { icon } from "../cards/icons.js";
+import { bonusTakenBy } from "../coach/read.js";
 
 /* solo's view carries names only; the multiplayer view also has a label for a
    seat nobody has taken yet ("Seat 3", "AI"), which is what belongs on screen. */
@@ -31,14 +32,6 @@ const pairNames = v => v.partner === v.declarer
   ? nameOf(v, v.declarer)
   : nameOf(v, v.declarer) + " & " + nameOf(v, v.partner);
 const pairLabel = v => pairNames(v) + (v.partner === v.declarer ? " is bidding alone" : " are bidding");
-/* The 30 goes to whoever captured the trick the 3 fell in. The wire carries no
-   "bonus taken by", so the trick history is where that is written down. */
-function bonusTakenBy(v) {
-  for (const t of v.tricks) {
-    if (t.cards.some(p => p.card.rank === 3 && p.card.suit === v.bonusSuit)) return t.winner;
-  }
-  return null;
-}
 const bidOf = v => v.bid || v.highBid || 0;
 
 // a rail thumbnail is a picture of a card, never a control

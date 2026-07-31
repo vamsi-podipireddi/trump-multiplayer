@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
+import { tableRead } from "../app/js/coach/read.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -91,4 +92,38 @@ test("a seated player yields no position before the match starts", () => {
   const v = R.buildView(room, pid, 0);
   assert.equal(v.you.hand, undefined, "buildView only deals out a hand once room.started");
   assert.equal(shadowFromView(v), null);
+});
+
+test("points live plus points captured is always 250", () => {
+  drive((room, pids) => {
+    if (room.G.phase !== "playing") return;
+    const r = tableRead(R.buildView(room, pids[0], 0));
+    const taken = room.G.capturedPoints.reduce((a, b) => a + b, 0);
+    assert.equal(r.pointsLive + taken, 250, "the table read lost points");
+    assert.equal(r.captured.mine + r.captured.theirs, taken, "sides do not sum to what was captured");
+  });
+});
+
+test("the bonus three is reported exactly when it has fallen", () => {
+  drive((room, pids) => {
+    if (room.G.phase !== "playing") return;
+    const v = R.buildView(room, pids[0], 0);
+    const r = tableRead(v);
+    const fell = room.G.playedCards.some(c => c.rank === 3 && c.suit === room.G.bonusSuit);
+    assert.equal(r.bonus.fallen, fell, "bonus.fallen disagrees with the played cards");
+    if (fell) assert.ok(r.bonus.takenBy != null && r.bonus.takenBy >= 0, "a fallen bonus must name its taker");
+  });
+});
+
+test("outstanding counts exclude my own hand and everything played", () => {
+  drive((room, pids) => {
+    if (room.G.phase !== "playing") return;
+    const v = R.buildView(room, pids[2], 0);
+    const r = tableRead(v);
+    for (const s of ["♠", "♥", "♦", "♣"]) {
+      const mine = v.you.hand.filter(c => c.suit === s).length;
+      const gone = room.G.playedCards.filter(c => c.suit === s).length;
+      assert.equal(r.outstanding[s].count, 13 - mine - gone, `${s} outstanding count is wrong`);
+    }
+  });
 });
