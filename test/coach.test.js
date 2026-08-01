@@ -262,3 +262,173 @@ test("a seeded hint repeats", () => {
     assert.deepEqual(a.result, b.result, "same seed, same answer");
   });
 });
+
+// ---------------------------------------------------------------------------
+// client.js — the promise facade itself. Every test above exercises
+// handleRequest() directly; none of them touch client.js's own reason to
+// exist: lazy construction, id correlation, timeout/error rejection, and the
+// synchronous fallback. Node has no global Worker, so the fallback path is
+// reachable with a plain import; the worker path needs a stand-in installed
+// as globalThis.Worker before client.js's lazy getWorker() ever runs.
+//
+// client.js keeps module-scoped state (the pending Map, the cached worker),
+// so every test below imports it through a uniquely-querystringed specifier
+// — a distinct URL is a distinct ES module instance in Node, with its own
+// fresh top-level state — rather than sharing the one import the rest of
+// this file never even makes. That is what makes these tests independent of
+// each other and of execution order, without needing a reset hook client.js
+// itself has no other reason to export.
+function oneToActView() {
+  let found = null;
+  drive((room, pids) => {
+    if (found || room.G.phase !== "playing") return;
+    const seat = room.G.turn;
+    const v = R.buildView(room, pids[seat], 0);
+    if (v.you.toAct) found = v;
+  });
+  return found;
+}
+
+/* A minimal stand-in for the real Worker API — just enough (postMessage,
+   settable onmessage/onerror) for getWorker() to accept it as the real
+   thing. .last always points at the most recently constructed instance, so
+   a test can reach in and drive its callbacks by hand. */
+class FakeWorker {
+  constructor() { this.sent = []; FakeWorker.last = this; }
+  postMessage(msg) { this.sent.push(msg); }
+}
+
+/* globalThis.Worker is a real global, shared by the whole process — unlike
+   client.js's own state, a querystring import can't isolate it. Every test
+   that sets it restores whatever was there before (nothing, in plain Node),
+   so an earlier test's fake never leaks into a later one. */
+async function withFakeWorker(WorkerClass, fn) {
+  const saved = globalThis.Worker;
+  globalThis.Worker = WorkerClass;
+  try { await fn(); } finally {
+    if (saved === undefined) delete globalThis.Worker; else globalThis.Worker = saved;
+  }
+}
+
+/* assert.rejects on its own can hang forever if the promise under test never
+   settles at all — a real failure mode, not a hypothetical one: writing the
+   onError tests below, a mutation that dropped its p.reject(err) call hung
+   the whole suite rather than failing one test. Racing against a short real
+   timer (client.js's own timeouts are all mocked in these tests, so this
+   never fires on a passing run) turns that into a fast, clear failure. */
+async function rejectsWithin(promise, pattern, ms = 1000) {
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error(`expected a rejection within ${ms}ms, got none`)), ms));
+  await Promise.race([pattern ? assert.rejects(promise, pattern) : assert.rejects(promise), timeout]);
+}
+
+test("client.js: with no Worker in this environment, coachAvailable is false and requests resolve via the sync fallback", async () => {
+  delete globalThis.Worker; // Node has none anyway; explicit for a self-contained test
+  const { requestHint, requestReview, coachAvailable } = await import("../app/js/coach/client.js?t=fallback-basic");
+  assert.equal(coachAvailable(), false, "no Worker global means no live worker");
+  const hint = await requestHint({ you: {} });
+  assert.equal(hint.ok, false);
+  assert.ok(typeof hint.error === "string" && hint.error.length, "a failed hint must explain itself");
+  const review = await requestReview({ you: {} }, 0);
+  assert.equal(review.ok, false);
+  assert.ok(typeof review.error === "string" && review.error.length, "a failed review must explain itself");
+});
+
+test("client.js: requestHint resolves a real recommendation through the sync fallback end to end", async () => {
+  delete globalThis.Worker;
+  const { requestHint } = await import("../app/js/coach/client.js?t=fallback-happy");
+  const v = oneToActView();
+  assert.ok(v, "no to-act view captured");
+  const res = await requestHint(v);
+  assert.ok(res.ok, `hint failed: ${res.error}`);
+  const legal = v.you.legal.map(c => c.suit + c.rank);
+  assert.ok(legal.includes(res.result.best.card.suit + res.result.best.card.rank),
+    "the fallback's hint must be a legal card");
+});
+
+test("client.js: a worker response resolves the correlated request, even answered out of order", async () => {
+  await withFakeWorker(FakeWorker, async () => {
+    const { requestHint } = await import("../app/js/coach/client.js?t=correlate");
+    const pA = requestHint({ you: {}, tag: "A" });
+    const pB = requestHint({ you: {}, tag: "B" });
+    const w = FakeWorker.last;
+    assert.equal(w.sent.length, 2, "both requests must reach the worker");
+    const [msgA, msgB] = w.sent;
+    assert.notEqual(msgA.id, msgB.id, "each request gets its own correlation id");
+    // answer B first, then A: cross-wiring would show up as a swapped result
+    w.onmessage({ data: { id: msgB.id, ok: true, result: { tag: "answerB" } } });
+    w.onmessage({ data: { id: msgA.id, ok: true, result: { tag: "answerA" } } });
+    const [resA, resB] = await Promise.all([pA, pB]);
+    assert.equal(resA.result.tag, "answerA", "A's promise must resolve to A's own answer");
+    assert.equal(resB.result.tag, "answerB", "B's promise must resolve to B's own answer");
+  });
+});
+
+test("client.js: a duplicate or late worker message is a silent no-op, not a double-settle", async () => {
+  await withFakeWorker(FakeWorker, async () => {
+    const { requestHint } = await import("../app/js/coach/client.js?t=noop");
+    const p = requestHint({ you: {} });
+    const w = FakeWorker.last;
+    const id = w.sent[0].id;
+    const answer = { id, ok: true, result: { tag: "first" } };
+    w.onmessage({ data: answer });
+    const res = await p;
+    assert.equal(res.result.tag, "first");
+    // duplicate: pending no longer has this id, so a replay must be inert
+    assert.doesNotThrow(() => w.onmessage({ data: answer }));
+    // late: a stray id, as if some other already-settled request's answer arrived
+    assert.doesNotThrow(() => w.onmessage({ data: { id: id + 999, ok: true, result: {} } }));
+  });
+});
+
+test("client.js: a wedged worker's request rejects once the timeout elapses, not before", async (t) => {
+  class HangingWorker { postMessage() {} } // never calls onmessage — simulates a stuck worker
+  await withFakeWorker(HangingWorker, async () => {
+    const { requestHint } = await import("../app/js/coach/client.js?t=timeout");
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const p = requestHint({ you: {} });
+    let settled = false;
+    p.catch(() => { settled = true; });
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(settled, false, "must not settle before the timeout elapses");
+    t.mock.timers.tick(10000);
+    await assert.rejects(p, /timed out/, "a wedged worker must reject, not hang forever");
+  });
+});
+
+test("client.js: a worker error event rejects the pending request instead of hanging", async () => {
+  await withFakeWorker(FakeWorker, async () => {
+    const { requestHint } = await import("../app/js/coach/client.js?t=error");
+    const p = requestHint({ you: {} });
+    const w = FakeWorker.last;
+    w.onerror(new Error("simulated worker crash"));
+    await rejectsWithin(p, /simulated worker crash/);
+  });
+});
+
+/* Regression for a review finding: onError must discard the dead worker, not
+   just reject what was pending — otherwise every request after a crash keeps
+   posting into a worker that will never answer again, and pays the full
+   timeout for it instead of falling back. Mock timers make that failure mode
+   fast to detect here: if the fix ever regresses, request 2 goes back through
+   the (dead) worker path and this test's own tick(10000) rejects it instead
+   of silently hanging for 10 real seconds. */
+test("client.js: after a worker error, the next request falls back to the synchronous path instead of hanging", async (t) => {
+  await withFakeWorker(FakeWorker, async () => {
+    const { requestHint, coachAvailable } = await import("../app/js/coach/client.js?t=fallback-after-error");
+    assert.equal(coachAvailable(), true, "a fake worker is present, so the facade must report it live");
+    const p1 = requestHint({ you: {} });
+    const w = FakeWorker.last;
+    w.onerror(new Error("crash"));
+    await rejectsWithin(p1);
+    assert.equal(coachAvailable(), false, "a worker that has errored must not still read as available");
+
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    const sentBefore = w.sent.length;
+    const p2 = requestHint({ you: {} });
+    t.mock.timers.tick(10000); // a no-op if request 2 took the sync fallback; would fire the dead worker's timeout otherwise
+    const res2 = await p2;
+    assert.equal(w.sent.length, sentBefore, "the dead worker must never receive another postMessage");
+    assert.equal(res2.ok, false); // { you: {} } isn't a real view — the point is it answered at all, synchronously
+  });
+});

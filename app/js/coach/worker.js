@@ -6,8 +6,10 @@
    incapable of cheating. */
 import * as E from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
-// reviewDeal (./review.js) lands in Task 9. Until then "review" below is a
-// stub — same message shape, so client.js needs no change when it arrives.
+// reviewDeal (./review.js) lands in Task 9, which adds a dedicated "review"
+// branch here. Until then an unrecognised "review" kind falls through to the
+// generic "unknown request" answer below — already an honest ok:false, so
+// there is nothing for a stub branch to add.
 
 /* Background-thread budget: generous, because nothing here blocks a frame.
    client.js's synchronous fallback (no worker available) passes
@@ -41,7 +43,6 @@ function handleRequest(msg) {
       return { id: msg.id, ok: true, result: { kind: "play", moves, best: moves[0],
                                                determinizations: ev.determinizations } };
     }
-    if (msg.kind === "review") return { id: msg.id, ok: false, error: "review not available yet" };
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
   } catch (e) {
     return { id: msg && msg.id, ok: false, error: String((e && e.message) || e) };

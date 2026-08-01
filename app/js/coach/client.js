@@ -25,10 +25,16 @@ function onMessage(e) {
 
 /* A worker-level error (a bad import, a throw outside handleRequest's own
    try/catch) isn't correlated to one id, so every in-flight request fails —
-   the alternative is a spinner nothing will ever answer. */
+   the alternative is a spinner nothing will ever answer. Also discards the
+   worker itself: one that has died stays dead, so every later request must
+   fall back to the synchronous path rather than posting into the void and
+   eating a full TIMEOUT_MS for nothing — the file's own promise is "degrades
+   in responsiveness, never in availability," which a wedged dead worker
+   would otherwise quietly break. */
 function onError(err) {
   for (const p of pending.values()) { clearTimeout(p.timer); p.reject(err); }
   pending.clear();
+  worker = null;
 }
 
 /* Constructed once, lazily, and reused: a Worker that fails to build once
@@ -49,7 +55,10 @@ function getWorker() {
 function request(kind, payload) {
   const id = nextId++;
   const seed = Math.floor(Math.random() * 0x100000000);
-  const msg = { id, kind, seed, ...payload };
+  // id/kind/seed spread last so a payload can never clobber the correlation
+  // id — unreachable today (requestHint/requestReview build fixed-shape
+  // payloads), kept impossible rather than merely unexercised.
+  const msg = { ...payload, id, kind, seed };
   const w = getWorker();
   // No worker: answer synchronously through the exact same handler, at a
   // budget small enough that blocking this thread doesn't read as a stall.
@@ -73,10 +82,10 @@ function request(kind, payload) {
 
 function requestHint(view) { return request("hint", { view }); }
 
-/* Resolves to { ok: false, error: "review not available yet" } — handleRequest's
-   own stub for the "review" kind — until Task 9 adds the real branch to
-   worker.js. Nothing here has to change when it does: the request already
-   flows through this exact pipeline. */
+/* Resolves to { ok: false, error: "unknown request: review" } — handleRequest
+   has no "review" branch until Task 9 adds one to worker.js. Nothing here has
+   to change when it does: the request already flows through this exact
+   pipeline, so Task 9's diff is a new branch in worker.js and nothing else. */
 function requestReview(view, seat) { return request("review", { view, seat }); }
 
 /* True when a live worker backs the facade, false when every request is about
