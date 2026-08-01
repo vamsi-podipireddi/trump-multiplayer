@@ -30,9 +30,12 @@ import { aiBidDecisionSearch } from "./bid-search.js";
 
    Difficulty is one room setting applied to every bot (src/core/room/drive.js),
    so the shipped shape of this branch is four searching *bidders* against each
-   other, not one against three hand-counters. That regime is measured in
-   scripts/bench-auction-search.js's `table` section: the auction settles ~13
-   points higher and the extra ambition is paid for, not merely spent. */
+   other, not one against three hand-counters. scripts/bench-auction-search.js's
+   `table` section reads like a measurement of that regime, but isn't one: its
+   `searcher` (bench:405-411) still sends trump and the call through the search
+   too, on every seat that "searches" — the pre-cut auction, not what ships. Its
+   "auction settles ~13 points higher" and "paid for, not merely spent" describe
+   that pre-cut table, not the bid-only one four `hard` bots actually play. */
 function aiActionFor(G, seat, difficulty) {
   const easy = difficulty === true || difficulty === "easy";
   const hard = difficulty === "hard";

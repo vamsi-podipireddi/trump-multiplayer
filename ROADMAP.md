@@ -218,6 +218,25 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   of the above was forced. It is a cost decision taken on measurement: `wrangler.toml` now carries a
   `[limits] cpu_ms = 300` runaway guard sized from the table above, per Cloudflare's own recommendation
   to bound denial-of-wallet rather than leave the default in place.
+
+  **Checked against an all-hard table, on re-review — nothing above had.** `outcome`'s pairs are one
+  searching seat against three hand-counters; an all-`hard` table is four, which is what four `hard`
+  bots actually produce. Paired fork: an identical searched-bid auction, then two branches from the same
+  position with the same seeds after the fork — trump/call from the search (the pre-cut policy) against
+  trump/call from the hand-count (what ships) — n=2000. Under the card play that ships, PIMC: set rate
+  32.3% → 32.5%, **+0.15 ± 1.77 pp** — indistinguishable from zero, so **the cut is safe as shipped**.
+  Under the heuristic card play `outcome` itself uses (`runDeal`, `scripts/bench-auction-search.js:87`,
+  which hardcodes `chooseAICard` unconditionally): 32.7% → 36.1%, **+3.42 ± 2.16 pp** — significant. The
+  mechanism: `aiPickTrumpSearch`/`aiPickPartnerSearch` score each candidate by rolling the rest of the
+  deal out with `chooseAICard` (`playOutWith` → `pimc.js`'s `playOutRound`, unconditionally — never
+  PIMC), so whatever edge the search has over the hand-count is real only when the deal actually gets
+  finished that way, which shipped `hard` play never does. That cuts backward, too: the **+0.56 ± 0.42
+  pp** figure this decision rests on came from that same `outcome` arm, under that same heuristic card
+  play — not the PIMC that `hard` ships. It is not overturned: the PIMC-measured, all-hard-table result
+  above independently lands in the same place, indistinguishable from zero, which is the confirmation
+  the original number could not give by itself. But the honest record is that the figure this cut was
+  decided on carries the identical methodological caveat as everything else `outcome` measures, and this
+  is the first place that caveat was actually checked rather than merely true in principle.
 - **D36. Common random numbers in the auction search.** Candidates are compared on one shared set of
   sampled worlds. Rejected: independent sampling per candidate — same cost, strictly more variance in
   exactly the comparison the decision turns on.

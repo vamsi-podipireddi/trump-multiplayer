@@ -33,6 +33,13 @@
  * at 50% by construction. What can be seen is the auction's own shape: where the
  * contract settles, how often the declaring side is set, how often it hits the
  * 250 ceiling, and how a lone hand-counter fares at such a table.
+ *
+ * Caveat on that last sentence: `table`'s own "search" seats (`tableOf`/
+ * `searcher`, below) still route trump and the call through the search too —
+ * the pre-cut auction ROADMAP D35 cut server-side, not the bid-only one that
+ * ships. Read `table`'s numbers as evidence for the auction search's general
+ * shape, not as a measurement of the regime four `hard` bots actually play
+ * today.
  */
 import * as E from "../app/js/core/engine/index.js";
 import { chooseAICard, aiPickTrump, aiPickPartner, aiBidDecision } from "../app/js/core/engine/ai/heuristic.js";

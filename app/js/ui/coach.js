@@ -1,9 +1,12 @@
-/* The hint affordance: "what would the hard AI play here." One button, wired
-   once at boot (initCoach) and painted every frame (renderCoach) — the same
-   init/render split as ui/sound.js's initSound()/paintSoundBtn(), because the
-   click handler is wired long before the view it will act on exists, and the
-   view arrives fresh on every state message while the button itself never
-   moves in the DOM.
+/* The hint affordance: the search's own pick, not "what the hard bots would
+   do" — true for the bid and the card, which hard bots search too, but not
+   for trump and the call: bots always take those from the hand-count
+   (ai/index.js), while the hint searches them anyway (ai/bid-search.js, via
+   coach/worker.js). One button, wired once at boot (initCoach) and painted
+   every frame (renderCoach) — the same init/render split as ui/sound.js's
+   initSound()/paintSoundBtn(), because the click handler is wired long
+   before the view it will act on exists, and the view arrives fresh on
+   every state message while the button itself never moves in the DOM.
 
    The room's `coach` setting (read through coachOn, never re-tested here) is a
    table agreement, not an enforcement boundary — this file runs in every
