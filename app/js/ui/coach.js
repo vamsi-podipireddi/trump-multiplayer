@@ -327,7 +327,99 @@ function renderTableRead(v, o) {
     `<div class="tr-block"><div class="lbl">Outstanding</div>${suitsHtml(s.outstanding, s.trump)}</div>`;
 }
 
+// ---------- deal review ----------
+/* coach/review.js's reviewDeal() re-searches every decision from a finished
+   deal's own record and grades each play against what the search would have
+   picked; this section is only the wording — what a review's own findings
+   say once painted into the round-result modal's review view (ui/modals.js),
+   opened there on click, never automatically (nobody gets analysis thrown at
+   them while the table waits on the ready gate — see modals.js's own
+   comment). Same split as describeHint/describeTableRead above:
+   describeReview is pure and carries every wording branch; renderReview is
+   the thin painter over it. "Thin painter" here means DOM-free rather than
+   DOM-light — it returns a string for modals.js to drop into #round-body,
+   the same contract renderTableRead's own caller (rails.js) does not share,
+   since #round-body is swapped wholesale rather than patched in place. */
+
+/* evaluateMoves' own affordable/maxDet formula (ai/pimc.js) ceilings every
+   review decision at 24 determinizations — review.js never overrides
+   opts.determinizations, so that default stands — half of what a live hint
+   affords itself (48, worker.js's HINT_BUDGET). A wide-open early lead (13
+   legal cards, ~39 unseen at trick 1) taxes the same formula down toward
+   ~15. 20 sits between the deal's ordinary case (most decisions land at or
+   near the 24 cap) and that worst-case floor, so a samples count under it
+   means this particular read really did run thinner than most of the deal's
+   own decisions — worth saying, not just a number to print next to. */
+const THIN_SAMPLES = 20;
+
+/* Pure: result is reviewDeal's own {decisions, worst, samples}; v/seat pick
+   the declaring/defending frame (below) the same way describeHint's play
+   branch does. Returns plain data, not markup — renderReview is the only
+   thing that turns this into HTML, same division as describeTableRead vs.
+   tableReadRows/renderTableRead above. */
+function describeReview(result, v, seat) {
+  const decisions = (result && result.decisions) || [];
+  const worst = ((result && result.worst) || []).slice(0, 2);   // reviewDeal's own cap; slice guards a caller that doesn't honour it
+  const samples = (result && result.samples) || 0;
+  const thin = samples > 0 && samples < THIN_SAMPLES;
+  if (!worst.length) return { clean: true, thin, samples, count: decisions.length, worst: [] };
+
+  // winProb reads from the reviewed seat's own side (ai/pimc.js) — the same
+  // hedge describeHint's play branch makes above: a defender's own success
+  // is "sets", not "holds", or the number reads backwards for exactly the
+  // seats it matters most to.
+  const verb = sideOf(v, seat) === "D" ? "holds" : "sets";
+  return {
+    clean: false, thin, samples, count: decisions.length,
+    worst: worst.map(d => ({
+      trickNo: d.trickNo, grade: d.grade, verb,
+      playedName: cardName(d.played), bestName: cardName(d.best),
+      playedPct: Math.round(d.playedWinProb * 100), bestPct: Math.round(d.bestWinProb * 100),
+    })),
+  };
+}
+
+/* The one line every branch of renderReview ends on: what the numbers above
+   it are actually worth (ambiguity #2: caveat a thin search rather than
+   present it with false confidence). Skipped when there was nothing to
+   sample at all (count 0) — a caveat about sample size means nothing next to
+   a deal with no real decisions in it. */
+function reviewNote(s) {
+  if (!s.count) return "";
+  return s.thin
+    ? `Rough read — some of these decisions drew as few as ${s.samples} sampled deals.`
+    : `Based on ${s.samples} sampled deals per decision.`;
+}
+
+/* result/v/seat: see describeReview above. Every interpolated card label
+   runs through esc() (M9) even though cardName()'s own vocabulary is fixed,
+   never view-supplied — the same blanket rule voidsHtml/renderTableRead
+   apply to seat names, kept here rather than argued case by case. */
+function renderReview(result, v, seat) {
+  const s = describeReview(result, v, seat);
+  const note = reviewNote(s);
+  if (s.clean) {
+    // count 0: every trick was a forced play (review.js skips a trick with
+    // only one legal card rather than grading a play that was never a
+    // choice) — an honest "nothing to grade", not the same claim as a real
+    // decision that simply never cost the contract.
+    const line = s.count
+      ? `Clean deal — none of your ${s.count} decision${s.count === 1 ? "" : "s"} cost the contract.`
+      : `Nothing to grade this deal — every card was forced.`;
+    return `<div class="deal-review"><p class="muted">${line}</p>` +
+      (note ? `<div class="note">${esc(note)}</div>` : "") + `</div>`;
+  }
+  const rows = s.worst.map(d =>
+    `<div class="dr-dec"><div class="dr-head"><span class="dr-trick">Trick ${d.trickNo}</span>` +
+    `<span class="dr-tag ${d.grade}">${d.grade}</span></div>` +
+    `<div class="dr-line">You played <b>${esc(d.playedName)}</b>, which ${d.verb} the contract in ${d.playedPct}% of sampled deals.</div>` +
+    `<div class="dr-line dr-alt">The search preferred <b>${esc(d.bestName)}</b>, which ${d.verb} it in ${d.bestPct}%.</div></div>`
+  ).join("");
+  return `<div class="deal-review">${rows}<div class="note">${esc(note)}</div></div>`;
+}
+
 export {
   hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
   describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
+  describeReview, renderReview,
 };

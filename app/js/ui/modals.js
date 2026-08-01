@@ -2,6 +2,8 @@ import { $, esc, avatarHtml } from "../util/dom.js";
 import { SUIT_NAME } from "../cards/labels.js";
 import { cardEl } from "../cards/deck.js";
 import { sfx } from "./sound.js";
+import { requestReview } from "../coach/client.js";
+import { renderReview } from "./coach.js";
 
 /* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
    pages hand these functions their own view and their own handlers, and solo
@@ -115,19 +117,63 @@ const SPLIT_SHADES = ["var(--acc)", "var(--acc2)", "rgba(230,192,122,.42)", "rgb
    replay its verdict cue, so a panel already showing this deal only has its
    button refreshed. */
 let roundKey = null;
+/* The review view's own state, scoped to the one round `roundKey` names —
+   reset alongside it below. reviewOpen: is #round-body currently showing the
+   coach's findings instead of the "where the N went" summary. reviewState:
+   null (never asked), "pending" (requestReview in flight), or the settled
+   { ok, result | message } — kept outside paintRoundBody so a toggle back to
+   the summary and back again to the review doesn't re-run a multi-second
+   search it already has the answer to. */
+let reviewOpen = false;
+let reviewState = null;
+
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const REVIEW_WAIT = `<div class="deal-review"><p class="muted">Analysing your play<span class="think"><i></i><i></i><i></i></span></p></div>`;
 
 function showRoundResult(v, o, h) {
   const r = v.lastResult;
   if (!r) return;
   const key = v.roundNumber + "|" + r.bid + "|" + r.dPts + "|" + (r.made ? 1 : 0);
-  if (roundKey === key && $("overlay").dataset.kind === "round") { roundAction(v, h); return; }
+  if (roundKey === key && $("overlay").dataset.kind === "round") { roundAction(v, o, h); return; }
   roundKey = key;
+  reviewOpen = false; reviewState = null;   // a new deal — any open or in-flight review belonged to the last one
 
-  const total = v.consts.TOTAL_POINTS;
   const nm = seat => esc(seatName(v, o, seat));
   const tone = r.made ? "made" : "set";
   const pct = r.bid ? Math.min(1, r.dPts / r.bid) * 100 : 0;
   const pair = r.partner === r.declarer ? nm(r.declarer) + " alone" : nm(r.declarer) + " &amp; " + nm(r.partner);
+
+  /* #round-body is the part the review toggle swaps (paintRoundBody); the
+     verdict above it and #round-action below it never move, which is what
+     keeps the ready button reachable regardless of which body is showing. */
+  setModal("round",
+    `<div class="sheen"></div><div class="kicker">Deal ${v.roundNumber} result</div>` +
+    `<div class="head ${tone}">${r.made ? "MADE" : "SET"}</div>` +
+    `<p>${pair} captured ${r.dPts} of ${r.bid}. ${r.winners.map(nm).join(" &amp; ")} win the deal.</p>` +
+    `<div class="pbar"><i class="${tone}" style="width:${pct.toFixed(0)}%"></i></div>` +
+    `<div id="round-body"></div><div id="round-action"></div>`);
+  paintRoundBody(v, o);
+  roundAction(v, o, h);
+  sfx(r.made ? "made" : "set");
+}
+/* The 30-point 3 is the deal's single biggest swing, so the panel names who
+   ended up with it — which the trick history knows and the score does not. */
+function takerOfBonus(v, tricks) {
+  for (const t of tricks) {
+    if (t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit)) return t.winner;
+  }
+  return null;
+}
+/* The "where the N went" breakdown plus final standings — everything
+   showRoundResult used to build inline, now its own function so the review
+   toggle (roundAction below) can rebuild it on demand: paintRoundBody calls
+   this every time reviewOpen flips back off. Recomputed rather than cached —
+   a few array maps over a deal that cannot change while its own modal is up
+   — so there is no snapshot to keep in sync with showRoundResult's own. */
+function roundSummaryHtml(v, o) {
+  const r = v.lastResult;
+  const total = v.consts.TOTAL_POINTS;
+  const nm = seat => esc(seatName(v, o, seat));
 
   const order = [0,1,2,3].slice().sort((a,b) => v.capturedPoints[b] - v.capturedPoints[a]);
   const splitBar = order.map((s, i) =>
@@ -163,27 +209,57 @@ function showRoundResult(v, o, h) {
     `<span>${nm(s)} · ${sideOf(v, o, s) === "D" ? "bidding" : "defending"}</span>` +
     `<span>${v.capturedPoints[s]} pts · ${v.scores[s]} deal${v.scores[s] === 1 ? "" : "s"}</span></div>`).join("");
 
-  setModal("round",
-    `<div class="sheen"></div><div class="kicker">Deal ${v.roundNumber} result</div>` +
-    `<div class="head ${tone}">${r.made ? "MADE" : "SET"}</div>` +
-    `<p>${pair} captured ${r.dPts} of ${r.bid}. ${r.winners.map(nm).join(" &amp; ")} win the deal.</p>` +
-    `<div class="pbar"><i class="${tone}" style="width:${pct.toFixed(0)}%"></i></div>` +
-    review +
-    `<div class="standings">${standings}</div><div id="round-action"></div>`);
-  roundAction(v, h);
-  sfx(r.made ? "made" : "set");
+  return review + `<div class="standings">${standings}</div>`;
 }
-/* The 30-point 3 is the deal's single biggest swing, so the panel names who
-   ended up with it — which the trick history knows and the score does not. */
-function takerOfBonus(v, tricks) {
-  for (const t of tricks) {
-    if (t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit)) return t.winner;
+/* #round-body's own paint: the summary above when the toggle is off, else
+   the review — computed lazily, on this first open, never ahead of a click
+   (ambiguity #4: on demand, not automatic). requestReview's own 10s timeout
+   (client.js) is what stops a permanent "Analysing…" if the worker wedges.
+   Never touches #round-action, which is what keeps the ready button
+   reachable through every state this function paints. */
+function paintRoundBody(v, o) {
+  const host = $("round-body");
+  if (!host) return;
+  if (!reviewOpen) { host.innerHTML = roundSummaryHtml(v, o); return; }
+
+  if (reviewState === "pending") { host.innerHTML = REVIEW_WAIT; return; }
+  if (reviewState) {
+    host.innerHTML = reviewState.ok
+      ? renderReview(reviewState.result, v, v.you.seat)
+      : `<div class="deal-review"><p class="muted">${esc(reviewState.message)}</p></div>`;
+    return;
   }
-  return null;
+
+  reviewState = "pending";
+  host.innerHTML = REVIEW_WAIT;
+  const seat = v.you.seat;
+  const myKey = roundKey;   // a slow response landing after the NEXT deal has already opened must not paint over it
+  requestReview(v, seat).then(res => {
+    if (roundKey !== myKey) return;
+    reviewState = (res && res.ok) ? { ok: true, result: res.result }
+                                   : { ok: false, message: cap((res && res.error) || "the review could not be run") + "." };
+    paintRoundBody(v, o);
+  }, () => {
+    if (roundKey !== myKey) return;
+    /* A rejection is a real path, not a hypothetical one — client.js rejects
+       every pending request when the worker dies and again after its own
+       10s timeout, never merely because review is unavailable (that comes
+       back as ok:false above instead). Same lesson coach.js's own hint
+       rejection handler documents: the player asked for something and
+       deserves evidence it did something, not a pane that quietly reverts. */
+    reviewState = { ok: false, message: "The review search failed — try again." };
+    paintRoundBody(v, o);
+  });
 }
-/* One button, and which one depends on who is driving the deal: multiplayer
-   waits for every live seat to ready up, solo deals the moment you say so. */
-function roundAction(v, h) {
+/* One primary button, and which one depends on who is driving the deal:
+   multiplayer waits for every live seat to ready up, solo deals the moment
+   you say so — plus, second and always additive, the review toggle. Adding
+   it here rather than replacing the primary button is the whole point: three
+   other players (or the 30s fallback, D5) are waiting on that button
+   regardless of what the toggle does, so it only ever gets a neighbour, never
+   a replacement. Spectators return above before reaching the toggle — there
+   is nothing of their own to review. */
+function roundAction(v, o, h) {
   const host = $("round-action");
   if (!host) return;
   host.innerHTML = "";
@@ -204,6 +280,21 @@ function roundAction(v, h) {
     b.onclick = () => h.nextDeal();
     host.appendChild(b);
   }
+  if (v.you && v.you.seat != null) {
+    const rb = document.createElement("button");
+    rb.className = "btn ghost";
+    paintReviewToggle(rb);
+    /* Mutates this same node rather than re-running roundAction(): the click
+       that fires this handler must not delete the element it fired on out
+       from under itself — a keyboard/screen-reader user tabbed to this
+       button would otherwise lose focus the instant they activate it. */
+    rb.onclick = () => { reviewOpen = !reviewOpen; paintReviewToggle(rb); paintRoundBody(v, o); };
+    host.appendChild(rb);
+  }
+}
+function paintReviewToggle(btn) {
+  btn.textContent = reviewOpen ? "‹ Back" : "Review this deal ▸";
+  btn.setAttribute("aria-expanded", String(reviewOpen));
 }
 
 // ---------- the partner reveal ----------

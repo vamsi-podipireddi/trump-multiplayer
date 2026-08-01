@@ -443,3 +443,109 @@ test('suitsHtml: "gone" vs the top card, and the trump suit is the only tile mar
   assert.ok(spadesIdx >= 0 && heartsIdx >= 0 && spadesIdx < heartsIdx,
     "♠ (plain) renders before ♥ (trump), matching SUITS' own fixed order");
 });
+
+test("the round-result modal offers a review without hiding ready", async () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  assert.ok(/review/i.test(src), "showRoundResult never mentions a review");
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  const html = renderReview({ decisions: [], worst: [], samples: 12 }, { names: ["A","B","C","D"] }, 0);
+  assert.ok(/clean|no mistakes|nothing/i.test(String(html)),
+    "a spotless deal must say so rather than render an empty list");
+});
+
+/* ---------------------------------------------------------------------------
+   describeReview(result, v, seat) / renderReview(result, v, seat) — the pure
+   half of the deal-review panel (coach.js), same split as describeHint and
+   describeTableRead/tableReadRows above. result is reviewDeal's own settled
+   shape ({decisions, worst, samples}); its own correctness (the search, the
+   grading thresholds, reproducibility) is coach.test.js's job — these tests
+   are only about what this panel says given a result, so plain hand-built
+   fixtures in that output shape are used throughout, the same call
+   describeTableRead's own tests make for a shape only this subsystem
+   produces and consumes. */
+const declarerView = { names: ["A","B","C","D"], declarer: 0, partner: 2 };
+const defenderView = { names: ["A","B","C","D"], declarer: 1, partner: 3 };
+const decision = (over) => ({ trickNo: 3, played: { suit: "♠", rank: 5 }, best: { suit: "♠", rank: 12 },
+  playedWinProb: 0.52, bestWinProb: 0.71, delta: 0.19, grade: "blunder", samples: 24, ...over });
+
+test("describeReview: no real decisions at all is distinct from a clean deal among real ones", async () => {
+  const { describeReview } = await import("../app/js/ui/coach.js");
+  const forced = describeReview({ decisions: [], worst: [], samples: 0 }, declarerView, 0);
+  assert.deepEqual(forced, { clean: true, thin: false, samples: 0, count: 0, worst: [] });
+
+  const cleanAmongReal = describeReview(
+    { decisions: [decision(), decision({ grade: "fine" })], worst: [], samples: 24 }, declarerView, 0);
+  assert.equal(cleanAmongReal.clean, true);
+  assert.equal(cleanAmongReal.count, 2, "count reflects every real decision, not just worst");
+});
+
+test("renderReview: forced (no decisions) and clean-among-real print different, both honest, lines", async () => {
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  const forced = renderReview({ decisions: [], worst: [], samples: 0 }, declarerView, 0);
+  assert.match(forced, /forced/i);
+  assert.doesNotMatch(forced, /Based on|Rough read/, "no decisions means no sample-size caveat to print");
+
+  const clean = renderReview({ decisions: [decision(), decision()], worst: [], samples: 24 }, declarerView, 0);
+  assert.match(clean, /Clean deal.*\b2\b decisions/i);
+  assert.doesNotMatch(clean, /forced/i);
+});
+
+test("renderReview: caveats a thin search and doesn't caveat a full one, right at the boundary", async () => {
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  const thin = renderReview({ decisions: [decision()], worst: [decision({ samples: 19 })], samples: 19 }, declarerView, 0);
+  assert.match(thin, /Rough read/i);
+  assert.match(thin, /19 sampled deals/);
+
+  const full = renderReview({ decisions: [decision()], worst: [decision({ samples: 20 })], samples: 20 }, declarerView, 0);
+  assert.doesNotMatch(full, /Rough read/i, "20 samples is review's own ordinary case, not a thin one");
+  assert.match(full, /Based on 20 sampled deals per decision/);
+});
+
+test("renderReview: prints trick, both cards, both percentages and the grade for up to two decisions, worst first", async () => {
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  const worst = [
+    decision({ trickNo: 5, grade: "blunder", played: { suit: "♠", rank: 5 }, best: { suit: "♠", rank: 14 }, playedWinProb: 0.3, bestWinProb: 0.8 }),
+    decision({ trickNo: 9, grade: "mistake", played: { suit: "♥", rank: 4 }, best: { suit: "♥", rank: 11 }, playedWinProb: 0.5, bestWinProb: 0.6 }),
+  ];
+  const html = renderReview({ decisions: worst, worst, samples: 24 }, declarerView, 0);
+
+  assert.match(html, /Trick 5/); assert.match(html, /Trick 9/);
+  assert.match(html, /class="dr-tag blunder">blunder/); assert.match(html, /class="dr-tag mistake">mistake/);
+  // lowercase, unlike describeHint's own "Ace of spades" above: RANK_NAME
+  // (cards/labels.js) is itself lowercase ("ace","king","queen","jack"), and
+  // describeHint only reads capitalised because cap() capitalises the whole
+  // string and the card name happens to lead it there. Here it sits
+  // mid-sentence ("you played the ace of spades"), where capitalising it
+  // would be wrong, so renderReview never calls cap() on it.
+  assert.match(html, /5 of spades/); assert.match(html, /ace of spades/);
+  assert.match(html, /4 of hearts/); assert.match(html, /jack of hearts/);
+  assert.match(html, /30%/); assert.match(html, /80%/); assert.match(html, /50%/); assert.match(html, /60%/);
+  // worst's own order (reviewDeal sorts by delta descending) is preserved, not re-sorted here
+  assert.ok(html.indexOf("Trick 5") < html.indexOf("Trick 9"));
+
+  // a third entry is never shown even if a caller hands one in — reviewDeal
+  // itself already caps worst at two; this pins renderReview's own defence
+  // of that contract rather than trusting the caller to have honoured it
+  const three = [worst[0], worst[1], decision({ trickNo: 11 })];
+  assert.doesNotMatch(renderReview({ decisions: three, worst: three, samples: 24 }, declarerView, 0), /Trick 11/);
+});
+
+test("renderReview: the win percentages read as holds for a declarer and sets for a defender, same seat and numbers", async () => {
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  const result = { decisions: [decision()], worst: [decision()], samples: 24 };
+  assert.match(renderReview(result, declarerView, 0), /which holds the contract/);
+  assert.match(renderReview(result, defenderView, 0), /which sets the contract/,
+    "seat 0 is neither declarer(1) nor partner(3) in defenderView — a defender's own success is 'sets', not 'holds'");
+});
+
+test("renderReview escapes a card label the same way voidsHtml escapes a name", async () => {
+  const { renderReview } = await import("../app/js/ui/coach.js");
+  // cardName() falls back to the raw suit string for one it doesn't recognise
+  // (labels.js: SUIT_NAME[c.suit] || c.suit) — the one way an unexpected
+  // string can reach this panel's markup at all, so it stands in for the
+  // "untrusted card label" the M9 fix and this task's own brief both name.
+  const hostile = decision({ played: { suit: "<img src=x onerror=alert(1)>", rank: 5 } });
+  const html = renderReview({ decisions: [hostile], worst: [hostile], samples: 24 }, declarerView, 0);
+  assert.ok(!html.includes("<img"), "an unescaped card label would inject markup into the modal");
+  assert.match(html, /&lt;img/);
+});

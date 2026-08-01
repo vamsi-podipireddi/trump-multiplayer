@@ -326,3 +326,35 @@
   #sheet-tabs button[aria-expanded="true"] { color:var(--acc); border-top-color:var(--acc); }
   #sheet-tabs .badge { display:inline-block; min-width:16px; margin-left:5px; border-radius:var(--r-pill); background:var(--bad);
     color:#2a0f0a; font-size:var(--t-2xs); font-weight:800; padding:1px 5px; }
+
+/* ---- deal review — the coach's post-deal grading (ui/coach.js's
+   renderReview), opened on demand from the round-result modal's action row
+   (ui/modals.js). Own "dr-" prefix rather than reusing base.css's ".review":
+   that class already names the "where the N went" split-bar breakdown a few
+   rows up in the same modal, the same reason table-read's own rows below
+   carry "tr-" instead of colliding with it. ---- */
+  .deal-review { display:flex; flex-direction:column; gap:14px; margin-bottom:20px; text-align:left; }
+  .deal-review > .muted { margin:0; }
+  .dr-dec { display:flex; flex-direction:column; gap:5px; padding-top:12px; border-top:1px solid var(--line); }
+  .dr-dec:first-child { padding-top:0; border-top:none; }
+  .dr-head { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .dr-trick { font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.16em; text-transform:uppercase; color:var(--txt3); }
+  /* same two colours .pill.off/.pill.ai already carry in the lobby seat list —
+     blunder borrows the "off" red, mistake the neutral "ai" grey, so a third
+     colour is never invented just for this one badge. */
+  .dr-tag { font-family:var(--fm); font-size:var(--t-2xs); letter-spacing:.08em; text-transform:uppercase;
+    padding:2px 8px; border-radius:var(--r-pill); flex:none; }
+  .dr-tag.blunder { background:rgba(224,112,92,.15); color:var(--bad); }
+  .dr-tag.mistake { background:var(--panel2); color:var(--txt2); }
+  .dr-line { font-size:var(--t-sm); color:var(--txt2); line-height:1.5; }
+  .dr-line b { color:var(--txt); font-weight:600; }
+  .dr-line.dr-alt { color:var(--txt3); }
+  .deal-review .note { font-size:var(--t-xs); color:var(--txt3); line-height:1.4; }
+  /* the table's own "AI is thinking" dots (table.css's .seat .think), reused
+     here for the same wait rather than a second spinner motif — that rule is
+     scoped to .seat and hidden by default, so this file gives the class a
+     second, always-visible home instead of fighting that scoping. */
+  .deal-review .think { display:inline-flex; gap:3.5px; align-items:center; margin-left:6px; }
+  .deal-review .think i { width:4px; height:4px; border-radius:50%; background:var(--acc); display:block; animation:dotBob 1.05s var(--e) infinite; }
+  .deal-review .think i:nth-child(2) { animation-delay:.16s; }
+  .deal-review .think i:nth-child(3) { animation-delay:.32s; }
