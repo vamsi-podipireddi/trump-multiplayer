@@ -33,8 +33,9 @@ reasoning behind these choices, see `docs/superpowers/specs/2026-07-27-project-s
 | `src/server/*` | Node + ws adapter |
 | `src/worker/*` | Cloudflare Worker + Durable Object adapter |
 
-Also at the root: `test/` (10 files, run via `node --test`), `scripts/` (`build-assets.js`,
-`gen-icons.js`), `docs/` (this file, the design spec, the implementation plan), `schema.sql`
+Also at the root: `test/` (11 files, run via `node --test`), `scripts/` (`build-assets.js`,
+`gen-icons.js`, `bench-auction-search.js` — the last deliberately outside `npm test`, it takes
+minutes), `docs/` (this file, the design spec, the implementation plan), `schema.sql`
 (optional D1 stats table), `wrangler.toml`, `package.json`.
 
 ## Engine layers (`app/js/core/engine/`)
@@ -54,10 +55,11 @@ above it.
 | L4 | `contract.js` | `applyTrump callableCards callIsLegal applyCall beginPlay` |
 | L4 | `play.js` | `legalCards playIsLegal applyPlay advanceTrick` (`resolveTrick` is module-private) |
 | L5 | `ai/heuristic.js` | `aiBidEstimate aiBidDecision aiPickTrump aiPickPartner chooseAICard` |
-| L5 | `ai/pimc.js` | `cardKey determinize rolloutClone playOutRound choosePIMCCard PIMC_PLAY_BUDGET` |
+| L5 | `ai/pimc.js` | `determinize rolloutClone playOutRound evaluateMoves choosePIMCCard PIMC_PLAY_BUDGET` |
+| L5 | `ai/bid-search.js` | `bidValue aiBidDecisionSearch aiPickTrumpSearch aiPickPartnerSearch` + its three play budgets |
 | L6 | `flow.js` | `requiredActor` |
-| L7 | `ai/index.js` | `aiActionFor` (imports `flow.js` and both AI modules) |
-| L8 | `index.js` | barrel — re-exports the public surface, 36 names |
+| L7 | `ai/index.js` | `aiActionFor` (imports `flow.js` and all three AI modules; `hard` routes every decision to a search, `easy`/`normal` to the hand-count) |
+| L8 | `index.js` | barrel — re-exports the public surface, 42 names |
 
 `redeal` sits in `bidding.js` rather than with match lifecycle, and `requiredActor` / `aiActionFor` sit
 in their own top dispatch layer above everything else — both relocations exist solely to keep the

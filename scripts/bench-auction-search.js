@@ -11,11 +11,21 @@
  *
  * Not run by `npm test` — it takes minutes. Run it deliberately:
  *
- *   node scripts/bench-auction-search.js              # everything, ~4 min
+ *   node scripts/bench-auction-search.js              # everything, ~12 min
  *   node scripts/bench-auction-search.js cost regret  # named sections only
  *   DEALS=40 node scripts/bench-auction-search.js     # smaller/faster
  *
- * Sections: cost | regret | shortlist | calibration | outcome
+ * Sections: cost | regret | shortlist | calibration | outcome | table | threshold
+ *
+ * `table` and `threshold` answer a question the others structurally cannot.
+ * Every number above comes from ONE searching seat against three hand-counters,
+ * but difficulty is a single room setting applied to every bot
+ * (src/core/room/drive.js), so the shipped shape is four searching seats bidding
+ * against each other — and deals-won is blind to that, since exactly two of four
+ * seats win every deal and an all-hard table against an all-hard table is pinned
+ * at 50% by construction. What can be seen is the auction's own shape: where the
+ * contract settles, how often the declaring side is set, how often it hits the
+ * 250 ceiling, and how a lone hand-counter fares at such a table.
  */
 import * as E from "../app/js/core/engine/index.js";
 import { chooseAICard, aiPickTrump, aiPickPartner, aiBidDecision } from "../app/js/core/engine/ai/heuristic.js";
@@ -271,5 +281,212 @@ if (on("outcome")) {
     const pp = win.map(x => x * 100);
     console.log(`  ${label.padEnd(16)}: ${pm(pp)} pp  ${Math.abs(mean(pp)) > ci(pp) ? "(significant)" : "(CI spans 0)"}  contract ${mean(lvl) >= 0 ? "+" : ""}${mean(lvl).toFixed(1)} pts` +
       (extra ? `, bought ${extra} contracts the hand-count did not and won ${(100 * extraWon / extra).toFixed(1)}% of them` : ""));
+  }
+}
+
+// --------------------------------------------------------------- table
+/* Shared by `table` and `threshold`: one whole deal under a per-seat auction
+   policy. Unlike runDeal above it never bails on a redeal — a redeal is one of
+   the things being measured — and it reports the auction's shape rather than one
+   seat's paired result. */
+const CONTRACT_BUCKETS = [130, 140, 150, 160, 170, 180, 190, 200, 210];
+const bucketOf = (b) => Math.min(CONTRACT_BUCKETS.length - 1, Math.floor((b - 130) / 10));
+const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
+
+function playTable(seats, card, probe = {}) {
+  const G = fresh();
+  let turn = 0, guard = 0, redeals = 0;
+  while (G.phase === "bidding" && guard++ < 80) {
+    redeals = Math.max(redeals, G.redealCount);
+    const seat = E.findBidActor(G);
+    if (seat === null) break;
+    E.applyBid(G, seat, seats[seat].bid(G, seat, ++turn));
+  }
+  if (G.phase !== "trumpSelect") return null;
+  /* forceBid writes highBid/highBidder directly and never touches G.bids, so a
+     declarer with no bid on record is one the engine forced to 130 after
+     MAX_REDEALS+1 all-pass auctions — a distinct failure mode from bidding 130. */
+  const forced = G.bids[G.declarer] === null;
+  E.applyTrump(G, seats[G.declarer].trump(G, G.declarer));
+  E.applyCall(G, seats[G.declarer].call(G, G.declarer));
+  let g2 = 0;
+  while ((G.phase === "playing" || G.phase === "trickEnd") && g2++ < 300) {
+    if (G.phase === "trickEnd") { E.advanceTrick(G); continue; }
+    E.applyPlay(G, G.turn, card(G));
+  }
+  /* Only trust the probe when it is about *this* contract: a forced declarer
+     never bid at all, and a redeal leaves the previous auction's entry behind. */
+  const pr = probe[G.declarer];
+  return { bid: G.bid, made: G.lastResult.made, dPts: G.lastResult.dPts,
+           prob: pr && pr.level === G.bid ? pr : null,
+           winners: G.lastResult.winners, redeals, forced, turns: turn };
+}
+
+/* aiBidDecisionSearch inlined so the make-probability behind each bid can be
+   kept (probe) and its 0.5 line swept (thresh). Identical to the shipped
+   function at thresh 0.5 on the same seed — asserted, not assumed, by the
+   equivalence guard at the top of `table`.
+
+   probe[seat] holds the level a seat last *bid* and the probability it bid on.
+   Only bids are recorded: a seat that passes goes on to compute probabilities
+   for levels it never took, and the declarer's winning bid is by definition its
+   last one. */
+const searcher = (d, thresh, probe) => ({
+  bid: (G, s, n) => {
+    const need = E.minNextBid(G);
+    if (need > E.MAX_BID) return null;
+    const p = E.bidValue(G, s, { rnd: E.mulberry32(d * 977 + n) }).makeProb(need);
+    if (p < (thresh === undefined ? 0.5 : thresh)) return null;
+    if (probe) probe[s] = { level: need, p };
+    return need;
+  },
+  trump: (G, s) => aiPickTrumpSearch(G, s, { rnd: E.mulberry32(d * 13 + 1) }),
+  call: (G, s) => aiPickPartnerSearch(G, s, { rnd: E.mulberry32(d * 17 + 2) }),
+});
+const counter = () => ({
+  bid: (G, s) => aiBidDecision(G, s, false, Math.random),
+  trump: (G, s) => aiPickTrump(G, s),
+  call: (G, s) => aiPickPartner(G, s),
+});
+/* `who` is the set of seats that search; everyone else hand-counts. */
+const tableOf = (who, d, thresh, probe) => [0, 1, 2, 3].map(s => (who.includes(s) ? searcher(d, thresh, probe) : counter()));
+
+/* Accumulates one arm's deals into the distribution the deal-win metric cannot
+   see. seatWin is reported for seat 3 specifically: exactly two of four seats win
+   every deal, so any seat's rate is 50% under a symmetric table and a deviation
+   is exactly the asymmetry a mixed table introduces. */
+function tally(rows) {
+  const bids = rows.map(r => r.bid).sort((a, b) => a - b);
+  const hist = CONTRACT_BUCKETS.map(() => 0), lost = CONTRACT_BUCKETS.map(() => 0);
+  rows.forEach(r => { hist[bucketOf(r.bid)]++; if (!r.made) lost[bucketOf(r.bid)]++; });
+  return {
+    n: rows.length, bids, hist,
+    /* "do contracts spiral upward, with declarers set constantly?" is a question
+       about this row, not about the mean: a table whose 180s all fail is unwell
+       however healthy its average looks. */
+    setBy: hist.map((h, i) => (h ? lost[i] / h : null)),
+    mean: mean(bids), ci: ci(bids), p50: pct(bids, 0.5), p90: pct(bids, 0.9), max: bids[bids.length - 1],
+    set: rows.filter(r => !r.made).length / rows.length,
+    ceiling: rows.filter(r => r.bid >= 250).length / rows.length,
+    big: rows.filter(r => r.bid >= 180).length / rows.length,
+    redeal: rows.filter(r => r.redeals > 0).length / rows.length,
+    forced: rows.filter(r => r.forced).length / rows.length,
+    turns: mean(rows.map(r => r.turns)),
+    margin: mean(rows.map(r => r.dPts - r.bid)),
+    seatWin: rows.filter(r => r.winners.includes(3)).length / rows.length,
+  };
+}
+function report(label, t) {
+  console.log(`  ${label.padEnd(22)} contract ${t.mean.toFixed(1)} +/- ${t.ci.toFixed(1)}  p50 ${String(t.p50).padStart(3)}  p90 ${String(t.p90).padStart(3)}  max ${t.max}` +
+    `   set ${(100 * t.set).toFixed(1)}%   >=180 ${(100 * t.big).toFixed(1)}%   250 ${(100 * t.ceiling).toFixed(1)}%` +
+    `   redeal ${(100 * t.redeal).toFixed(1)}%  forced ${(100 * t.forced).toFixed(1)}%   ${t.turns.toFixed(1)} bids   margin ${t.margin >= 0 ? "+" : ""}${t.margin.toFixed(1)}   seat3 wins ${(100 * t.seatWin).toFixed(1)}%`);
+}
+function histTable(labels, tallies) {
+  const w = 6;
+  const head = `  ${"".padEnd(22)}${CONTRACT_BUCKETS.map((b, i) => (i === CONTRACT_BUCKETS.length - 1 ? b + "+" : String(b)).padStart(w)).join("")}`;
+  console.log(`  winning contract, % of deals in each 10-point band:`);
+  console.log(head);
+  labels.forEach((l, i) => console.log(`  ${l.padEnd(22)}${tallies[i].hist.map(h => (100 * h / tallies[i].n).toFixed(1).padStart(w)).join("")}`));
+  console.log(`\n  and the % of those the declaring side was SET in ("." = fewer than 20 deals in the band):`);
+  console.log(head);
+  labels.forEach((l, i) => console.log(`  ${l.padEnd(22)}${tallies[i].setBy.map((s, j) =>
+    (tallies[i].hist[j] < 20 ? "." : (100 * s).toFixed(1)).padStart(w)).join("")}`));
+}
+
+if (on("table")) {
+  const N = Number(process.env.TDEALS || 1000);
+  const P = Number(process.env.TPIMC || 200);
+  const heurCard = (G) => chooseAICard(G, G.turn, false, Math.random);
+  const pimcCard = (G) => E.choosePIMCCard(G, G.turn);
+  const ARMS = [["all hand-count", []], ["all search (hard)", [0, 1, 2, 3]],
+                ["1 search vs 3", [0]], ["3 search vs 1 (seat 3)", [0, 1, 2]]];
+  console.log(`\n== table: what the auction settles at when every seat searches (${N} deals, heuristic card play) ==`);
+  /* searcher() reimplements aiBidDecisionSearch to keep the probability; pin the
+     two together before any number below rests on the reimplementation. */
+  let drift = 0;
+  for (let d = 0; d < 200; d++) {
+    const G = fresh(), s = E.findBidActor(G), rnd = () => E.mulberry32(d * 977 + 1);
+    const mine = E.bidValue(G, s, { rnd: rnd() }).makeProb(E.minNextBid(G)) >= 0.5 ? E.minNextBid(G) : null;
+    if (mine !== aiBidDecisionSearch(G, s, { rnd: rnd() })) drift++;
+  }
+  console.log(`  the probe's inlined bid vs the shipped aiBidDecisionSearch: ${drift}/200 disagreements (must be 0)`);
+
+  const labels = [], tallies = [], calib = [];
+  for (const [label, who] of ARMS) {
+    const rows = [];
+    for (let d = 0; d < N; d++) { const probe = {}; const r = playTable(tableOf(who, d, undefined, probe), heurCard, probe); if (r) rows.push(r); }
+    labels.push(label); tallies.push(tally(rows)); report(label, tallies[tallies.length - 1]);
+    if (who.length === 4) calib.push(...rows.filter(r => r.prob));
+  }
+  histTable(labels, tallies);
+
+  /* The crux of "is 0.5 too loose for a symmetric table": what the declarer's own
+     make-probability was at the level it won the auction with, against whether it
+     then made it. A line is too loose if the deals bid at it are lost more often
+     than passing would have been — and passing is worth (1/3)(1-set) + (2/3)(set),
+     since the called card lands with each of the other three seats a third of the
+     time. Both sides of that comparison are printed. */
+  const BANDS = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.85], [0.85, 1.01]];
+  const setRate = tallies[1].set;
+  console.log(`\n  all-search declarers, by the make-probability they bid the winning level on:`);
+  for (const [lo, hi] of BANDS) {
+    const in_ = calib.filter(r => r.prob.p >= lo && r.prob.p < hi);
+    if (!in_.length) continue;
+    console.log(`    p in [${lo}, ${hi === 1.01 ? "1.0" : hi})  n ${String(in_.length).padStart(5)}  contract ${mean(in_.map(r => r.bid)).toFixed(1)}` +
+      `  actually made ${(100 * in_.filter(r => r.made).length / in_.length).toFixed(1)}%  (= the declaring side's deal-win rate; scoring is binary)`);
+  }
+  console.log(`    passing instead is worth ${(100 * ((1 / 3) * (1 - setRate) + (2 / 3) * setRate)).toFixed(1)}% of deals at this table's ${(100 * setRate).toFixed(1)}% set rate`);
+
+  /* The rows above roll out with the heuristic, which is what the search itself
+     assumes — so they could be self-consistent and still wrong about the table
+     that ships, where all four seats play PIMC. Same two arms, real card play. */
+  console.log(`\n  the same two symmetric arms with PIMC card play, i.e. the tier as shipped (${P} deals):`);
+  for (const [label, who] of [ARMS[0], ARMS[1]]) {
+    const rows = [];
+    for (let d = 0; d < P; d++) { const r = playTable(tableOf(who, d), pimcCard); if (r) rows.push(r); }
+    report(label, tally(rows));
+  }
+}
+
+// ----------------------------------------------------------- threshold
+/* aiBidDecisionSearch bids when makeProb(need) >= 0.5. Bidding to a coin flip is
+   right when the opponents underbid and reckless when they do not, so a
+   symmetric table is exactly where that line should be re-examined. Both halves
+   matter: raising it must be paid for in the asymmetric regime the +2.77pp
+   result came from, or it is a trade rather than an improvement. */
+if (on("threshold")) {
+  const N = Number(process.env.THDEALS || 800);
+  const M = Number(process.env.THPAIRED || 2500);
+  const THRESHOLDS = [0.5, 0.55, 0.6, 0.65];
+  const heurCard = (G) => chooseAICard(G, G.turn, false, Math.random);
+  console.log(`\n== threshold: the makeProb line, at an all-search table (${N} deals) and against hand-counters (${M} paired) ==`);
+  const labels = [], tallies = [];
+  for (const T of THRESHOLDS) {
+    const rows = [];
+    for (let d = 0; d < N; d++) { const r = playTable(tableOf([0, 1, 2, 3], d, T), heurCard); if (r) rows.push(r); }
+    labels.push(`all search @ ${T}`); tallies.push(tally(rows)); report(labels[labels.length - 1], tallies[tallies.length - 1]);
+  }
+  histTable(labels, tallies);
+
+  console.log(`\n  and what each line is worth in the asymmetric regime (seat 0 searches, 1-3 hand-count):`);
+  const heur = (d) => (G, seat) => aiBidDecision(G, seat, false, E.mulberry32(d * 31 + seat + G.bidTurn * 7));
+  for (const T of THRESHOLDS) {
+    const bidAt = (d) => (G, s) => {
+      if (s !== 0) return heur(d)(G, s);
+      const need = E.minNextBid(G);
+      if (need > E.MAX_BID) return null;
+      return E.bidValue(G, s, { rnd: E.mulberry32(d * 97 + G.bidTurn) }).makeProb(need) >= T ? need : null;
+    };
+    const win = [], lvl = [];
+    for (let d = 0; d < M; d++) {
+      const snap = JSON.stringify(fresh());
+      const S = runDeal(snap, bidAt(d), (G, s) => aiPickTrump(G, s), (G, s) => aiPickPartner(G, s));
+      const H = runDeal(snap, heur(d), (G, s) => aiPickTrump(G, s), (G, s) => aiPickPartner(G, s));
+      if (!S || !H) continue;
+      win.push((S.lastResult.winners.includes(0) ? 1 : 0) - (H.lastResult.winners.includes(0) ? 1 : 0));
+      lvl.push(S.bid - H.bid);
+    }
+    const pp = win.map(x => x * 100);
+    console.log(`    bid @ ${T}: ${pm(pp)} pp of deals won  ${Math.abs(mean(pp)) > ci(pp) ? "(significant)" : "(CI spans 0)"}   contract ${mean(lvl) >= 0 ? "+" : ""}${mean(lvl).toFixed(1)} pts`);
   }
 }

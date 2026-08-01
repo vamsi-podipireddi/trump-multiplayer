@@ -9,7 +9,7 @@ import * as E from "../app/js/core/engine/index.js";
    frozen oracle below must NOT duplicate. It is unmodified by this task, so
    importing the live function is safe: only the oracle's own accumulator math
    needs to be frozen, not everything it calls. */
-import { chooseAICard as legacyChooseAICard, aiPickTrump, aiPickPartner } from "../app/js/core/engine/ai/heuristic.js";
+import { chooseAICard as legacyChooseAICard, aiPickTrump, aiPickPartner, aiBidDecision } from "../app/js/core/engine/ai/heuristic.js";
 /* Same exception, same reason: the auction budgets are internal tuning constants
    deliberately kept off the barrel (as PIMC_PLAY_BUDGET is), but they encode a
    measured result and a silent reset of them would undo this task's content. */
@@ -372,6 +372,131 @@ test("the auction budgets still buy enough worlds per candidate to beat the hand
   const G = E.createMatch(); E.startMatch(G);
   assert.equal(E.bidValue(G, E.findBidActor(G), { rnd: E.mulberry32(5) }).samples.length,
                worldsPer(1, BID_PLAY_BUDGET));
+});
+
+/* ---- the difficulty tiers (ai/index.js) ---- */
+
+test("every difficulty produces a legal auction action", () => {
+  for (let trial = 0; trial < 8; trial++) {
+    const G = E.createMatch(); E.startMatch(G);
+    const seat = E.findBidActor(G);
+    for (const level of ["easy", "normal", "hard"]) {
+      const act = E.aiActionFor(G, seat, level);
+      assert.equal(act.type, "bid");
+      assert.ok(act.value === null || E.bidIsLegal(G, seat, act.value), `${level} produced an illegal bid`);
+    }
+    let guard = 0;
+    // an all-pass auction redeals and stays in "bidding", so this is not one pass of four
+    while (G.phase !== "partnerSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
+    const call = E.aiActionFor(G, G.declarer, "hard");
+    assert.equal(call.type, "call");
+    assert.ok(E.callIsLegal(G, call.card), "hard called a card it already holds");
+  }
+});
+
+/* The three routing tests below are the content of this task. Each one is
+   written so that the *unwired* engine — hard answering the auction with the
+   hand-count, as every tier did before — scores exactly zero on the statistic,
+   rather than merely scoring lower. That is what makes them fail before the
+   change instead of passing marginally.
+
+   The bid needs the extra care: aiBidDecision adds rnd()*16-8 to its estimate,
+   so an unwired `hard` and a `normal` disagree on their own a few percent of the
+   time and a naive difference count would pass without the wiring. Pinning the
+   noise to each end of its range instead gives the two verdicts the hand-count
+   *cannot* contradict however the die falls — and an unwired hard is the
+   hand-count, so it contradicts them zero times by construction.
+
+   Measured over 400 opening positions: the search contradicts a forced verdict
+   16.3% of the time (22.6% across every turn of a live auction, where the target
+   is higher and the hand-count's flat +60 hurts most). At 80 positions the
+   expected count is ~13; requiring 2 is ~5 sd low, P(fail) ~ 2e-5. */
+test("hard bids from the search: it contradicts verdicts the hand-count cannot", () => {
+  const POSITIONS = 80;
+  let forced = 0, contradicted = 0;
+  for (let t = 0; t < POSITIONS; t++) {
+    const G = E.createMatch(); E.startMatch(G);
+    const seat = E.findBidActor(G);
+    const bids = (v) => v !== null;
+    // rnd() = 0 is the estimate's floor (-8), rnd() ~ 1 its ceiling (+8)
+    const floorBids = bids(aiBidDecision(G, seat, false, () => 0));
+    const ceilBids = bids(aiBidDecision(G, seat, false, () => 1 - 1e-9));
+    if (floorBids === ceilBids) {                       // the hand-count is forced either way
+      forced++;
+      if (bids(E.aiActionFor(G, seat, "hard").value) !== floorBids) contradicted++;
+    }
+  }
+  assert.ok(forced > POSITIONS / 4, `too few forced hand-count verdicts to test (${forced})`);
+  assert.ok(contradicted >= 2,
+    `hard's bid left the hand-count's forced verdict only ${contradicted} times of ${forced} — the search is not wired in`);
+});
+
+/* Unlike the bid, aiPickTrump and aiPickPartner are deterministic, so any
+   disagreement at all proves the search answered. Measured over 60 declared
+   deals: the searched trump differs 20% of the time and the searched call 50%,
+   so 16 deals expect ~11 of 32 decisions to move; requiring 3 is ~3 sd low.
+   The easy/normal assertions are exact — those tiers must not drift. */
+test("hard picks trump and the call from the search; easy and normal keep the hand-count", () => {
+  const DEALS = 16;
+  let differ = 0;
+  for (let d = 0; d < DEALS; d++) {
+    const G = E.createMatch(); E.startMatch(G);
+    let guard = 0;
+    while (G.phase !== "trumpSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
+    const seat = G.declarer;
+    const hT = aiPickTrump(G, seat);
+    for (const level of ["easy", "normal"])
+      assert.equal(E.aiActionFor(G, seat, level).suit, hT, `${level} must keep the hand-count's trump`);
+    if (E.aiActionFor(G, seat, "hard").suit !== hT) differ++;
+    E.applyTrump(G, hT);                                // both tiers judged on one position
+    const hC = aiPickPartner(G, seat);
+    for (const level of ["easy", "normal"])
+      assert.deepEqual(E.aiActionFor(G, seat, level).card, hC, `${level} must keep the hand-count's call`);
+    if (!E.sameCard(E.aiActionFor(G, seat, "hard").card, hC)) differ++;
+  }
+  assert.ok(differ >= 3,
+    `hard's trump and call never left the hand-count (${differ} of ${2 * DEALS} decisions) — the search is not wired in`);
+});
+
+/* Difficulty is one room setting applied to every bot, so the shape that ships
+   is four searching seats bidding against each other, not one against three
+   hand-counters. Deals won is structurally blind to that — exactly two of four
+   seats win every deal, so an all-hard table scores 50% against itself whatever
+   the seats do — and the auction's own level is the statistic that is not.
+
+   Paired on the dealt hands and stopped at the declaration, so this costs four
+   auctions a deal and no card play at all. Calibrated the way the budgets above
+   were: over 40 runs of 20 paired deals the difference sits at +13.7 (sd 2.4,
+   min 6.8) as wired, and at +0.2 (sd 1.2, max 2.3) for the unwired engine
+   (normal against normal, which is what hard *was*). +5 is 3.6 sd below shipped
+   and 4.1 sd above the null.
+
+   That the extra ambition is *paid for* — set 33.8% against the hand-count's
+   26.9%, buying 13 points of contract with 8.6 points of margin that a binary
+   score wastes anyway — is scripts/bench-auction-search.js `table`'s result over
+   4000 deals a side. No test cheap enough for `npm test` can see it. */
+test("an all-hard table bids the auction up, where an all-normal one does not", () => {
+  const DEALS = 20;
+  const auctionLevel = (snap, level) => {
+    const G = JSON.parse(snap);
+    let guard = 0;
+    while (G.phase === "bidding" && guard++ < 80) {
+      const seat = E.findBidActor(G);
+      if (seat === null) break;
+      E.applyBid(G, seat, E.aiActionFor(G, seat, level).value);
+    }
+    return G.phase === "trumpSelect" ? G.bid : null;    // an all-pass redeal has no contract
+  };
+  const diffs = [];
+  for (let d = 0; d < DEALS; d++) {
+    const snap = JSON.stringify((() => { const G = E.createMatch(); E.startMatch(G); return G; })());
+    const hard = auctionLevel(snap, "hard"), normal = auctionLevel(snap, "normal");
+    if (hard !== null && normal !== null) diffs.push(hard - normal);
+  }
+  assert.ok(diffs.length >= DEALS - 2, `${DEALS - diffs.length} of ${DEALS} auctions never declared`);
+  const lift = diffs.reduce((a, b) => a + b, 0) / diffs.length;
+  assert.ok(lift >= 5,
+    `an all-hard auction settled only ${lift.toFixed(1)} pts above an all-normal one over ${diffs.length} paired deals`);
 });
 
 /* ============================================================
