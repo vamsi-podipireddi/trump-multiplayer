@@ -6,10 +6,7 @@
    incapable of cheating. */
 import * as E from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
-// reviewDeal (./review.js) lands in Task 9, which adds a dedicated "review"
-// branch here. Until then an unrecognised "review" kind falls through to the
-// generic "unknown request" answer below — already an honest ok:false, so
-// there is nothing for a stub branch to add.
+import { reviewDeal } from "./review.js";
 
 /* Background-thread budget: generous, because nothing here blocks a frame.
    client.js's synchronous fallback (no worker available) passes
@@ -42,6 +39,24 @@ function handleRequest(msg) {
         (b.winProb * 1000 + b.meanPoints) - (a.winProb * 1000 + a.meanPoints));
       return { id: msg.id, ok: true, result: { kind: "play", moves, best: moves[0],
                                                determinizations: ev.determinizations } };
+    }
+    if (msg.kind === "review") {
+      const view = msg.view;
+      /* Same honesty as the hint branch above: a review only means something
+         once a deal has actually finished and v.tricks — the whole public
+         record reviewDeal reconstructs positions from — is there to read.
+         Anything else is an honest refusal, not a review of a partial or
+         nonexistent deal. */
+      if (!view || (view.phase !== "roundEnd" && view.phase !== "matchOver") ||
+          !Array.isArray(view.tricks) || !view.tricks.length)
+        return { id: msg.id, ok: false, error: "no finished deal in this view" };
+      /* No seed here, deliberately: client.js mints a fresh random one per
+         request (requestReview rides the same request() as requestHint), and
+         reviewDeal's own default instead derives the seed from the deal
+         itself — so re-requesting a review of the same finished deal prints
+         the same numbers regardless of how many times it's been asked for. */
+      const result = reviewDeal(view, msg.seat, {});
+      return { id: msg.id, ok: true, result };
     }
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
   } catch (e) {

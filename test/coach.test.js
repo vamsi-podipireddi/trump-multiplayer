@@ -8,6 +8,7 @@ import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest } from "../app/js/coach/worker.js";
+import { reviewDeal } from "../app/js/coach/review.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -274,6 +275,167 @@ test("a seeded hint repeats", () => {
     const b = handleRequest({ id: 2, kind: "hint", view: v, seed: 9 });
     assert.deepEqual(a.result, b.result, "same seed, same answer");
   });
+});
+
+// ---------------------------------------------------------------------------
+// review.js — post-deal review. A finished deal is fully public: v.tricks
+// holds all 13 tricks x 4 cards, each tagged with its player, so a review
+// reconstructs the position seat actually faced at each of its own decision
+// points from that record alone and re-searches it. The tests below check
+// three things: the shape of a review (every real decision, and only real
+// decisions), that it is reproducible, and — the property review.js's whole
+// claim to honesty rests on — that no position it hands the search ever
+// carries a card, void, or count seat could not yet have known.
+
+/* Play a deal to completion, then review it from seat 0's chair. drive()'s
+   onStep only ever fires right after an action (bid/trump/call/play) — and
+   reaching "roundEnd" happens through a fired timer instead, which is
+   exactly why drive() itself stopped checking for "roundEnd" the same way
+   (see its own comment above) — so there is no step at which onStep
+   observes phase==="roundEnd". Driving to the *match's* own end instead
+   sidesteps that: once drive() returns, room.G.phase is "matchOver" and
+   room.G.tricks (reset at the start of every deal) holds exactly the last
+   deal played — a real, finished, fully public deal either way. */
+function finishedDeal() {
+  let ref = null;
+  drive((room, pids) => { if (!ref) ref = { room, pids }; });
+  return R.buildView(ref.room, ref.pids[0], 0);
+}
+
+test("a review covers every real decision and nothing else", () => {
+  const v = finishedDeal();
+  assert.ok(v, "no finished deal was captured");
+  const r = reviewDeal(v, 0, { seed: 3 });
+  assert.ok(r.decisions.length > 0 && r.decisions.length <= 13, `implausible count ${r.decisions.length}`);
+  for (const d of r.decisions) {
+    assert.ok(d.trickNo >= 1 && d.trickNo <= 13);
+    assert.ok(d.delta >= 0, "a decision cannot beat the search's own best");
+    assert.ok(["blunder", "mistake", "fine"].includes(d.grade));
+  }
+  assert.ok(r.worst.length <= 2);
+  assert.ok(r.samples > 0, "a review of a real deal must have sampled at least one world somewhere");
+});
+
+test("a review is reproducible", () => {
+  const v = finishedDeal();
+  assert.deepEqual(reviewDeal(v, 0, { seed: 5 }), reviewDeal(v, 0, { seed: 5 }));
+});
+
+/* Independent ground truth for "what seat actually knew, right before each of
+   its own plays": shadowFromView applied to the *real* intermediate view built
+   live during a drive, not anything review.js derives — the same trusted
+   derivation the rest of this file checks against the server, not a second
+   copy of review.js's own logic that could share its bugs.
+
+   Unlike finishedDeal() above, this can't reuse drive()'s onStep: onStep
+   fires only after an action, but the step where seat *becomes* a new
+   trick's leader happens via a fired timer (advanceTrick), with no action —
+   and so no onStep call — in between, and by the next onStep call seat has
+   already led. So this drives the match itself, capturing right where
+   drive() calls E.requiredActor(), before that action is applied. Keyed by
+   trickNo using the identity shadow.js documents (trickNumber === completed
+   tricks while phase is "playing"). */
+function finishedDealWithLiveTruth(seat) {
+  const room = R.createRoom("TEST");
+  const pids = [];
+  for (let i = 0; i < 4; i++) {
+    const { pid } = R.join(room, { name: "P" + i }, 0);
+    pids.push(pid);
+    R.message(room, pid, { type: "sit", seat: i }, 0);
+  }
+  R.message(room, pids[0], { type: "start" }, 0);
+  const live = {};
+  for (let step = 0; step < 5000 && room.G.phase !== "matchOver"; step++) {
+    if (room.G.phase === "roundEnd") { for (const pid of pids) R.message(room, pid, { type: "ready" }, 0); continue; }
+    const ra = E.requiredActor(room.G);
+    if (!ra) { R.fireTimers(room, 1e9); continue; }
+    if (ra.kind === "play" && ra.seat === seat) {
+      const v = R.buildView(room, pids[seat], 0);
+      if (v.you.toAct) live[(v.tricks || []).length + 1] = shadowFromView(v);
+    }
+    R.message(room, pids[ra.seat], E.aiActionFor(room.G, ra.seat, "normal"), 0);
+  }
+  return { v: R.buildView(room, pids[0], 0), live };
+}
+
+test("the review never sees a card the player could not", () => {
+  /* The brief's own version of this test only asserts a position's card
+     count against the prefix it should carry — that rules out the crude
+     leak (a position built from the whole deal instead of a prefix), but it
+     would not catch a subtler one: an implementation that gets the count
+     right while still smuggling in a fact only a later trick reveals — a
+     void inferred one trick early, an opponent hand length that already
+     reflects a card not yet played, or (what this file's own early draft
+     actually had, caught by exactly this test) capturedPoints/tricksWon that
+     already carry the deal's own final outcome, or a copied-through v.phase
+     that silently turns every rollout into a no-op so every card grades
+     identically. A count can't see any of that. So alongside the count
+     check, tap compares every position against the real position seat held
+     at that exact moment, captured live during an actual drive — not a
+     second derivation that could share review.js's own bugs. */
+  const { v, live } = finishedDealWithLiveTruth(0);
+  assert.ok(v, "no finished deal was captured");
+  const keys = cs => cs.map(c => (c ? c.suit + c.rank : "null")).sort(); // hand contents, not order: shadow.js's live hand is suit-sorted, review.js's is reconstructed in play order
+  let compared = 0;
+  const r = reviewDeal(v, 0, { seed: 5, _tap: (pos, trickNo) => {
+    assert.ok(pos.playedCards.length <= (trickNo - 1) * 4 + 3,
+      `position at trick ${trickNo} carried ${pos.playedCards.length} played cards — it saw the future`);
+    for (const c of pos.hands[0]) assert.ok(c && c.suit, "my own hand must be real at every point");
+
+    const truth = live[trickNo];
+    assert.ok(truth, `no live snapshot captured for trick ${trickNo}`);
+    // rolloutClone/playOutRound gate every simulated play on phase==="playing";
+    // a leaked-through "roundEnd" would make every legal card score
+    // identically instead of throwing, so nothing above would ever catch it.
+    assert.equal(pos.phase, "playing");
+    assert.equal(pos.phase, truth.phase);
+    assert.deepEqual(pos.voids, truth.voids, `voids at trick ${trickNo} disagree with the live position`);
+    assert.deepEqual(pos.playedCards, truth.playedCards, `playedCards at trick ${trickNo} disagree with the live position`);
+    assert.deepEqual(pos.capturedPoints, truth.capturedPoints, `capturedPoints at trick ${trickNo} leaked the deal's own outcome`);
+    assert.deepEqual(pos.tricksWon, truth.tricksWon, `tricksWon at trick ${trickNo} leaked the deal's own outcome`);
+    assert.deepEqual(pos.trick, truth.trick, `the trick in progress at ${trickNo} disagrees with the live position`);
+    assert.equal(pos.leadSuit, truth.leadSuit, `leadSuit at trick ${trickNo} disagrees with the live position`);
+    assert.equal(pos.trickNumber, truth.trickNumber);
+    assert.equal(pos.leader, truth.leader);
+    assert.equal(pos.lastWinner, truth.lastWinner);
+    for (const p of [0, 1, 2, 3]) assert.deepEqual(keys(pos.hands[p]), keys(truth.hands[p]),
+      `seat ${p}'s hand at trick ${trickNo} disagrees with the live position`);
+    compared++;
+  } });
+  assert.ok(r.decisions.length > 0);
+  assert.ok(compared > 0, "no tapped position was checked against a live snapshot");
+  assert.equal(compared, r.decisions.length, "every real decision must have a live snapshot to check it against");
+});
+
+test("the worker answers a review request from a view alone, and reopening it prints the same numbers", () => {
+  const v = finishedDeal();
+  assert.ok(v, "no finished deal was captured");
+  // client.js mints a fresh random seed on *every* request (requestReview
+  // rides the same request() as requestHint) — two different msg.seed values
+  // here stand in for "the player closed and reopened the review". If the
+  // worker branch forwarded msg.seed into reviewDeal instead of leaving it to
+  // derive one from the deal, these would disagree.
+  const a = handleRequest({ id: 1, kind: "review", view: v, seat: 0, seed: 111 });
+  const b = handleRequest({ id: 2, kind: "review", view: v, seat: 0, seed: 222 });
+  assert.ok(a.ok, `review failed: ${a.error}`);
+  assert.ok(Array.isArray(a.result.decisions) && a.result.decisions.length > 0, "a review must find at least one decision");
+  assert.deepEqual(a.result, b.result, "reopening a review — a fresh request seed — must print the same numbers");
+});
+
+test("the worker refuses a review request for a deal that has not finished", () => {
+  let checked = 0;
+  drive((room, pids) => {
+    if (room.G.phase !== "playing" || checked > 3) return;
+    const v = R.buildView(room, pids[0], 0);
+    const res = handleRequest({ id: 4, kind: "review", view: v, seat: 0, seed: 1 });
+    assert.equal(res.ok, false, "a deal still in progress must not be reviewable");
+    assert.match(res.error, /finished/i);
+    checked++;
+  });
+  assert.ok(checked > 0, "no in-progress view was exercised");
+  const res = handleRequest({ id: 5, kind: "review", view: { you: {} }, seat: 0, seed: 1 });
+  assert.equal(res.ok, false);
+  assert.ok(typeof res.error === "string" && res.error.length, "a failure must explain itself");
 });
 
 // ---------------------------------------------------------------------------
