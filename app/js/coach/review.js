@@ -162,7 +162,15 @@ function gradeOf(delta) {
    (tests only; production leaves this to seedFromDeal). opts._tap(pos,
    trickNo): called with every position right before it is handed to the
    search — the one affordance that makes C5 checkable against the real
-   positions instead of trusting this file's own comments. */
+   positions instead of trusting this file's own comments.
+
+   Each entry in the returned decisions also carries its own `samples`
+   (that decision's evaluateMoves' own determinizations, not just the
+   deal-wide minimum) — with timeMs: Infinity below, that count is a pure
+   function of REVIEW_PLAY_BUDGET and the position, so it is exactly what
+   evaluateMoves' own affordable/maxDet formula predicts, every time. That
+   is what makes it possible to check, rather than merely comment, that
+   nothing here is quietly clock-limited (see test/coach.test.js). */
 function reviewDeal(v, seat, opts) {
   const seed = (opts && opts.seed != null) ? opts.seed : seedFromDeal(v);
   const tap = opts && opts._tap;
@@ -173,7 +181,6 @@ function reviewDeal(v, seat, opts) {
   const running = { playedCards: [], voids: [{}, {}, {}, {}], tricksWon: [0, 0, 0, 0], capturedPoints: [0, 0, 0, 0] };
 
   const decisions = [];
-  let minSamples = Infinity;
 
   for (let idx = 0; idx < tricks.length; idx++) {
     const t = tricks[idx];
@@ -183,7 +190,19 @@ function reviewDeal(v, seat, opts) {
 
     if (E.legalCards(pos, seat).length > 1) { // else no decision was made — a forced play, skip it
       if (tap) tap(pos, idx + 1);
-      const ev = E.evaluateMoves(pos, seat, { playBudget: perDecisionBudget, rnd: E.mulberry32(seed + idx + 1) });
+      /* timeMs: Infinity, deliberately — evaluateMoves defaults it to 25 and
+         enforces it as a real wall-clock cutoff after the 4th determinization
+         (ai/pimc.js). That default is a no-op on the server (Workers freeze
+         Date.now() between I/O — the reason ROADMAP M9 moved PIMC's own
+         budget onto simulated plays in the first place), but this file runs
+         in a browser Worker, where the clock keeps ticking: left at 25 it
+         would silently cap search depth below what REVIEW_PLAY_BUDGET
+         affords on a slow device or a busy tab, and — the part that actually
+         matters — make reviewDeal non-deterministic, since two calls could
+         race the clock to different determinization counts. playBudget alone
+         is the bound; nothing here should also depend on how fast the CPU
+         happened to be. */
+      const ev = E.evaluateMoves(pos, seat, { playBudget: perDecisionBudget, timeMs: Infinity, rnd: E.mulberry32(seed + idx + 1) });
       if (ev) { // null only if the sampler couldn't build any consistent world — rare; skip rather than fabricate a grade
         const playedMove = ev.moves.find(m => E.sameCard(m.card, playedCard));
         const bestMove = ev.moves.reduce((a, b) => (moveScore(b) > moveScore(a) ? b : a));
@@ -191,16 +210,18 @@ function reviewDeal(v, seat, opts) {
         decisions.push({
           trickNo: idx + 1, played: playedMove.card, best: bestMove.card,
           playedWinProb: playedMove.winProb, bestWinProb: bestMove.winProb,
-          delta, grade: gradeOf(delta),
+          delta, grade: gradeOf(delta), samples: ev.determinizations,
         });
-        minSamples = Math.min(minSamples, ev.determinizations);
       }
     }
     foldTrick(running, t);
   }
 
   const worst = decisions.filter(d => d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2);
-  return { decisions, worst, samples: Number.isFinite(minSamples) ? minSamples : 0 };
+  // The aggregate is derived from the per-decision counts, not tracked
+  // separately, so the two can never drift apart from each other.
+  const samples = decisions.length ? Math.min(...decisions.map(d => d.samples)) : 0;
+  return { decisions, worst, samples };
 }
 
 export { reviewDeal, REVIEW_PLAY_BUDGET, BLUNDER_WIN_DELTA, MISTAKE_WIN_DELTA };

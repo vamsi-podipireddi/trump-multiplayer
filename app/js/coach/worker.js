@@ -11,8 +11,23 @@ import { reviewDeal } from "./review.js";
 /* Background-thread budget: generous, because nothing here blocks a frame.
    client.js's synchronous fallback (no worker available) passes
    FALLBACK_HINT_BUDGET instead — small enough that running it on the thread
-   painting the UI doesn't read as a stall. */
-const HINT_BUDGET = { determinizations: 48, playBudget: 120000, timeMs: 400 };
+   painting the UI doesn't read as a stall.
+
+   timeMs: Infinity here, deliberately, not merely generous: evaluateMoves
+   enforces its timeMs as a real wall-clock cutoff after the 4th
+   determinization (ai/pimc.js), and unlike server-side PIMC — where that
+   cutoff is a no-op because Workers freeze Date.now() between I/O, the
+   reason ROADMAP M9 moved PIMC's own budget onto simulated plays in the
+   first place — this file runs in a browser Worker, where the clock keeps
+   ticking. A finite timeMs would make "a seeded hint repeats" (its own
+   reproducibility promise, tested in test/coach.test.js) hold only on a
+   fast, unloaded machine: two calls to the same seed could race the clock
+   to a different determinization count under load. playBudget alone is the
+   bound. FALLBACK_HINT_BUDGET keeps a real, finite timeMs (30ms) instead —
+   deliberately, the one place a clock guard is still the right tool: it
+   runs synchronously on the thread painting the UI, where not stalling a
+   frame matters more than a hint being bit-for-bit reproducible. */
+const HINT_BUDGET = { determinizations: 48, playBudget: 120000, timeMs: Infinity };
 const FALLBACK_HINT_BUDGET = { determinizations: 8, playBudget: 6000, timeMs: 30 };
 
 /* Pure: takes a request, returns a response. Exported separately from the

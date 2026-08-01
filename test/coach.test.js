@@ -8,7 +8,7 @@ import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest } from "../app/js/coach/worker.js";
-import { reviewDeal } from "../app/js/coach/review.js";
+import { reviewDeal, REVIEW_PLAY_BUDGET } from "../app/js/coach/review.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -393,6 +393,11 @@ test("the review never sees a card the player could not", () => {
     assert.deepEqual(pos.playedCards, truth.playedCards, `playedCards at trick ${trickNo} disagree with the live position`);
     assert.deepEqual(pos.capturedPoints, truth.capturedPoints, `capturedPoints at trick ${trickNo} leaked the deal's own outcome`);
     assert.deepEqual(pos.tricksWon, truth.tricksWon, `tricksWon at trick ${trickNo} leaked the deal's own outcome`);
+    // scores is inert to today's search (nothing in ai/pimc.js or ai/heuristic.js
+    // reads it back), but preRoundScores() still exists to keep it that way
+    // honestly rather than by accident — this is the one place that gets
+    // codified instead of only checked out-of-band during review.
+    assert.deepEqual(pos.scores, truth.scores, `scores at trick ${trickNo} leaked this round's own outcome`);
     assert.deepEqual(pos.trick, truth.trick, `the trick in progress at ${trickNo} disagrees with the live position`);
     assert.equal(pos.leadSuit, truth.leadSuit, `leadSuit at trick ${trickNo} disagrees with the live position`);
     assert.equal(pos.trickNumber, truth.trickNumber);
@@ -405,6 +410,41 @@ test("the review never sees a card the player could not", () => {
   assert.ok(r.decisions.length > 0);
   assert.ok(compared > 0, "no tapped position was checked against a live snapshot");
   assert.equal(compared, r.decisions.length, "every real decision must have a live snapshot to check it against");
+});
+
+/* evaluateMoves defaults timeMs to 25 and enforces it as a real wall-clock
+   cutoff (ai/pimc.js) — a no-op on the server (Workers freeze Date.now()
+   between I/O, per ROADMAP M9) but not in the browser Worker this file runs
+   in, where a left-in-place default would silently shave determinizations
+   off under load and make "a review is reproducible" above true only on a
+   fast, unloaded machine. review.js passes timeMs: Infinity specifically so
+   REVIEW_PLAY_BUDGET is the *only* thing governing search depth — which
+   means, with no clock in the way, evaluateMoves' own affordable/maxDet
+   formula predicts *exactly* how many determinizations every decision must
+   have spent. This computes that prediction independently (the same
+   arithmetic pimc.js does, not a call into it) for every real decision and
+   checks it against what reviewDeal actually reports — a reintroduced clock
+   cut would silently shave the reported count down instead of throwing, so
+   only an exact per-decision equality check catches it. */
+test("a review's determinization budget is not silently cut by a wall clock", () => {
+  const v = finishedDeal();
+  const perDecisionBudget = Math.max(1, Math.floor(REVIEW_PLAY_BUDGET / v.tricks.length));
+  const expected = {}; // trickNo -> determinizations evaluateMoves' own formula affords that position
+  const r = reviewDeal(v, 0, { seed: 7, _tap: (pos, trickNo) => {
+    const cardsLeft = pos.hands.reduce((n, h) => n + h.length, 0) || 1;
+    const legalCount = E.legalCards(pos, 0).length;
+    const affordable = Math.max(1, Math.floor(perDecisionBudget / (Math.max(1, legalCount) * cardsLeft)));
+    expected[trickNo] = Math.min(24, affordable); // 24: evaluateMoves' own default when opts.determinizations is unset, as reviewDeal leaves it
+  } });
+  assert.ok(r.decisions.length > 0, "no decisions to check");
+  for (const d of r.decisions) {
+    assert.equal(d.samples, expected[d.trickNo],
+      `trick ${d.trickNo} spent ${d.samples} determinizations; evaluateMoves' own formula for this budget affords ${expected[d.trickNo]} — a wall-clock cutoff is shaving the search short`);
+  }
+  // the deal-wide minimum reported alongside decisions must be exactly the
+  // smallest of those same per-decision counts, not a separately-tracked
+  // figure that could drift from them
+  assert.equal(r.samples, Math.min(...r.decisions.map(d => d.samples)));
 });
 
 test("the worker answers a review request from a view alone, and reopening it prints the same numbers", () => {
