@@ -296,21 +296,36 @@ test("the worker refuses a hint request when no decision is on offer", () => {
   assert.ok(checked > 0, "no dead-decision phase was exercised");
 });
 
+/* Capped per kind, not per run: a global "stop at 4 total" cap (one check per
+   kind) would let a single "play" trial stand in for the dozens of distinct
+   hands the pre-Task-10 version of this test actually exercised — breadth
+   (four kinds) without depth (one trial each) is a strictly weaker test. Each
+   kind gets its own budget instead, so "play" and "bid" — which recur many
+   times over a drive() run — get checked repeatedly, while the once-per-deal
+   kinds (trump/call) still get at least one and, on a long enough run, several. */
+const REPRO_CAP_PER_KIND = 6;
 test("a seeded hint repeats", () => {
   const seen = new Set();
+  const checkedPerKind = { bid: 0, trump: 0, call: 0, play: 0 };
   drive((room, pids) => {
-    if (seen.size >= 4) return;
     const ra = E.requiredActor(room.G);
-    if (!ra || seen.has(ra.kind)) return;
+    if (!ra || checkedPerKind[ra.kind] >= REPRO_CAP_PER_KIND) return;
     const v = R.buildView(room, pids[ra.seat], 0);
     if (!v.you.toAct) return;
     const a = handleRequest({ id: 1, kind: "hint", view: v, seed: 9 });
     const b = handleRequest({ id: 2, kind: "hint", view: v, seed: 9 });
     assert.deepEqual(a.result, b.result, `same seed, same answer (${ra.kind})`);
     assert.ok(a.ok, `${ra.kind} hint failed: ${a.error}`);
+    checkedPerKind[ra.kind]++;
     seen.add(ra.kind);
   });
   assert.deepEqual([...seen].sort(), ["bid", "call", "play", "trump"], "expected to exercise all four decision kinds");
+  // play and bid recur often enough within a single match that the cap itself
+  // must be what stops them, not the match running out first — pins the
+  // depth restoration, not just the kind breadth the assertion above already
+  // covers.
+  assert.equal(checkedPerKind.play, REPRO_CAP_PER_KIND, "expected 'play' to be checked more than the single trial the Task 10 rewrite left it with");
+  assert.equal(checkedPerKind.bid, REPRO_CAP_PER_KIND, "expected 'bid' to be checked more than once");
 });
 
 // ---------------------------------------------------------------------------
