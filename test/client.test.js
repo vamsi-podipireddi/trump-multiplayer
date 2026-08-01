@@ -238,3 +238,100 @@ test("describeHint: text and card mark for each decision kind, including both si
   assert.equal(call.cardKey, null);
   assert.equal(call.text, "Ace of spades — the search's pick to call");
 });
+
+test("the table read lives in the left rail and inside the Score sheet tab", () => {
+  const html = fs.readFileSync(path.join(root, "app/index.html"), "utf8");
+  assert.ok(/id="tableread"/.test(html), "no table-read container");
+  const tabs = [...html.matchAll(/data-tab="([a-z]+)"/g)].map(m => m[1]);
+  assert.deepEqual([...new Set(tabs)].sort(), ["chat", "log", "score"],
+    "the bottom sheet must stay at three tabs — the read belongs inside Score");
+});
+
+/* ---------------------------------------------------------------------------
+   describeTableRead(v, o) — the pure half of the table-read panel. It calls
+   the already-tested tableRead(v) (test/coach.test.js owns tableRead's own
+   numbers) and layers the panel's own presentation decisions on top: hiding
+   the side split, wording the bonus three's three states, dropping voidless
+   seats. Real engine views throughout, not hand-built fixtures: shadowFromView
+   reads enough of a view's shape (tricks, trick, handCounts, leadSuit) that a
+   fixture assembled by hand risks silently drifting from what the wire
+   actually sends. Each scenario instead starts from one real, dealt view and
+   overrides only the fields that scenario is about — deterministic, unlike
+   searching a live drive() for a rare window (coach.test.js's own approach,
+   justified there by testing tableRead's derivation itself; here the
+   derivation is a given and only describeTableRead's own wording is new). */
+function freshRoom() {
+  const room = R.createRoom("TEST");
+  const pids = [];
+  for (let i = 0; i < 4; i++) {
+    const { pid } = R.join(room, { name: "P" + i }, 0);
+    pids.push(pid);
+    R.message(room, pid, { type: "sit", seat: i }, 0);
+  }
+  return { room, pids };
+}
+const namedCtx = { seatInfo: s => ({ name: "P" + s }) };
+
+test("describeTableRead hides the side split before the reveal, and for a seatless viewer even after it", async () => {
+  const { describeTableRead } = await import("../app/js/ui/coach.js");
+  const { room, pids } = freshRoom();
+  R.message(room, pids[0], { type: "start" }, 0);
+  const mid = R.buildView(room, pids[0], 0);   // real, dealt, still bidding
+  assert.equal(mid.teamsRevealed, false, "test setup: expected to still be bidding");
+  assert.equal(describeTableRead(mid, namedCtx).side, null, "pre-reveal must hide the split");
+
+  // bid set explicitly so `needed` would be non-null but for the seat check below —
+  // otherwise this passes for the wrong reason (no bid yet) instead of the one it's pinning
+  const noSeat = { ...mid, teamsRevealed: true, declarer: 0, partner: 2, bid: 130, you: { ...mid.you, seat: null } };
+  assert.equal(describeTableRead(noSeat, namedCtx).side, null,
+    "a viewer with no seat has no 'my side' to report, even once teams are revealed");
+});
+
+test("describeTableRead reports the side split from the viewing seat's own side, once revealed", async () => {
+  const { describeTableRead } = await import("../app/js/ui/coach.js");
+  const { room, pids } = freshRoom();
+  R.message(room, pids[0], { type: "start" }, 0);
+  // declarer(0)+partner(2) captured 60 between them, the rest (1,3) captured 15
+  const overrides = { teamsRevealed: true, declarer: 0, partner: 2, bid: 150, capturedPoints: [40, 10, 20, 5] };
+  const view = seat => ({ ...R.buildView(room, pids[seat], 0), ...overrides });
+
+  assert.deepEqual(describeTableRead(view(0), namedCtx).side, { mine: 60, theirs: 15, needed: 90 }, "the declarer");
+  assert.deepEqual(describeTableRead(view(2), namedCtx).side, { mine: 60, theirs: 15, needed: 90 }, "the called partner");
+  assert.deepEqual(describeTableRead(view(1), namedCtx).side, { mine: 15, theirs: 60, needed: 90 }, "a defender");
+});
+
+test("describeTableRead words the bonus three's status through all three states", async () => {
+  const { describeTableRead } = await import("../app/js/ui/coach.js");
+  const { room, pids } = freshRoom();
+  R.message(room, pids[0], { type: "start" }, 0);
+  const base = R.buildView(room, pids[0], 0);
+
+  const notFallen = { ...base, bonusSuit: "♠", tricks: [], trick: [] };
+  assert.equal(describeTableRead(notFallen, namedCtx).bonusStatus, "still to fall");
+
+  // led but not yet resolved: bonusTakenBy (read.js) only ever looks at v.tricks,
+  // while shadowFromView folds v.trick into playedCards too — the real,
+  // documented "fallen but nobody has taken it yet" window, engineered here
+  // rather than hoped for out of a live drive.
+  const midTrick = { ...base, bonusSuit: "♠", tricks: [],
+    leadSuit: "♠", trick: [{ player: 1, card: { suit: "♠", rank: 3 } }] };
+  assert.equal(describeTableRead(midTrick, namedCtx).bonusStatus, "fallen — trick in progress");
+
+  const settled = { ...base, bonusSuit: "♠", trick: [],
+    tricks: [{ no: 1, winner: 2, pts: 30, winCard: { suit: "♠", rank: 3 },
+               cards: [{ player: 1, card: { suit: "♠", rank: 3 } }] }] };
+  assert.equal(describeTableRead(settled, namedCtx).bonusStatus, "taken by P2");
+});
+
+test("describeTableRead's voids list drops seats with no known void and names the rest", async () => {
+  const { describeTableRead } = await import("../app/js/ui/coach.js");
+  const { room, pids } = freshRoom();
+  R.message(room, pids[0], { type: "start" }, 0);
+  const base = R.buildView(room, pids[0], 0);   // viewer is seat 0
+
+  // seat 1 shows out of the led suit — a known void; seats 2/3 haven't played at all
+  const v = { ...base, leadSuit: "♠",
+    trick: [{ player: 0, card: { suit: "♠", rank: 5 } }, { player: 1, card: { suit: "♥", rank: 4 } }] };
+  assert.deepEqual(describeTableRead(v, namedCtx).voids, [{ seat: 1, name: "P1", suits: ["♠"] }],
+    "only the seat that actually showed out belongs in the list");
+});

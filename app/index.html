@@ -162,6 +162,15 @@
       <div id="my-tricks"></div>
       <div class="note empty" id="my-tricks-empty">Every trick you take lands here — and as a pile in front of your seat.</div>
     </div>
+    <!-- Public info only — every number here is something every seat watched happen, so
+         (unlike the hint button) this is never gated behind the room's coach setting. Its
+         own show/hide preference doubles as the disclosure this needs if it ever runs long
+         on a short sheet: collapsing hides #tr-body, not this header, so the toggle stays
+         reachable either way. -->
+    <div class="panel-section" id="tableread">
+      <h2>Table read<button class="mini-btn" id="btn-read-toggle" type="button" aria-expanded="true" aria-controls="tr-body" aria-label="Hide the table read">Hide</button></h2>
+      <div id="tr-body"></div>
+    </div>
   </aside>
 
   <div id="table-wrap">

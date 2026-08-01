@@ -14,6 +14,7 @@ import { SUIT_KEY, suitSvg, suitSpan, suitClass } from "../cards/labels.js";
 import { cardFace, miniCardEl } from "../cards/deck.js";
 import { icon } from "../cards/icons.js";
 import { bonusTakenBy } from "../coach/read.js";
+import { renderTableRead } from "./coach.js";
 
 /* solo's view carries names only; the multiplayer view also has a label for a
    seat nobody has taken yet ("Seat 3", "AI"), which is what belongs on screen. */
@@ -162,6 +163,13 @@ function renderTricks(v, o) {
   if (key !== builtKey || mine.length < builtCount) { host.innerHTML = ""; builtKey = key; builtCount = 0; }
   for (let i = builtCount; i < mine.length; i++) host.insertBefore(trickRow(mine[i]), host.firstChild);
   builtCount = mine.length;
+
+  /* The table-read block sits directly under this one in both shells' markup,
+     and both clients already call renderTricks(v, o) every frame — piggybacking
+     here is what lets coach.js's own renderer (coach-domain data, painted into
+     rails.js's own left-rail DOM) reach the screen with no third call site in
+     screens/game.js or solo.js. */
+  renderTableRead(v, o);
 }
 
 function trickRow(t) {

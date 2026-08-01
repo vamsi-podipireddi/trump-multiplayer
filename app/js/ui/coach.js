@@ -9,11 +9,12 @@
    table agreement, not an enforcement boundary — this file runs in every
    browser, so a devtools console can call requestHint() regardless of what the
    button says. hintEnabled() only ever governs the button's own affordance. */
-import { $ } from "../util/dom.js";
-import { coachOn } from "../coach/read.js";
+import { $, esc } from "../util/dom.js";
+import { coachOn, tableRead } from "../coach/read.js";
 import { requestHint } from "../coach/client.js";
-import { cardName, SUIT_NAME } from "../cards/labels.js";
+import { cardName, SUIT_NAME, SUITS, rankLabel, suitSpan } from "../cards/labels.js";
 import { sideOf } from "../core/engine/index.js";
+import { getPref, setPref } from "../util/prefs.js";
 
 /* actKind is not tested here: every decision kind handleRequest's hint branch
    answers (play, bid, trump, call) is a case worth a button, so "your turn,
@@ -166,4 +167,116 @@ function paintTrayLine(text) {
    clears every module's state for free. */
 function resetCoach() { pending = false; lastKey = null; answer = null; }
 
-export { hintEnabled, initCoach, renderCoach, resetCoach, describeHint };
+// ---------- table read ----------
+/* Public information (see coach/read.js's own file comment), so unlike
+   everything above this line it is never gated behind coachOn() — it gets a
+   local show/hide preference instead, the same shape as the 4-colour deck's
+   own persisted toggle (util/prefs.js). Called from rails.js, which owns the
+   left rail this block lives in — not from screens/game.js/solo.js's render
+   chain the way renderCoach above is, because renderCoach paints two regions
+   (the hand, the action tray) neither rails.js nor any other ui/*.js module
+   already owns, while every byte of this block is rails.js's own DOM. */
+
+/* Mirrors modals.js's own seatName(): both take (v, o, seat) and prefer the
+   table ctx's own name over the wire's, but neither file exports its copy for
+   the other to share — same minor, accepted duplication rails.js's nameOf()
+   and modals.js's seatName() already have between themselves. */
+function seatName(v, o, seat) {
+  const info = o && typeof o.seatInfo === "function" ? o.seatInfo(seat) : null;
+  return (info && info.name) || (v.names && v.names[seat]) || "";
+}
+
+/* Pure: turns tableRead(v)'s numbers into what the panel prints, plus every
+   "should this even show" decision on top of them — hiding the side split
+   before the reveal (tableRead itself already nulls `needed` then; this also
+   requires a real seat, so a spectator never borrows the defending side's
+   total under the label "you"), wording the bonus three's three real states
+   (bonusTakenBy's own comment: fallen-but-unclaimed is an honest state, not a
+   bug to paper over), and dropping any seat tableRead reports with zero known
+   voids, since an empty list is not information worth a row. No DOM — this is
+   the one part of the panel worth unit-testing without one
+   (test/client.test.js), the same split renderCoach/describeHint use above. */
+function describeTableRead(v, o) {
+  const r = tableRead(v);
+  const mySeat = v.you ? v.you.seat : null;
+  const side = (v.teamsRevealed && mySeat != null && r.needed != null)
+    ? { mine: r.captured.mine, theirs: r.captured.theirs, needed: r.needed }
+    : null;
+  const bonusStatus = !r.bonus.fallen ? "still to fall"
+    : r.bonus.takenBy == null ? "fallen — trick in progress"
+    : "taken by " + seatName(v, o, r.bonus.takenBy);
+  const voids = r.voids.filter(e => e.suits.length)
+    .map(e => ({ seat: e.seat, name: seatName(v, o, e.seat), suits: e.suits }));
+  return { pointsLive: r.pointsLive, side, bonusSuit: v.bonusSuit || null, bonusStatus,
+           voids, outstanding: r.outstanding, trump: v.trump || null };
+}
+
+const READ_PREF = "trump_read";
+const readShown = () => getPref(READ_PREF, "1") !== "0";
+
+/* Applies the persisted preference to the DOM. Called both from the toggle's
+   own click (instant feedback) and from every renderTableRead (so a render
+   landing between two clicks — or the very first one, before any click has
+   happened — still agrees with localStorage rather than whatever class was
+   last left on the element). #tr-body's content is painted regardless of
+   this state (see renderTableRead): collapsing only hides it, so expanding
+   again never shows anything stale. */
+function paintReadVisibility() {
+  const sec = $("tableread"), btn = $("btn-read-toggle");
+  const shown = readShown();
+  if (sec) sec.classList.toggle("collapsed", !shown);
+  if (btn) {
+    btn.setAttribute("aria-expanded", String(shown));
+    btn.textContent = shown ? "Hide" : "Show";
+    // the visible label is terse like every other header control (#btn-colors:
+    // "4-Colour" / aria-label "Four-colour deck"); tabbed to directly, out of
+    // the <h2>'s own text, a lone "Hide, button" names an action but not a target
+    btn.setAttribute("aria-label", (shown ? "Hide" : "Show") + " the table read");
+  }
+}
+function toggleRead() { setPref(READ_PREF, readShown() ? "0" : "1"); paintReadVisibility(); }
+
+const trRow = (label, value) => `<div class="tr-row"><span>${label}</span><span>${value}</span></div>`;
+
+function voidsHtml(voids) {
+  if (!voids.length) return `<div class="note">No voids spotted yet.</div>`;
+  return `<div class="tr-voids">` + voids.map(e =>
+    `<div class="tr-void-row"><b>${esc(e.name)}</b>${e.suits.map(suitSpan).join("")}</div>`).join("") + `</div>`;
+}
+// SUITS' own fixed order, not Object.keys(outstanding) — plain objects don't
+// promise key order the way this suit sequence is guaranteed to read the same
+// every render. Trump is marked by the tile itself (a border/background pair
+// in panels.css), not a "· trump" suffix on the top-card text: "top 10" is
+// already close to what a ~60px rail-width column affords, and a trump tile
+// sits right beside the contract card's own trump icon, so the highlight
+// alone reads as "this one" without a second, wrap-prone text cue.
+function suitsHtml(outstanding, trump) {
+  return `<div class="tr-suits">` + SUITS.map(s => {
+    const info = outstanding[s];
+    const top = info.count ? "top " + rankLabel(info.top) : "gone";
+    return `<div class="tr-suit${s === trump ? " trump" : ""}">${suitSpan(s)}` +
+           `<span class="cnt">${info.count}</span><span class="top">${top}</span></div>`;
+  }).join("") + `</div>`;
+}
+
+function renderTableRead(v, o) {
+  const sec = $("tableread");
+  if (!sec) return;   // both shells always carry it; guards a stray call before boot anyway
+  const btn = $("btn-read-toggle");
+  if (btn) btn.onclick = toggleRead;
+  paintReadVisibility();
+
+  const s = describeTableRead(v, o);
+  const rows = [trRow("Points live", `<b>${s.pointsLive}</b>`)];
+  if (s.side) {
+    rows.push(trRow("Captured", `you <b>${s.side.mine}</b> · them <b>${s.side.theirs}</b>`));
+    rows.push(trRow("Still needed", s.side.needed === 0 ? "made it" : `<b>${s.side.needed}</b>`));
+  }
+  if (s.bonusSuit) rows.push(trRow(`Bonus ${suitSpan(s.bonusSuit)}`, esc(s.bonusStatus)));
+
+  $("tr-body").innerHTML = rows.join("") +
+    `<div class="tr-block"><div class="lbl">Known voids</div>${voidsHtml(s.voids)}</div>` +
+    `<div class="tr-block"><div class="lbl">Outstanding</div>${suitsHtml(s.outstanding, s.trump)}</div>`;
+}
+
+export { hintEnabled, initCoach, renderCoach, resetCoach, describeHint, describeTableRead, renderTableRead };
