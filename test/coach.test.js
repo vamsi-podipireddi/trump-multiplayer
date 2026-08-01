@@ -3,6 +3,9 @@
    weaker than the bot's (missing a public fact) or stronger than it should be. */
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
@@ -496,6 +499,83 @@ test("a review's determinization budget is not silently cut by a wall clock", ()
   // smallest of those same per-decision counts, not a separately-tracked
   // figure that could drift from them
   assert.equal(r.samples, Math.min(...r.decisions.map(d => d.samples)));
+});
+
+/* D29's stated property is "one evaluator, two consumers, because two searchers
+   that disagree about the same position is a bug generator". Scoring the moves
+   is only half of what a searcher does, though — the other half is the ARGMAX,
+   and `winProb * 1000 + meanPoints` used to be spelled out three separate times:
+   in choosePIMCCard (what the bot plays), in worker.js's hint sort (what the
+   tray recommends), and in review.js's `best` (what a played card is graded
+   against). Nothing compared them, so editing one would have made the hint
+   recommend a card the bot would not play, or the review grade against a
+   different best — silently, with the suite green. They now share
+   E.moveScore, and these are the checks that keep them sharing it.
+
+   Three, because no one of them covers the others: (1) is the only one that
+   catches a fourth consumer re-typing the rule tomorrow, and (2)/(3) are the
+   only ones that catch a consumer keeping its own spelling while still
+   importing the shared name. */
+test("one argmax rule: the rule exists once, and the hint and the review both obey it", () => {
+  // (1) exactly one definition of the fusion anywhere the browser ships
+  const jsRoot = new URL("../app/js/", import.meta.url);
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true })
+    .flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const owners = walk(fileURLToPath(jsRoot)).filter(f => f.endsWith(".js"))
+    .filter(f => /winProb\s*\*\s*1000/.test(fs.readFileSync(f, "utf8")))
+    .map(f => path.relative(fileURLToPath(new URL("../", import.meta.url)), f));
+  assert.deepEqual(owners, ["app/js/core/engine/ai/pimc.js"],
+    `the winProb*1000 + meanPoints fusion must exist in exactly one file — found it in ${owners.join(", ")}`);
+
+  // (2) the hint's order is moveScore's order, and its `best` is that order's head
+  let hints = 0;
+  drive((room, pids) => {
+    if (room.G.phase !== "playing" || hints > 3) return;
+    const seat = room.G.turn;
+    const v = R.buildView(room, pids[seat], 0);
+    if (!v.you.toAct) return;
+    const res = handleRequest({ id: 21, kind: "hint", view: v, seed: 42 });
+    assert.ok(res.ok, `hint failed: ${res.error}`);
+    assert.deepEqual(res.result.moves, res.result.moves.slice().sort((a, b) => E.moveScore(b) - E.moveScore(a)),
+      "the hint tray's order must be the bot's own ranking, not a second spelling of it");
+    assert.deepEqual(res.result.best, res.result.moves[0], "the recommended card must head that order");
+    hints++;
+  });
+  assert.ok(hints > 0, "no play hint was exercised");
+
+  /* (3) the review's `best` is moveScore's argmax over the exact evaluateMoves
+     call it graded against — reproduced here from review.js's own exported
+     budget and its documented per-decision seed (seed + trickNo), so this
+     compares against the search that actually ran rather than a fresh one.
+
+     tieBreaks counts decisions where meanPoints genuinely decided the winner:
+     several moves tied on winProb with different meanPoints. Without at least
+     one of those, this whole check would also pass for a review that ranked on
+     winProb alone — the single most plausible way for the two rules to drift
+     apart, since winProb is the number the review reports. */
+  const v = finishedDeal();
+  const seed = 13;
+  const perDecisionBudget = Math.max(1, Math.floor(REVIEW_PLAY_BUDGET / v.tricks.length));
+  const expected = {}; // trickNo -> { card, winProb, tie }
+  const r = reviewDeal(v, 0, { seed, _tap: (pos, trickNo) => {
+    const ev = E.evaluateMoves(pos, 0, { playBudget: perDecisionBudget, timeMs: Infinity, rnd: E.mulberry32(seed + trickNo) });
+    const best = ev.moves.reduce((a, b) => (E.moveScore(b) > E.moveScore(a) ? b : a));
+    const topProb = Math.max(...ev.moves.map(m => m.winProb));
+    const tied = ev.moves.filter(m => m.winProb === topProb);
+    expected[trickNo] = { card: best.card, winProb: best.winProb,
+                          tie: tied.length > 1 && new Set(tied.map(m => m.meanPoints)).size > 1 };
+  } });
+  assert.ok(r.decisions.length > 0, "no decisions to check");
+  let tieBreaks = 0;
+  for (const d of r.decisions) {
+    const e = expected[d.trickNo];
+    assert.deepEqual(d.best, e.card, `trick ${d.trickNo}: the review's "best" is not the shared argmax`);
+    assert.equal(d.bestWinProb, e.winProb, `trick ${d.trickNo}: bestWinProb belongs to a different move`);
+    if (e.tie) tieBreaks++;
+  }
+  assert.ok(tieBreaks > 0,
+    "no decision in this deal was settled by the meanPoints tie-break, so the checks above cannot tell " +
+    "the shared rule apart from ranking on winProb alone");
 });
 
 test("the worker answers a review request from a view alone, and reopening it prints the same numbers", () => {

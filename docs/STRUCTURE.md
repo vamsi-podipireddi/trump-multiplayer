@@ -62,11 +62,11 @@ above it.
 | L4 | `contract.js` | `applyTrump callableCards callIsLegal applyCall beginPlay` |
 | L4 | `play.js` | `legalCards playIsLegal applyPlay advanceTrick` (`resolveTrick` is module-private) |
 | L5 | `ai/heuristic.js` | `aiBidEstimate aiBidDecision aiPickTrump aiPickPartner chooseAICard` |
-| L5 | `ai/pimc.js` | `determinize rolloutClone playOutRound evaluateMoves choosePIMCCard PIMC_PLAY_BUDGET` |
-| L5 | `ai/bid-search.js` | `bidValue aiBidDecisionSearch aiPickTrumpSearch aiPickPartnerSearch` + its three play budgets |
+| L5 | `ai/pimc.js` | `determinize rolloutClone playOutRound evaluateMoves moveScore choosePIMCCard PIMC_PLAY_BUDGET` |
+| L5 | `ai/bid-search.js` | `bidValue aiBidDecisionSearch aiPickTrumpSearch aiPickPartnerSearch` + its three play budgets, and `worldsFor`/`withTrump` so `scripts/bench-auction-search.js` cannot fork the formula |
 | L6 | `flow.js` | `requiredActor` |
-| L7 | `ai/index.js` | `aiActionFor` (imports `flow.js` and all three AI modules; `hard` routes every decision to a search, `easy`/`normal` to the hand-count) |
-| L8 | `index.js` | barrel — re-exports the public surface, 42 names |
+| L7 | `ai/index.js` | `aiActionFor` (imports `flow.js` and all three AI modules; `hard` routes the **bid** and the **card** to a search, `easy`/`normal` neither — trump and the call are the hand-count's at every tier, per ROADMAP D35) |
+| L8 | `index.js` | barrel — re-exports the public surface, 43 names |
 
 `redeal` sits in `bidding.js` rather than with match lifecycle, and `requiredActor` / `aiActionFor` sit
 in their own top dispatch layer above everything else — both relocations exist solely to keep the

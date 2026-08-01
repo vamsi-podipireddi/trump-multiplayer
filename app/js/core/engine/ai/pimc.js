@@ -131,6 +131,18 @@ function evaluateMoves(G, me, opts) {
   };
 }
 
+/* The argmax rule, exported beside evaluateMoves and for exactly the same
+   reason (D29). Scoring the moves is only half of "what the search would have
+   played"; RANKING them is the other half, and it is the half three files were
+   each spelling out for themselves — this one, coach/worker.js's hint sort and
+   coach/review.js's "best". Edit one and the hint recommends a card the bot
+   would not play, or the review grades against a different best, with nothing
+   erroring and nothing failing. winProb dominates by 1000:1 — a move that wins
+   more sampled worlds always ranks first — so meanPoints is purely the
+   tie-break between moves that win equally often, which over a few dozen
+   integer-counted determinizations is common rather than exotic. */
+const moveScore = m => m.winProb * 1000 + m.meanPoints;
+
 function choosePIMCCard(G, me, opts) {
   const legal = legalCards(G, me);
   if (legal.length <= 1) return legal[0];
@@ -139,7 +151,7 @@ function choosePIMCCard(G, me, opts) {
   let best = 0, bestScore = -Infinity;
   ev.moves.forEach((m, i) => {
     if (!m.samples) return;
-    const score = m.winProb * 1000 + m.meanPoints;
+    const score = moveScore(m);
     if (score > bestScore) { bestScore = score; best = i; }
   });
   return legal[best];
@@ -148,4 +160,4 @@ function choosePIMCCard(G, me, opts) {
 /* rolloutClone/playOutRound are exported for ai/bid-search.js, which simulates
    whole deals from the auction. Copying this object's 20 fields a second time is
    how two searches quietly start disagreeing about the same position. */
-export { determinize, rolloutClone, playOutRound, PIMC_PLAY_BUDGET, evaluateMoves, choosePIMCCard };
+export { determinize, rolloutClone, playOutRound, PIMC_PLAY_BUDGET, evaluateMoves, moveScore, choosePIMCCard };

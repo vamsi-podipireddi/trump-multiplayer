@@ -146,11 +146,6 @@ function foldTrick(running, t) {
   running.capturedPoints[t.winner] += t.pts;
 }
 
-// Same fusion choosePIMCCard/worker.js's hint sort use to rank a search's own
-// moves — "best" here means what the search would itself have played, not
-// merely the single highest winProb (which meanPoints breaks ties on).
-const moveScore = m => m.winProb * 1000 + m.meanPoints;
-
 function gradeOf(delta) {
   if (delta >= BLUNDER_WIN_DELTA) return "blunder";
   if (delta >= MISTAKE_WIN_DELTA) return "mistake";
@@ -205,7 +200,12 @@ function reviewDeal(v, seat, opts) {
       const ev = E.evaluateMoves(pos, seat, { playBudget: perDecisionBudget, timeMs: Infinity, rnd: E.mulberry32(seed + idx + 1) });
       if (ev) { // null only if the sampler couldn't build any consistent world — rare; skip rather than fabricate a grade
         const playedMove = ev.moves.find(m => E.sameCard(m.card, playedCard));
-        const bestMove = ev.moves.reduce((a, b) => (moveScore(b) > moveScore(a) ? b : a));
+        /* E.moveScore is choosePIMCCard's own argmax rule, imported rather than
+           restated: "best" here has to mean what the search would itself have
+           played — including meanPoints breaking the tie between moves that win
+           equally often — or the grade is measured against a different search
+           than the one the hint recommends and the bot plays. */
+        const bestMove = ev.moves.reduce((a, b) => (E.moveScore(b) > E.moveScore(a) ? b : a));
         const delta = Math.max(0, bestMove.winProb - playedMove.winProb); // sampling noise can rank the actual play above the search's own "best" — that reads as 0, not a negative blunder
         decisions.push({
           trickNo: idx + 1, played: playedMove.card, best: bestMove.card,

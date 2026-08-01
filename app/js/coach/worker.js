@@ -64,8 +64,11 @@ function handleRequest(msg) {
       if (actKind === "play") {
         const ev = E.evaluateMoves(G, seat, { ...budget, rnd });
         if (!ev) return { id: msg.id, ok: false, error: "the sampler could not build a consistent deal" };
-        const moves = ev.moves.slice().sort((a, b) =>
-          (b.winProb * 1000 + b.meanPoints) - (a.winProb * 1000 + a.meanPoints));
+        /* E.moveScore, never a second copy of the fusion: this sort decides
+           which card the tray recommends, and choosePIMCCard's own argmax is
+           what the bot would play. Two spellings of one rule is how a hint
+           starts quietly recommending a card the bot would not play. */
+        const moves = ev.moves.slice().sort((a, b) => E.moveScore(b) - E.moveScore(a));
         return { id: msg.id, ok: true, result: { kind: "play", moves, best: moves[0],
                                                  determinizations: ev.determinizations } };
       }

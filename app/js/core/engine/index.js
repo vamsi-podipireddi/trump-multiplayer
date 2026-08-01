@@ -20,5 +20,5 @@ export { applyTrump, applyCall, callIsLegal, callableCards } from "./contract.js
 export { applyPlay, playIsLegal, advanceTrick, legalCards } from "./play.js";
 export { requiredActor } from "./flow.js";
 export { aiActionFor } from "./ai/index.js";
-export { choosePIMCCard, evaluateMoves, determinize as _determinize } from "./ai/pimc.js";
+export { choosePIMCCard, evaluateMoves, moveScore, determinize as _determinize } from "./ai/pimc.js";
 export { bidValue, aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch } from "./ai/bid-search.js";
