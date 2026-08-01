@@ -186,6 +186,22 @@ test("all-pass redeals end in a forced 130 bid for eldest", () => {
   assert.equal(G.bid, E.MIN_BID);
   assert.equal(G.declarer, (dealer + 1) % 4, "eldest hand forced");
   assert.ok(guard < 100, "auction terminated");
+
+  // the forced bid is the log's last entry, marked forced; nothing earlier in
+  // the same (post-redeal) log is — deal()'s reset on every failed redeal
+  // means this log holds only the final attempt's 4 passes plus this one entry
+  const last = G.auction[G.auction.length - 1];
+  assert.equal(G.auction.length, 5, "4 passes from the final attempt, then the forced bid");
+  assert.equal(last.seat, G.declarer);
+  assert.equal(last.value, E.MIN_BID);
+  assert.equal(last.forced, true, "forceBid's own entry carries forced: true");
+  for (const a of G.auction.slice(0, -1)) assert.ok(!a.forced, "no chosen (here: passed) bid is marked forced");
+
+  // and it survives the publicView copy — this is the shape Task 4's grading reads
+  const pvAuction = E.publicView(G).auction;
+  const pvLast = pvAuction[pvAuction.length - 1];
+  assert.equal(pvLast.forced, true, "forced survives the publicView copy");
+  for (const a of pvAuction.slice(0, -1)) assert.ok(!a.forced);
 });
 
 test("bidIsLegal edges", () => {
