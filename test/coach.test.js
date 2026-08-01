@@ -12,6 +12,7 @@ import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest } from "../app/js/coach/worker.js";
 import { reviewDeal, REVIEW_PLAY_BUDGET } from "../app/js/coach/review.js";
+import { matchReport } from "../app/js/coach/report.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -871,4 +872,47 @@ test("the heuristic's own answer is evaluated first, so a tie leaves it standing
   assert.equal(ev.candidates.length, 4);
   // candidates[0] is the heuristic's pick; a reduce with strict > keeps the first on a tie
   assert.ok(E.SUITS.includes(ev.candidates[0].suit));
+});
+
+// ---------------------------------------------------------------------------
+// report.js — the match-level aggregate. Pure arithmetic, no dependencies.
+
+const dec = (kind, delta, grade) => ({ kind, delta, grade, roundNumber: 1 });
+
+test("matchReport's headline is a mean, so match length cannot move it", () => {
+  const three = [1, 2, 3].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine")], skipped: [] }));
+  const seven = [1, 2, 3, 4, 5, 6, 7].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine")], skipped: [] }));
+  assert.ok(Math.abs(matchReport(three, 0, 3).headline - matchReport(seven, 0, 7).headline) < 1e-10);
+  assert.ok(Math.abs(matchReport(three, 0, 3).headline - 0.1) < 1e-10);
+});
+
+test("skipped decisions stay out of the denominator, band decisions stay in", () => {
+  const deals = [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("bid", 0, "fine")],
+                   skipped: [{ kind: "trump", roundNumber: 1, reason: "not-declarer" }] }];
+  const r = matchReport(deals, 0, 1);
+  assert.equal(r.counts.fine, 2, "both graded decisions count");
+  assert.equal(r.byKind.trump.n, 0, "a skip is not a decision");
+});
+
+test("headline is null, not zero, when nothing was graded", () => {
+  const r = matchReport([{ roundNumber: 1, decisions: [], skipped: [] }], 0, 1);
+  assert.equal(r.headline, null);
+  assert.equal(r.counts.fine, 0);
+});
+
+test("coverage reports missing deals rather than hiding them", () => {
+  const r = matchReport([{ roundNumber: 2, decisions: [dec("play", 0.3, "blunder")], skipped: [] }], 0, 5);
+  assert.equal(r.coverage.dealsGraded, 1);
+  assert.equal(r.coverage.dealsInMatch, 5);
+});
+
+test("worst is the two costliest across the whole match, not per deal", () => {
+  const deals = [
+    { roundNumber: 1, decisions: [dec("play", 0.30, "blunder"), dec("play", 0.05, "fine")], skipped: [] },
+    { roundNumber: 2, decisions: [dec("call", 0.40, "blunder"), dec("bid", 0.20, "blunder")], skipped: [] },
+  ];
+  const r = matchReport(deals, 0, 2);
+  assert.equal(r.worst.length, 2);
+  assert.equal(r.worst[0].delta, 0.40);
+  assert.equal(r.worst[1].delta, 0.30);
 });
