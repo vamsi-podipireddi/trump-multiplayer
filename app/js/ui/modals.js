@@ -3,6 +3,7 @@ import { SUIT_NAME } from "../cards/labels.js";
 import { cardEl } from "../cards/deck.js";
 import { sfx } from "./sound.js";
 import { requestReview } from "../coach/client.js";
+import { bonusTakenBy } from "../coach/read.js";
 import { renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
 
 /* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
@@ -244,14 +245,6 @@ function showRoundResult(v, o, h) {
   roundAction(v, o, h);
   sfx(r.made ? "made" : "set");
 }
-/* The 30-point 3 is the deal's single biggest swing, so the panel names who
-   ended up with it — which the trick history knows and the score does not. */
-function takerOfBonus(v, tricks) {
-  for (const t of tricks) {
-    if (t.cards.some(c => c.card.rank === 3 && c.card.suit === v.bonusSuit)) return t.winner;
-  }
-  return null;
-}
 /* The "where the N went" breakdown plus final standings — everything
    showRoundResult used to build inline, now its own function so the review
    toggle (roundAction below) can rebuild it on demand: paintRoundBody calls
@@ -272,7 +265,12 @@ function roundSummaryHtml(v, o) {
   /* The trick history is new on the wire; a client talking to a server that has
      not shipped it yet drops these rows rather than inventing them. */
   const tricks = Array.isArray(v.tricks) ? v.tricks : [];
-  const bonusTaker = takerOfBonus(v, tricks);
+  /* The 30-point 3 is the deal's single biggest swing, so the panel names who
+     ended up with it — which the trick history knows and the score does not.
+     coach/read.js's bonusTakenBy, not a second copy of the same loop: the rail
+     and this modal showing different owners of the same 30 points is exactly
+     the drift M10's Task 4 relocated that function out of rails.js to end. */
+  const bonusTaker = bonusTakenBy(v);
   const fat = tricks.slice().sort((a, b) => b.pts - a.pts || a.no - b.no)[0];
   // declarer === partner is applyCall()'s unreachable safety; counting the seat twice would not be
   const dTricks = r.partner === r.declarer ? v.tricksWon[r.declarer] : v.tricksWon[r.declarer] + v.tricksWon[r.partner];

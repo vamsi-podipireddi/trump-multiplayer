@@ -58,6 +58,29 @@ test("the shadow's public facts match the server's exactly", () => {
   assert.ok(checked > 200, `expected many sampled positions, got ${checked}`);
 });
 
+/* The test above only samples phase "playing", where the auction's own fields
+   are dead. The bid hint is not: worker.js searches the shadow mid-auction, and
+   bid-search.js's playOutWith needs a contract to roll out against — it takes
+   minNextBid(G) whenever G.bid is null, which it is for the whole auction.
+   minNextBid is `G.highBid === null ? MIN_BID : G.highBid + BID_STEP`, and
+   `undefined === null` is false, so a shadow missing the field does not fall
+   back to the minimum: it returns NaN, silently, at every bidding turn. Checked
+   against the server's own answer, which is the only thing that makes it a fact
+   rather than a second opinion. */
+test("the shadow answers minNextBid exactly as the server does, all through the auction", () => {
+  let checked = 0;
+  drive((room, pids) => {
+    if (room.G.phase !== "bidding") return;
+    const ra = E.requiredActor(room.G);
+    if (!ra) return;
+    const g = shadowFromView(R.buildView(room, pids[ra.seat], 0));
+    assert.equal(E.minNextBid(g), E.minNextBid(room.G),
+      "the shadow's next legal bid drifted from the server's — the bid hint rolls out against this number");
+    checked++;
+  });
+  assert.ok(checked > 20, `expected many bidding turns, got ${checked}`);
+});
+
 test("the shadow carries no foreign card", () => {
   drive((room, pids) => {
     if (room.G.phase !== "playing") return;
@@ -552,30 +575,40 @@ test("one argmax rule: the rule exists once, and the hint and the review both ob
      several moves tied on winProb with different meanPoints. Without at least
      one of those, this whole check would also pass for a review that ranked on
      winProb alone — the single most plausible way for the two rules to drift
-     apart, since winProb is the number the review reports. */
+     apart, since winProb is the number the review actually reports.
+
+     All four seats of the one finished deal, not just seat 0 (a finished deal
+     is fully public, so reviewDeal grades any seat from the same record). One
+     seat's ~13 decisions leave a measured ~3% chance that none of them happened
+     to be settled by the tie-break — 2 of 72 runs — which would fail the guard
+     below for a reason that has nothing to do with the code. Four seats is
+     ~52 decisions for ~90ms, and P(none) falls to ~1e-6. */
   const v = finishedDeal();
   const seed = 13;
   const perDecisionBudget = Math.max(1, Math.floor(REVIEW_PLAY_BUDGET / v.tricks.length));
-  const expected = {}; // trickNo -> { card, winProb, tie }
-  const r = reviewDeal(v, 0, { seed, _tap: (pos, trickNo) => {
-    const ev = E.evaluateMoves(pos, 0, { playBudget: perDecisionBudget, timeMs: Infinity, rnd: E.mulberry32(seed + trickNo) });
-    const best = ev.moves.reduce((a, b) => (E.moveScore(b) > E.moveScore(a) ? b : a));
-    const topProb = Math.max(...ev.moves.map(m => m.winProb));
-    const tied = ev.moves.filter(m => m.winProb === topProb);
-    expected[trickNo] = { card: best.card, winProb: best.winProb,
-                          tie: tied.length > 1 && new Set(tied.map(m => m.meanPoints)).size > 1 };
-  } });
-  assert.ok(r.decisions.length > 0, "no decisions to check");
-  let tieBreaks = 0;
-  for (const d of r.decisions) {
-    const e = expected[d.trickNo];
-    assert.deepEqual(d.best, e.card, `trick ${d.trickNo}: the review's "best" is not the shared argmax`);
-    assert.equal(d.bestWinProb, e.winProb, `trick ${d.trickNo}: bestWinProb belongs to a different move`);
-    if (e.tie) tieBreaks++;
+  let graded = 0, tieBreaks = 0;
+  for (const seat of [0, 1, 2, 3]) {
+    const expected = {}; // trickNo -> { card, winProb, tie }
+    const r = reviewDeal(v, seat, { seed, _tap: (pos, trickNo) => {
+      const ev = E.evaluateMoves(pos, seat, { playBudget: perDecisionBudget, timeMs: Infinity, rnd: E.mulberry32(seed + trickNo) });
+      const best = ev.moves.reduce((a, b) => (E.moveScore(b) > E.moveScore(a) ? b : a));
+      const topProb = Math.max(...ev.moves.map(m => m.winProb));
+      const tied = ev.moves.filter(m => m.winProb === topProb);
+      expected[trickNo] = { card: best.card, winProb: best.winProb,
+                            tie: tied.length > 1 && new Set(tied.map(m => m.meanPoints)).size > 1 };
+    } });
+    for (const d of r.decisions) {
+      const e = expected[d.trickNo];
+      assert.deepEqual(d.best, e.card, `seat ${seat}, trick ${d.trickNo}: the review's "best" is not the shared argmax`);
+      assert.equal(d.bestWinProb, e.winProb, `seat ${seat}, trick ${d.trickNo}: bestWinProb belongs to a different move`);
+      if (e.tie) tieBreaks++;
+      graded++;
+    }
   }
+  assert.ok(graded > 0, "no decisions to check");
   assert.ok(tieBreaks > 0,
-    "no decision in this deal was settled by the meanPoints tie-break, so the checks above cannot tell " +
-    "the shared rule apart from ranking on winProb alone");
+    `none of the ${graded} decisions checked was settled by the meanPoints tie-break, so the checks above ` +
+    "cannot tell the shared rule apart from ranking on winProb alone");
 });
 
 test("the worker answers a review request from a view alone, and reopening it prints the same numbers", () => {

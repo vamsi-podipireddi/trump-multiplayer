@@ -31,6 +31,16 @@ function shadowFromView(v) {
     phase: v.phase, trump: v.trump, bonusSuit: v.bonusSuit,
     declarer: v.declarer, partner: v.partner, teamsRevealed: v.teamsRevealed,
     bid: v.bid, calledCard: v.calledCard,
+    /* bidding.js's minNextBid is `G.highBid === null ? MIN_BID : G.highBid +
+       BID_STEP`, and `undefined === null` is false — so omitting this does not
+       fall back to MIN_BID, it returns NaN. The bid hint reaches it:
+       bid-search.js's playOutWith sets `sim.bid = G.bid == null ? minNextBid(G)
+       : G.bid`, and G.bid is null all through the auction. Inert as of today
+       (endRound compares against sim.bid but playOutWith returns captured
+       points, and nothing in the rollout policy reads it), which is exactly the
+       kind of quiet wrongness the comment above that line exists to warn about
+       — so it is copied, not reasoned about again. */
+    highBid: v.highBid,
     dealer: v.dealer, roundNumber: v.roundNumber,
     names: v.names.slice(), scores: v.scores.slice(),
     targetGames: v.consts ? v.consts.TARGET_GAMES : 5,

@@ -82,10 +82,11 @@ function request(kind, payload) {
 
 function requestHint(view) { return request("hint", { view }); }
 
-/* Resolves to { ok: false, error: "unknown request: review" } — handleRequest
-   has no "review" branch until Task 9 adds one to worker.js. Nothing here has
-   to change when it does: the request already flows through this exact
-   pipeline, so Task 9's diff is a new branch in worker.js and nothing else. */
+/* Resolves to the graded deal worker.js's "review" branch builds (reviewDeal's
+   { decisions, worst, samples }), or to { ok: false, error } if the view holds
+   no finished deal. Deliberately the same request() as requestHint — one
+   correlation path, one timeout, one synchronous fallback — which is why
+   adding the review needed no change in this file at all. */
 function requestReview(view, seat) { return request("review", { view, seat }); }
 
 /* True when a live worker backs the facade, false when every request is about
