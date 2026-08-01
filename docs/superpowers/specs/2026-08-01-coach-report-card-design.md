@@ -328,9 +328,13 @@ sizes at different sample counts, which is the opposite of what D43 is for.
 | type | graded when | delta |
 |---|---|---|
 | card play | `legalCards(pos, seat).length > 1` | `max(0, bestWinProb − playedWinProb)` (unchanged) |
-| bid | you were the actor, the bid was not `forced`, and `\|p − 0.5\| > band` | `\|p − 0.5\|` |
+| bid | you were the actor, the bid was not `forced`, and `delta > band` | one-sided: `max(0, p − 0.5)` if you passed, `max(0, 0.5 − p)` if you bid |
 | trump | you were declarer, and `bestProb − yoursProb > band` | `max(0, bestProb − yoursProb)` |
 | call | you were declarer, and `bestProb − yoursProb > band` | `max(0, bestProb − yoursProb)` |
+
+The bid's delta is **one-sided by construction**: being far from the line on the *correct* side is not
+an error, so a pass on a hand the search gives a 0.1 make-probability scores 0, not 0.4. Only the
+wrong side of the line accumulates.
 
 **What the bid's delta is, and is not.** It is in the same unit as the other three — a probability —
 but it measures *distance from the decision boundary*, not forgone win probability. Those coincide
