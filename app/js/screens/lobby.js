@@ -7,6 +7,7 @@ import { setModal, hideOverlay, onRender } from "../ui/modals.js";
 const DIFF_OPTS = [["easy","Easy"],["normal","Normal"],["hard","Hard"]];
 const DEAL_OPTS = [3,5,7];
 const TIMER_OPTS = [0,15,30,45,60,90];
+const COACH_OPTS = [[true,"On"],[false,"Off"]];
 
 // ---------- lobby ----------
 /* Reads the session directly, unlike the renderers under ui/: a lobby is a room
@@ -89,6 +90,11 @@ function renderSettings(host_el, isHost) {
   seg("Match length", DEAL_OPTS.map(n => [n, "First to " + n]), st.targetDeals, "targetDeals", false);
   seg("AI skill", DIFF_OPTS, st.difficulty, "difficulty", true); // difficulty may change mid-match
   seg("Turn timer", TIMER_OPTS.map(n => [n, n === 0 ? "Off" : n + "s"]), st.turnTimerSec, "turnTimerSec", true);
+  // a room restored from storage predating this field has st.coach === undefined, which must read as on
+  seg("Hints", COACH_OPTS, st.coach !== false, "coach", true);
+  const note = document.createElement("p"); note.className = "muted";
+  note.textContent = "a table agreement — the engine runs in every browser";
+  host_el.appendChild(note);
 }
 
 /* The same settings rows, opened from the table instead of the lobby. It lives
@@ -104,4 +110,4 @@ function showSettingsModal() {
   $("btn-close-set").onclick = () => { hideOverlay(); onRender(); };
 }
 
-export { renderLobby, renderSettings, showSettingsModal, miniBtn, DIFF_OPTS, DEAL_OPTS, TIMER_OPTS };
+export { renderLobby, renderSettings, showSettingsModal, miniBtn, DIFF_OPTS, DEAL_OPTS, TIMER_OPTS, COACH_OPTS };

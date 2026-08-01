@@ -18,7 +18,7 @@ import * as R from "../src/core/room/index.js";
 import { syncWindow } from "../app/js/ui/log.js";
 import { esc } from "../app/js/util/dom.js";
 import { EMOTES } from "../app/js/cards/icons.js";
-import { DIFF_OPTS, DEAL_OPTS, TIMER_OPTS } from "../app/js/screens/lobby.js";
+import { DIFF_OPTS, DEAL_OPTS, TIMER_OPTS, COACH_OPTS } from "../app/js/screens/lobby.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -64,6 +64,9 @@ test("client option lists match the core's validated choices", () => {
   assert.deepStrictEqual(DIFF_OPTS.map(o => o[0]), R.DIFFICULTIES);
   assert.deepStrictEqual(DEAL_OPTS, R.TARGET_DEAL_CHOICES);
   assert.deepStrictEqual(TIMER_OPTS, R.TURN_TIMER_CHOICES);
+  // coach validates by typeof, not membership, so there is no R.COACH_CHOICES to pin against —
+  // the vocabulary IS the boolean type, and this pins the toggle to exactly its two values
+  assert.deepStrictEqual(COACH_OPTS.map(o => o[0]), [true, false]);
 });
 
 /* ------------------------------------------------------------------
