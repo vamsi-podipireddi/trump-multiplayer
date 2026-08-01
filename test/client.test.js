@@ -584,3 +584,79 @@ test("REVIEW_REJECTED_MESSAGE: a fixed, honest string for a genuine rejection", 
   // hint-rejection handler already follows)
   assert.doesNotMatch(REVIEW_REJECTED_MESSAGE, /\bError\b|\[object/);
 });
+
+/* ---------------------------------------------------------------------------
+   showMatchOver (ui/modals.js) — Task 14: the deal that clinches the match
+   skips "roundEnd" entirely (match.js's endRound routes a clinching deal
+   straight to "matchOver"), so it never reached showRoundResult's own review
+   toggle above — the single most memorable deal of a match had no review
+   affordance at all. coach/worker.js already accepts a matchOver view
+   (view.lastResult is still the clinching deal's own result: endRound never
+   clears declarer/partner/tricks/lastResult, only the *next* deal does), so
+   this ports Task 12's #round-body/#round-action split to
+   #match-body/#match-action rather than building a second analysis path.
+   Same source-as-text approach as every DOM-writing function in this file —
+   there is no jsdom here (Task 12's own report confirms it) — so these pin
+   the *structure*; the task report documents the real, once-off Chromium
+   proof that a live rematch button survives an open review. */
+// Slices exactly one top-level function's own body — not "up to the next
+// function", which would also sweep in that next function's leading doc
+// comment (this file writes one above every function, and those comments
+// freely say things like "the rematch button", which a boundary drawn at
+// the next `function` keyword would misattribute to the wrong function).
+// This file's own convention is reliable instead: every top-level function
+// closes with a lone, unindented "}" on its own line — nested blocks never
+// are (they read "  });", "  }", etc., never bare) — so that is the anchor.
+function sliceFn(src, name) {
+  const start = src.indexOf(`\nfunction ${name}(`);
+  assert.ok(start >= 0, `function ${name}(...) not found in modals.js`);
+  const m = /\n\}(?=\r?\n|$)/.exec(src.slice(start));
+  assert.ok(m, `could not find function ${name}'s own closing brace`);
+  return src.slice(start, start + m.index + m[0].length);
+}
+
+test("the match-over modal offers a review without displacing rematch", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const showFn = sliceFn(src, "showMatchOver");
+  assert.match(showFn, /review/i, "showMatchOver never mentions a review");
+  assert.match(showFn, /id="match-body"/);
+  assert.match(showFn, /id="match-action"/);
+
+  // Task 12's own guarantee, ported: the function that paints the review
+  // (calls renderReview) and the function that owns the rematch button are
+  // different functions, and neither one's source mentions the other's own
+  // host/control — no code path in either can reach the other, by
+  // construction rather than by discipline (mirrors this file's own header
+  // comment on #round-body/#round-action, the pattern this ports).
+  const bodyFn = sliceFn(src, "paintMatchBody");
+  assert.match(bodyFn, /renderReview\(/);
+  // the actual DOM handles, not the English word — a comment explaining *why*
+  // the split matters is expected to say "rematch" (this codebase's own
+  // style), so the real guarantee is that the body painter never reaches for
+  // the rematch button's id or its host, not that it never talks about it
+  assert.doesNotMatch(bodyFn, /btn-rematch|match-action/, "the review body painter must never reach the rematch control's id or host");
+
+  const actionFn = sliceFn(src, "matchAction");
+  assert.match(actionFn, /btn-rematch/);
+  assert.doesNotMatch(actionFn, /renderReview\(|match-body/i, "the action painter must never touch the review body");
+});
+
+test("a seatless viewer is not offered a review on the match-over modal", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const actionFn = sliceFn(src, "matchAction");
+  assert.match(actionFn, /view\.you\s*&&\s*view\.you\.seat\s*!=\s*null/,
+    "the review toggle must be gated on view.you.seat != null, same as the round-result modal's own spectator gate");
+});
+
+test("the match review is requested lazily from the body painter alone", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const bodyFn = sliceFn(src, "paintMatchBody");
+  assert.match(bodyFn, /requestReview\(/);
+  assert.match(bodyFn, /REVIEW_WAIT/, "a working state must show while the search runs");
+  // showMatchOver's own body must never call requestReview directly — every
+  // render would otherwise re-fire the search instead of waiting for the
+  // toggle's first click (ambiguity #4: on demand, not automatic — same rule
+  // showRoundResult's own paintRoundBody comment states).
+  const showFn = sliceFn(src, "showMatchOver");
+  assert.doesNotMatch(showFn, /requestReview\(/);
+});

@@ -79,31 +79,120 @@ function showHelp(view) {
    the overlay off "match" on its way past, which is what lets the next match
    sound even if it ends on the same numbers. */
 let matchKey = null;
+/* The match-over review's own state, scoped to the one match `matchKey`
+   names — same shape and same reason as showRoundResult's reviewOpen/
+   reviewState below: reset alongside matchKey so a review left open on a
+   decided match never bleeds into the next one. */
+let matchReviewOpen = false;
+let matchReviewState = null;
 
 function showMatchOver(view, onRematch) {
   const key = view.scores.join(",");
   if (matchKey === key && $("overlay").dataset.kind === "match") return;
   matchKey = key;
+  matchReviewOpen = false; matchReviewState = null;   // a new match — any open or in-flight review belonged to the last one
 
   const mySeat = view.you ? view.you.seat : null;
   const best = Math.max(...view.scores);
   const champs = [0,1,2,3].filter(p => view.scores[p] === best);
   const youWon = mySeat != null && champs.includes(mySeat);
   const names = champs.map(p => esc(view.names[p])).join(" &amp; ");
-  const standings = [0,1,2,3].slice().sort((a,b) => view.scores[b] - view.scores[a]).map(p =>
-    `<div class="${mySeat != null && p === mySeat ? "me" : ""}"><span>${esc(view.names[p])}${mySeat != null && p === mySeat ? " (you)" : ""}</span>` +
-    `<span>${view.scores[p]} deal${view.scores[p] === 1 ? "" : "s"}</span></div>`).join("");
-  const btn = view.room.isHost
-    ? `<button class="btn" id="btn-rematch">Start a new match</button>`
-    : `<p class="muted">Waiting for ${esc(view.room.hostName || "the host")} to start a new match…</p>`;
+
+  /* #match-body is what the review toggle swaps (paintMatchBody); #match-action
+     — the rematch button (or "waiting for host"), plus the toggle itself —
+     never moves, the exact split showRoundResult's #round-body/#round-action
+     use below so the rematch path is unreachable from the body painter no
+     matter which body is currently showing (Task 12's own structural
+     guarantee — reviewed and approved there — ported rather than re-argued). */
   setModal("match",
     `<div class="sheen"></div><div class="kicker">Match over · first to ${view.consts.TARGET_GAMES}</div>` +
     `<div class="head${youWon ? " made" : ""}">${youWon ? "YOU WIN" : names}</div>` +
     `<p>${names} reach ${best} deal${best === 1 ? "" : "s"} first.</p>` +
     `<div class="pbar"><i class="${youWon ? "made" : ""}" style="width:100%"></i></div>` +
-    `<div class="standings">${standings}</div>${btn}`);
-  if (view.room.isHost) $("btn-rematch").onclick = onRematch;
+    `<div id="match-body"></div><div id="match-action"></div>`);
+  paintMatchBody(view);
+  matchAction(view, onRematch);
   sfx("win");
+}
+/* The standings list — showMatchOver's original inline build, pulled into its
+   own function for the same reason roundSummaryHtml below was: paintMatchBody
+   must rebuild it every time the review toggle flips back off, and
+   recomputing off `view` costs nothing next to a snapshot that would need to
+   stay in sync with showMatchOver's own copy. No `o` (table ctx) parameter —
+   showMatchOver has never taken one, and nothing here needs more than
+   view.you/view.names/view.scores already carry. */
+function matchStandingsHtml(view) {
+  const mySeat = view.you ? view.you.seat : null;
+  return `<div class="standings">` + [0,1,2,3].slice().sort((a,b) => view.scores[b] - view.scores[a]).map(p =>
+    `<div class="${mySeat != null && p === mySeat ? "me" : ""}"><span>${esc(view.names[p])}${mySeat != null && p === mySeat ? " (you)" : ""}</span>` +
+    `<span>${view.scores[p]} deal${view.scores[p] === 1 ? "" : "s"}</span></div>`).join("") + `</div>`;
+}
+/* #match-body's own paint: the standings above when the toggle is off, else
+   the review — computed lazily, on this first open, never ahead of a click
+   (same "on demand, not automatic" contract paintRoundBody documents below).
+   requestReview's own 10s timeout (client.js) is what stops a permanent
+   "Analysing…" if the worker wedges. Never touches #match-action, which is
+   what keeps the primary control reachable through every state this
+   function paints. */
+function paintMatchBody(view) {
+  const host = $("match-body");
+  if (!host) return;
+  if (!matchReviewOpen) { host.innerHTML = matchStandingsHtml(view); return; }
+
+  if (matchReviewState === "pending") { host.innerHTML = REVIEW_WAIT; return; }
+  if (matchReviewState) {
+    host.innerHTML = matchReviewState.ok
+      ? renderReview(matchReviewState.result, view, view.you.seat)
+      : `<div class="deal-review"><p class="muted">${esc(matchReviewState.message)}</p></div>`;
+    return;
+  }
+
+  matchReviewState = "pending";
+  host.innerHTML = REVIEW_WAIT;
+  const seat = view.you.seat;
+  const myKey = matchKey;   // a slow response landing after the NEXT match has already opened must not paint over it
+  requestReview(view, seat).then(res => {
+    if (matchKey !== myKey) return;
+    matchReviewState = (res && res.ok) ? { ok: true, result: res.result } : { ok: false, message: reviewErrorMessage(res) };
+    paintMatchBody(view);
+  }, () => {
+    /* A rejection is a real path, not a hypothetical one — see
+       paintRoundBody's identical comment below: client.js rejects every
+       pending request when the worker dies and again after its own 10s
+       timeout, never merely because review is unavailable (that resolves
+       ok:false above, via reviewErrorMessage instead). */
+    if (matchKey !== myKey) return;
+    matchReviewState = { ok: false, message: REVIEW_REJECTED_MESSAGE };
+    paintMatchBody(view);
+  });
+}
+/* #match-action's own paint: the rematch button (host) or the "waiting for
+   host" message — exactly what showMatchOver used to build inline — plus,
+   second and always additive, the review toggle. Adding it here rather than
+   replacing the primary control is the whole point (same reasoning
+   roundAction's own comment gives below): the host may be about to start
+   another match regardless of what the toggle does, so it only ever gets a
+   neighbour, never a replacement. A spectator (no seat of their own) never
+   sees the toggle — there is nothing of theirs to review. */
+function matchAction(view, onRematch) {
+  const host = $("match-action");
+  if (!host) return;
+  host.innerHTML = view.room.isHost
+    ? `<button class="btn" id="btn-rematch">Start a new match</button>`
+    : `<p class="muted">Waiting for ${esc(view.room.hostName || "the host")} to start a new match…</p>`;
+  if (view.room.isHost) $("btn-rematch").onclick = onRematch;
+
+  if (view.you && view.you.seat != null) {
+    const rb = document.createElement("button");
+    rb.className = "btn ghost";
+    paintReviewToggle(rb, matchReviewOpen);
+    /* Mutates this same node rather than rebuilding #match-action: see
+       roundAction's identical comment below — a keyboard/screen-reader user
+       tabbed here must not lose focus the instant they activate the control
+       that fired this very handler. */
+    rb.onclick = () => { matchReviewOpen = !matchReviewOpen; paintReviewToggle(rb, matchReviewOpen); paintMatchBody(view); };
+    host.appendChild(rb);
+  }
 }
 
 // ---------- deal result ----------
@@ -281,18 +370,23 @@ function roundAction(v, o, h) {
   if (v.you && v.you.seat != null) {
     const rb = document.createElement("button");
     rb.className = "btn ghost";
-    paintReviewToggle(rb);
+    paintReviewToggle(rb, reviewOpen);
     /* Mutates this same node rather than re-running roundAction(): the click
        that fires this handler must not delete the element it fired on out
        from under itself — a keyboard/screen-reader user tabbed to this
        button would otherwise lose focus the instant they activate it. */
-    rb.onclick = () => { reviewOpen = !reviewOpen; paintReviewToggle(rb); paintRoundBody(v, o); };
+    rb.onclick = () => { reviewOpen = !reviewOpen; paintReviewToggle(rb, reviewOpen); paintRoundBody(v, o); };
     host.appendChild(rb);
   }
 }
-function paintReviewToggle(btn) {
-  btn.textContent = reviewOpen ? "‹ Back" : "Review this deal ▸";
-  btn.setAttribute("aria-expanded", String(reviewOpen));
+/* `open` is passed in rather than read off a module-level flag: this is now
+   shared with the match-over modal's own toggle (matchAction above), which
+   tracks matchReviewOpen instead of reviewOpen — the label/aria-expanded
+   pairing is identical in both places, so the one thing that differs between
+   the two callers is the one thing this function takes as a parameter. */
+function paintReviewToggle(btn, open) {
+  btn.textContent = open ? "‹ Back" : "Review this deal ▸";
+  btn.setAttribute("aria-expanded", String(open));
 }
 
 // ---------- the partner reveal ----------
