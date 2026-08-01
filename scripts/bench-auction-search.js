@@ -441,12 +441,13 @@ if (on("table")) {
      at the level it won the auction with, against whether it then made it. This
      used to be followed by a comparison against (1/3)(1-set) + (2/3)(set) as "the
      value of passing instead," presented as the crux of whether 0.5 is too loose.
-     That comparison is RETRACTED (task-8-report.md section 8.2; ROADMAP.md D35) —
-     the expression is an algebraic identity, not a counterfactual: exactly two of
-     four seats win every deal, so it equals 50% for every set rate, which made
-     every threshold from 0.5 to 0.65 read as "conservative." It also compared a
-     rate conditioned on the search liking the hand and winning the auction against
-     a rate conditioned on nothing. The real answer is the same-hand fork in the
+     That comparison is RETRACTED (task-8-report.md section 8.2; ROADMAP.md's M10
+     milestone, "fixed to stop asserting a retracted claim") — the expression is
+     an algebraic identity, not a counterfactual: exactly two of four seats win
+     every deal, so it equals 50% for every set rate, which made every threshold
+     from 0.5 to 0.65 read as "conservative." It also compared a rate conditioned
+     on the search liking the hand and winning the auction against a rate
+     conditioned on nothing. The real answer is the same-hand fork in the
      `counterfactual` section below: bidding a marginal level measured at
      -0.35 +/- 1.40 pp against passing it instead — no detectable effect, which is
      why 0.50 stands as the incumbent rather than as a measured winner. */

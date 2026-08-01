@@ -156,13 +156,22 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   ~~Estimated cost: "at most ~6 times per deal at 6000 plays ≈ 36k plays, against a play phase that
   already spends up to 13 × 4 × 8000 ≈ 416k. Roughly a 9% increase in the DO's per-deal search work."~~ —
   **CORRECTED, measured** (`scripts/bench-auction-search.js cost`): PIMC's real per-deal cost is
-  **~124,500** simulated plays, not ~416,000 — `maxDet = Math.min(24, affordable)` shrinks as
-  `cardsLeft` falls through a deal, and `choosePIMCCard` spends nothing at all on a forced play, so
-  `8000 × 13` badly overstates it. The auction search's real cost is **~79,500** plays/deal:
-  **+64%, not +9%** — an order of magnitude off in relative terms, though the absolute cost (tens of ms,
-  warm, in a DO idle between messages) is still small enough that the recommendation is unchanged.
-  Recorded so the next person to reason about DO cost starts from the measured mechanism, not the
-  interface contract's arithmetic.
+  **~124,500** simulated plays, not ~416,000. `evaluateMoves` (`ai/pimc.js:95-97`) computes
+  `affordable = budget / (legal.length × cardsLeft)`, with `cardsLeft` (all four hands combined) in the
+  *denominator* — so `affordable`, and therefore `maxDet = Math.min(24, affordable)`, is *small* early
+  in a deal when `cardsLeft` is large and *grows* as the deal empties, until it hits and then sits
+  pinned at its 24 ceiling; it does not shrink as the deal progresses (traced on a real deal:
+  `legal=13, cardsLeft=52` → `affordable=11`, `maxDet=11`; `legal=2, cardsLeft=8` → `affordable=500`,
+  `maxDet` pinned at 24). The saving is in the *per-decision cost* (`maxDet × legal.length ×
+  cardsLeft`): while `maxDet` is still under 24 the afford formula caps that cost at roughly the 8000
+  budget (the same traced early decision costs 7,436 plays), but once the ceiling binds, cost keeps
+  falling as `legal.length`/`cardsLeft` keep shrinking through the endgame even though `maxDet` itself
+  is flat at 24 (the same traced late decision costs 384 plays). On top of that, `choosePIMCCard`
+  spends nothing at all on a forced play (`legal.length <= 1`) — `evaluateMoves` is never even called
+  for one. The auction search's real cost is **~79,500** plays/deal: **+64%, not +9%** — an order of
+  magnitude off in relative terms, though the absolute cost (tens of ms, warm, in a DO idle between
+  messages) is still small enough that the recommendation is unchanged. Recorded so the next person to
+  reason about DO cost starts from the measured mechanism, not the interface contract's arithmetic.
   **More consequential than the cost:** the auction search's two halves are not equally valuable. Paired
   A/B on real outcomes — deals won, the game's own scoring unit — found the **bid** worth
   **+2.77 ± 0.91 pp** (n=5998) for ~40% of the auction's compute, while **trump and call together** are
