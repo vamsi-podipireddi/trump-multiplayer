@@ -63,12 +63,25 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    played deals: +2.08 +/- 1.25 pts to the declaring side, +0.56 +/- 0.42 pp of
    deals won. Both are asked once a deal and only of the seat that won it.
 
-   The whole auction costs ~79500 plays a deal against PIMC's measured ~124500
-   for the same deal's card play (+64%) — PIMC's real figure, not 8000 x 13:
-   maxDet shrinks as cardsLeft does, and forced plays short-circuit entirely.
-   The bid is 40% of that and buys +2.77 +/- 0.91 pp of deals won; trump and call
-   are the other 60% and buy +0.56 +/- 0.42 pp. scripts/bench-auction-search.js
-   re-derives every number in this comment. */
+   WHERE EACH OF THESE ACTUALLY RUNS, which the rows above do not say. Only
+   aiBidDecisionSearch is routed server-side (ai/index.js, "hard" only). Trump
+   and the call are the browser's alone: the coach's auction advisor
+   (app/js/coach/worker.js) is their sole caller, and it passes its own, wider
+   playBudget — so TRUMP_PLAY_BUDGET/CALL_PLAY_BUDGET are this module's tuned
+   defaults and the bench's and tests' basis, not a figure any shipped call
+   spends. ROADMAP D35 has the reasoning: a Durable Object bills per invocation,
+   trump and call are one alarm each at ~8 ms where the alternative is ~0.01 ms,
+   and +0.56 +/- 0.42 pp is not distinguishable from zero. The bid buys
+   +2.77 +/- 0.91 pp for ~1.3 ms on a turn that is otherwise near-free.
+
+   The bid alone costs the DO ~32000 plays a deal against PIMC's measured
+   ~124500 for the same deal's card play (+25%); all three together came to
+   ~79500 (+64%). PIMC's figure is measured, not 8000 x 13: 8000 is a per-
+   decision CAP, not a per-decision spend — evaluateMoves divides it by
+   legal.length x cardsLeft, so maxDet GROWS toward its 24 ceiling as the deal
+   empties while the per-decision cost falls, and a forced play short-circuits
+   before evaluateMoves is called at all.
+   scripts/bench-auction-search.js re-derives every number in this comment. */
 const BID_PLAY_BUDGET = 3000;
 const TRUMP_PLAY_BUDGET = 24000;
 const CALL_PLAY_BUDGET = 24000;

@@ -9,6 +9,11 @@
  * whenever the rollout policy (ai/heuristic.js chooseAICard) is tuned, which is
  * what would silently invalidate them.
  *
+ * Since ROADMAP D35 those two govern the search that answers the coach's
+ * auction advisor in the browser, not a bot's: ai/index.js routes only the bid
+ * server-side. `cost` reports both — what the DO actually spends, and what the
+ * full three-question auction would cost if it were routed back.
+ *
  * Not run by `npm test` — it takes minutes. Run it deliberately:
  *
  *   node scripts/bench-auction-search.js              # everything, ~12 min
@@ -117,7 +122,10 @@ const on = (s) => !want.length || want.includes(s);
 if (on("cost")) {
   /* PIMC's own arithmetic (pimc.js:95-97): maxDet x legal x cardsLeft plays per
      card decision, and nothing at all when the play is forced. 8000 x 13 is the
-     wrong figure — maxDet shrinks with cardsLeft. */
+     wrong figure because 8000 is a per-decision CAP, not a per-decision spend:
+     cardsLeft is in affordable's denominator, so maxDet GROWS toward its 24
+     ceiling as the deal empties while the per-decision cost falls with
+     legal.length and cardsLeft. */
   const pimcFor = (G) => {
     let tot = 0, g = 0;
     while ((G.phase === "playing" || G.phase === "trickEnd") && g++ < 400) {
