@@ -295,9 +295,39 @@ test("describeTableRead reports the side split from the viewing seat's own side,
   const overrides = { teamsRevealed: true, declarer: 0, partner: 2, bid: 150, capturedPoints: [40, 10, 20, 5] };
   const view = seat => ({ ...R.buildView(room, pids[seat], 0), ...overrides });
 
-  assert.deepEqual(describeTableRead(view(0), namedCtx).side, { mine: 60, theirs: 15, needed: 90 }, "the declarer");
-  assert.deepEqual(describeTableRead(view(2), namedCtx).side, { mine: 60, theirs: 15, needed: 90 }, "the called partner");
-  assert.deepEqual(describeTableRead(view(1), namedCtx).side, { mine: 15, theirs: 60, needed: 90 }, "a defender");
+  // mineLabel/theirsLabel name every seat on each side (never a bare pronoun) —
+  // see the dedicated labelling test below for why that matters and the
+  // lone-declarer 1-vs-3 shape; this test is only pinning mine/theirs/needed.
+  assert.deepEqual(describeTableRead(view(0), namedCtx).side,
+    { mine: 60, theirs: 15, needed: 90, mineLabel: "You & P2", theirsLabel: "P1 & P3" }, "the declarer");
+  assert.deepEqual(describeTableRead(view(2), namedCtx).side,
+    { mine: 60, theirs: 15, needed: 90, mineLabel: "P0 & You", theirsLabel: "P1 & P3" }, "the called partner");
+  assert.deepEqual(describeTableRead(view(1), namedCtx).side,
+    { mine: 15, theirs: 60, needed: 90, mineLabel: "You & P3", theirsLabel: "P0 & P2" }, "a defender");
+});
+
+/* Review finding (Minor): side.mine/theirs are partnership totals, and a bare
+   "you"/"them" pronoun let a called partner misread "you 60" as their own
+   personal capture. mineLabel/theirsLabel name every seat on the relevant
+   side instead — this test is the one that actually exercises the 1-seat and
+   3-seat shapes (a lone declarer has no partner; their defenders are three,
+   not two), which the 2v2 test above never reaches. */
+test("describeTableRead names every seat on a side, including the 1-vs-3 shape when the declarer plays alone", async () => {
+  const { describeTableRead } = await import("../app/js/ui/coach.js");
+  const { room, pids } = freshRoom();
+  R.message(room, pids[0], { type: "start" }, 0);
+  const overrides = { teamsRevealed: true, declarer: 0, partner: 2, bid: 150, capturedPoints: [40, 10, 20, 5] };
+  const view = seat => ({ ...R.buildView(room, pids[seat], 0), ...overrides });
+
+  const alone = { ...view(0), partner: 0 };   // applyCall()'s "declarer === partner" case
+  const aloneSide = describeTableRead(alone, namedCtx).side;
+  assert.equal(aloneSide.mineLabel, "You", "a lone declarer's own side is just them — no '&'");
+  assert.equal(aloneSide.theirsLabel, "P1 & P2 & P3",
+    "three defenders against a lone declarer, the same 3-way join modals.js's showReveal() uses for this exact case");
+
+  const aloneDefender = describeTableRead({ ...view(1), declarer: 0, partner: 0 }, namedCtx).side;
+  assert.equal(aloneDefender.mineLabel, "You & P2 & P3", "one of three defenders, 'You' substituted in seat order");
+  assert.equal(aloneDefender.theirsLabel, "P0", "a lone declarer's side is a single name, no '&'");
 });
 
 test("describeTableRead words the bonus three's status through all three states", async () => {
@@ -334,4 +364,82 @@ test("describeTableRead's voids list drops seats with no known void and names th
     trick: [{ player: 0, card: { suit: "♠", rank: 5 } }, { player: 1, card: { suit: "♥", rank: 4 } }] };
   assert.deepEqual(describeTableRead(v, namedCtx).voids, [{ seat: 1, name: "P1", suits: ["♠"] }],
     "only the seat that actually showed out belongs in the list");
+});
+
+/* ---------------------------------------------------------------------------
+   tableReadRows(s) / voidsHtml(voids) / suitsHtml(outstanding, trump) — the
+   rest of the panel's pure logic (review finding: these touch neither
+   `document` nor `localStorage`, so — like describeTableRead/describeHint
+   above — there is no reason they can't be checked without a DOM). Fed plain
+   objects/arrays in describeTableRead's own output shape directly: unlike a
+   view, this is a shape only this file produces and consumes, so a hand-built
+   fixture carries none of the wire-drift risk describeTableRead's own tests
+   avoid by using real engine views. */
+
+test("tableReadRows: points live always shows; the side and bonus rows only when their data exists", async () => {
+  const { tableReadRows } = await import("../app/js/ui/coach.js");
+
+  const bare = { pointsLive: 250, side: null, bonusSuit: null, bonusStatus: "still to fall" };
+  assert.deepEqual(tableReadRows(bare), [{ kind: "num", label: "Points live", value: 250, mine: false }],
+    "no side (pre-reveal or no seat), no bonus suit assigned yet — just the one row");
+
+  const withBonus = { ...bare, bonusSuit: "♠" };
+  assert.deepEqual(tableReadRows(withBonus), [
+    { kind: "num", label: "Points live", value: 250, mine: false },
+    { kind: "text", label: "Bonus", suit: "♠", value: "still to fall", mine: false },
+  ], "a bonus suit assigned adds exactly one row, after points live");
+
+  const withSide = { ...bare, side: { mine: 60, theirs: 15, needed: 90, mineLabel: "You & P2", theirsLabel: "P1 & P3" } };
+  assert.deepEqual(tableReadRows(withSide), [
+    { kind: "num", label: "Points live", value: 250, mine: false },
+    { kind: "num", label: "You & P2", value: 60, mine: true },
+    { kind: "num", label: "P1 & P3", value: 15, mine: false },
+    { kind: "num", label: "Still needed", value: 90, mine: false },
+  ], "revealed: my side's row is flagged mine:true, theirs is not, needed is a plain count");
+});
+
+test('tableReadRows: "made it" once the contract is already there, not a bare 0', async () => {
+  const { tableReadRows } = await import("../app/js/ui/coach.js");
+  const made = { pointsLive: 10, side: { mine: 150, theirs: 90, needed: 0, mineLabel: "You", theirsLabel: "P1 & P2 & P3" },
+                 bonusSuit: null, bonusStatus: "" };
+  assert.deepEqual(tableReadRows(made).find(r => r.label === "Still needed"),
+    { kind: "text", label: "Still needed", value: "made it", mine: false });
+
+  const notYet = { ...made, side: { ...made.side, needed: 5 } };
+  assert.deepEqual(tableReadRows(notYet).find(r => r.label === "Still needed"),
+    { kind: "num", label: "Still needed", value: 5, mine: false });
+});
+
+test("voidsHtml: an empty-state note when nothing is known, escaped rows when something is", async () => {
+  const { voidsHtml } = await import("../app/js/ui/coach.js");
+  assert.match(voidsHtml([]), /No voids spotted yet\./);
+  assert.doesNotMatch(voidsHtml([]), /tr-void-row/);
+
+  const html = voidsHtml([{ seat: 1, name: "West", suits: ["♠", "♦"] }]);
+  assert.doesNotMatch(html, /No voids spotted yet\./);
+  assert.match(html, /<b>West<\/b>/);
+  assert.equal((html.match(/class="sc /g) || []).length, 2, "one suit icon per known-void suit");
+
+  // the one untrusted value voidsHtml ever prints — a player's own chosen name
+  const unsafe = voidsHtml([{ seat: 2, name: "<img src=x onerror=alert(1)>", suits: ["♥"] }]);
+  assert.ok(!unsafe.includes("<img"), "an unescaped name would inject markup into the rail");
+  assert.match(unsafe, /&lt;img/);
+});
+
+test('suitsHtml: "gone" vs the top card, and the trump suit is the only tile marked .trump', async () => {
+  const { suitsHtml } = await import("../app/js/ui/coach.js");
+  const outstanding = { "♠": { count: 0, top: null }, "♥": { count: 3, top: 12 }, "♦": { count: 1, top: 5 }, "♣": { count: 13, top: 14 } };
+  const html = suitsHtml(outstanding, "♥");
+
+  assert.match(html, /<span class="top">gone<\/span>/, "a suit with nothing left says 'gone', not 'top null'");
+  assert.match(html, /<span class="top">top Q<\/span>/, "rankLabel formats the top card (12 -> Q)");
+  assert.match(html, /<span class="top">top A<\/span>/, "14 -> A, not the raw number");
+
+  // exactly one tile carries .trump, and it's the suit passed in — not e.g.
+  // the first suit, or every suit if the equality check were ever inverted
+  assert.equal((html.match(/tr-suit trump/g) || []).length, 1, "exactly one suit tile is marked trump");
+  const spadesIdx = html.indexOf('class="tr-suit">');        // ♠ — not trump here — renders plain
+  const heartsIdx = html.indexOf('class="tr-suit trump">');  // ♥ — trump here
+  assert.ok(spadesIdx >= 0 && heartsIdx >= 0 && spadesIdx < heartsIdx,
+    "♠ (plain) renders before ♥ (trump), matching SUITS' own fixed order");
 });

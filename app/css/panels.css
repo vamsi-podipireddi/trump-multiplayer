@@ -255,8 +255,15 @@
   .tr-row { display:flex; justify-content:space-between; align-items:baseline; gap:10px;
     font-size:var(--t-sm); padding:6px 0; border-top:1px solid var(--line); }
   .tr-row:first-child { border-top:none; padding-top:0; }
-  .tr-row > span:first-child { color:var(--txt2); }
-  .tr-row > span:last-child { font-family:var(--fm); color:var(--txt); text-align:right; }
+  /* flex:1 + min-width:0 + ellipsis: two of these rows are now named by real
+     seats (up to a 3-way "West & North & East" against a lone declarer, join
+     name field maxlength 16 each) rather than a short static label like
+     "Points live" — same overflow fix .tr-void-row b already needed below. */
+  .tr-row > span:first-child { flex:1 1 auto; min-width:0; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; color:var(--txt2); }
+  .tr-row > span:last-child { flex:none; font-family:var(--fm); color:var(--txt); text-align:right; }
+  /* marks "your side's" row the same way table.score tr.you does its own name */
+  .tr-row.mine > span:first-child { color:var(--txt); font-weight:700; }
   .tr-block { margin-top:10px; }
   .tr-block .lbl { margin-bottom:7px; }
   .tr-voids { display:flex; flex-direction:column; gap:5px; }

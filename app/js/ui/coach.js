@@ -186,6 +186,16 @@ function seatName(v, o, seat) {
   return (info && info.name) || (v.names && v.names[seat]) || "";
 }
 
+/* Every seat on one side, named — the declaring pair (1 seat if playing alone,
+   otherwise 2) or its complement (usually 2 defenders, 3 against a lone
+   declarer). Mirrors modals.js's showReveal(): `defenders.join(" & ")` is the
+   exact 3-way-join precedent for the alone case. mySeat is replaced with
+   "You" wherever it falls, which is always in exactly one of the two calls
+   this feeds (a seat cannot be on both sides at once). */
+function sideLabel(v, o, seats, mySeat) {
+  return seats.map(s => s === mySeat ? "You" : seatName(v, o, s)).join(" & ");
+}
+
 /* Pure: turns tableRead(v)'s numbers into what the panel prints, plus every
    "should this even show" decision on top of them — hiding the side split
    before the reveal (tableRead itself already nulls `needed` then; this also
@@ -194,14 +204,28 @@ function seatName(v, o, seat) {
    (bonusTakenBy's own comment: fallen-but-unclaimed is an honest state, not a
    bug to paper over), and dropping any seat tableRead reports with zero known
    voids, since an empty list is not information worth a row. No DOM — this is
-   the one part of the panel worth unit-testing without one
+   one of the parts of the panel worth unit-testing without one
    (test/client.test.js), the same split renderCoach/describeHint use above. */
 function describeTableRead(v, o) {
   const r = tableRead(v);
   const mySeat = v.you ? v.you.seat : null;
-  const side = (v.teamsRevealed && mySeat != null && r.needed != null)
-    ? { mine: r.captured.mine, theirs: r.captured.theirs, needed: r.needed }
-    : null;
+  let side = null;
+  if (v.teamsRevealed && mySeat != null && r.needed != null) {
+    // a Set, not a 2-element array: playing alone means declarer === partner,
+    // one seat, not two — read.js's own tableRead() guards the same identity
+    const declSeats = [...new Set([v.declarer, v.partner])];
+    const defSeats = [0, 1, 2, 3].filter(s => !declSeats.includes(s));
+    const onDeclaringSide = declSeats.includes(mySeat);
+    const mySeats = onDeclaringSide ? declSeats : defSeats;
+    const theirSeats = onDeclaringSide ? defSeats : declSeats;
+    /* side.mine/theirs are partnership totals, not personal ones — a called
+       partner reading a bare "you 60" could take it as their own personal
+       capture. Naming every seat on each side (renderContract's pairNames()
+       and renderScoreboard's per-seat rows both name real seats, never a
+       pronoun) removes the ambiguity; the numbers were always correct. */
+    side = { mine: r.captured.mine, theirs: r.captured.theirs, needed: r.needed,
+             mineLabel: sideLabel(v, o, mySeats, mySeat), theirsLabel: sideLabel(v, o, theirSeats, mySeat) };
+  }
   const bonusStatus = !r.bonus.fallen ? "still to fall"
     : r.bonus.takenBy == null ? "fallen — trick in progress"
     : "taken by " + seatName(v, o, r.bonus.takenBy);
@@ -209,6 +233,27 @@ function describeTableRead(v, o) {
     .map(e => ({ seat: e.seat, name: seatName(v, o, e.seat), suits: e.suits }));
   return { pointsLive: r.pointsLive, side, bonusSuit: v.bonusSuit || null, bonusStatus,
            voids, outstanding: r.outstanding, trump: v.trump || null };
+}
+
+/* Pure: which rows the panel shows and how each is worded — whether the side
+   rows and the bonus row appear at all, and "made it" vs a plain count once
+   the contract's already there. Split out of renderTableRead for the same
+   reason voidsHtml/suitsHtml below are their own functions: none of this
+   touches DOM, so none of it needs one to be checked (test/client.test.js).
+   Rows are plain data (kind/label/value/mine/suit), not HTML — renderTableRead
+   is the only place that escapes and wraps them, same division of labour as
+   describeTableRead vs. renderTableRead itself. */
+function tableReadRows(s) {
+  const rows = [{ kind: "num", label: "Points live", value: s.pointsLive, mine: false }];
+  if (s.side) {
+    rows.push({ kind: "num", label: s.side.mineLabel, value: s.side.mine, mine: true });
+    rows.push({ kind: "num", label: s.side.theirsLabel, value: s.side.theirs, mine: false });
+    rows.push(s.side.needed === 0
+      ? { kind: "text", label: "Still needed", value: "made it", mine: false }
+      : { kind: "num", label: "Still needed", value: s.side.needed, mine: false });
+  }
+  if (s.bonusSuit) rows.push({ kind: "text", label: "Bonus", suit: s.bonusSuit, value: s.bonusStatus, mine: false });
+  return rows;
 }
 
 const READ_PREF = "trump_read";
@@ -236,7 +281,7 @@ function paintReadVisibility() {
 }
 function toggleRead() { setPref(READ_PREF, readShown() ? "0" : "1"); paintReadVisibility(); }
 
-const trRow = (label, value) => `<div class="tr-row"><span>${label}</span><span>${value}</span></div>`;
+const trRow = (label, value, mine) => `<div class="tr-row${mine ? " mine" : ""}"><span>${label}</span><span>${value}</span></div>`;
 
 function voidsHtml(voids) {
   if (!voids.length) return `<div class="note">No voids spotted yet.</div>`;
@@ -267,16 +312,22 @@ function renderTableRead(v, o) {
   paintReadVisibility();
 
   const s = describeTableRead(v, o);
-  const rows = [trRow("Points live", `<b>${s.pointsLive}</b>`)];
-  if (s.side) {
-    rows.push(trRow("Captured", `you <b>${s.side.mine}</b> · them <b>${s.side.theirs}</b>`));
-    rows.push(trRow("Still needed", s.side.needed === 0 ? "made it" : `<b>${s.side.needed}</b>`));
-  }
-  if (s.bonusSuit) rows.push(trRow(`Bonus ${suitSpan(s.bonusSuit)}`, esc(s.bonusStatus)));
+  // tableReadRows decides *what*; only the escaping/suit-icon/<b> markup is
+  // built here — labels are player names in two of these rows (mineLabel/
+  // theirsLabel), the one untrusted value this function ever prints outside
+  // voidsHtml, so esc() runs on every label, not just the ones expected to need it.
+  const rowsHtml = tableReadRows(s).map(r => {
+    const label = esc(r.label) + (r.suit ? " " + suitSpan(r.suit) : "");
+    const value = r.kind === "num" ? `<b>${r.value}</b>` : esc(String(r.value));
+    return trRow(label, value, r.mine);
+  }).join("");
 
-  $("tr-body").innerHTML = rows.join("") +
+  $("tr-body").innerHTML = rowsHtml +
     `<div class="tr-block"><div class="lbl">Known voids</div>${voidsHtml(s.voids)}</div>` +
     `<div class="tr-block"><div class="lbl">Outstanding</div>${suitsHtml(s.outstanding, s.trump)}</div>`;
 }
 
-export { hintEnabled, initCoach, renderCoach, resetCoach, describeHint, describeTableRead, renderTableRead };
+export {
+  hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
+  describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
+};
