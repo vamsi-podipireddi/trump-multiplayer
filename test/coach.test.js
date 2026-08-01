@@ -899,14 +899,82 @@ test("aiPickPartnerSearch is evaluateCalls' argmax on makeProb", () => {
   assert.ok(E.sameCard(pick, best.card));
 });
 
+/* Task 2 review finding: the version of this test that shipped in 9dd8c38 only
+   checked `candidates.length === 4` and `SUITS.includes(candidates[0].suit)`
+   — both true unconditionally by construction (evaluateTrumps always builds 4
+   suit candidates, and candidates[0].suit is always a member of SUITS), so it
+   passed just as happily for a bestOf using `>=` instead of `>`, or with no
+   tie-break at all. Fixed to assert the actual resolution: find a seed whose
+   top makeProb is genuinely shared by 2+ candidates, then check that
+   aiPickTrumpSearch returns the EARLIEST of those tied candidates — the one
+   bestOf's strict `>` must leave standing — not merely a legal suit.
+   evaluateTrumps builds cands as [heuristic, ...SUITS.filter(...)] and
+   preserves that order all the way to ev.candidates, so filter() finds the
+   tied subset without disturbing which one is earliest.
+
+   makeProb is a count over one fixed, shared world sample per call, so two
+   candidates tie exactly when their counts are exactly equal — comparing
+   with `===` is exact, no floating-point tolerance needed.
+
+   TIE_BUDGET is deliberately smaller than the 24000 (TRUMP_PLAY_BUDGET) the
+   other two tests above use — not a mismatch, a different question. Measured
+   while fixing this finding: at 24000 (~115 worlds/candidate) 0 of 60 sampled
+   seeds produced a tie at all; at 1500 (~7 worlds/candidate) 17 of 60 did,
+   and — checked directly — every one of those 17 would have resolved to a
+   different suit under a `>=` mutant, so the assertion below has real bite.
+   worldsFor/scoreCandidates/bestOf run identically regardless of which budget
+   produced their worlds; a coarser sample only makes the tie this test wants
+   easier to find, on the same code path the other two tests already cover at
+   the shipped budget. */
 test("the heuristic's own answer is evaluated first, so a tie leaves it standing", () => {
-  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
-  E.startMatch(G);
-  driveToDeclarer(G);
-  const ev = E.evaluateTrumps(G, G.declarer, { rnd: E.mulberry32(3), playBudget: 24000 });
-  assert.equal(ev.candidates.length, 4);
-  // candidates[0] is the heuristic's pick; a reduce with strict > keeps the first on a tie
-  assert.ok(E.SUITS.includes(ev.candidates[0].suit));
+  const TIE_BUDGET = 1500; // ~7 worlds/candidate — coarse enough that exact ties are common, see comment above
+  let tieFound = false;
+  for (let seed = 0; seed < 60; seed++) {
+    const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+    E.startMatch(G);
+    driveToDeclarer(G);
+    const seat = G.declarer;
+    const ev = E.evaluateTrumps(G, seat, { rnd: E.mulberry32(seed), playBudget: TIE_BUDGET });
+    assert.equal(ev.candidates.length, 4);
+    const top = Math.max(...ev.candidates.map(c => c.makeProb));
+    const tied = ev.candidates.filter(c => c.makeProb === top);   // filter() preserves cands' order
+    if (tied.length < 2) continue;
+    tieFound = true;
+    assert.equal(E.aiPickTrumpSearch(G, seat, { rnd: E.mulberry32(seed), playBudget: TIE_BUDGET }), tied[0].suit,
+      `seed ${seed}: a ${tied.length}-way tie at makeProb ${top} must resolve to the earliest tied candidate`);
+    break;
+  }
+  assert.ok(tieFound, "no seed among the first 60 produced a tie at the top makeProb — the tie-break was never exercised");
+});
+
+/* Same property through evaluateCalls/aiPickPartnerSearch. Optional per the
+   review finding (the trump test above is what it required) — added anyway
+   because bestOf is the one function both consumers share, and the call side
+   has its own candidate-construction order to pin
+   (`cands = heuristic ? [heuristic, ...honours] : honours`). Kept at the
+   shipped CALL_PLAY_BUDGET (24000): unlike trump, ties there are already
+   common at that budget (9 of 60 sampled seeds), so there is no reason to
+   shrink it. */
+test("evaluateCalls' tie leaves the earliest candidate standing too (bestOf is shared)", () => {
+  let tieFound = false;
+  for (let seed = 0; seed < 80; seed++) {
+    const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+    E.startMatch(G);
+    driveToDeclarer(G);
+    E.applyTrump(G, E.SUITS[0]);
+    const seat = G.declarer;
+    const ev = E.evaluateCalls(G, seat, { rnd: E.mulberry32(seed), playBudget: 24000 });
+    if (!ev) continue;
+    const top = Math.max(...ev.candidates.map(c => c.makeProb));
+    const tied = ev.candidates.filter(c => c.makeProb === top);
+    if (tied.length < 2) continue;
+    tieFound = true;
+    const pick = E.aiPickPartnerSearch(G, seat, { rnd: E.mulberry32(seed), playBudget: 24000 });
+    assert.ok(E.sameCard(pick, tied[0].card),
+      `seed ${seed}: a ${tied.length}-way tie at makeProb ${top} must resolve to the earliest tied candidate`);
+    break;
+  }
+  assert.ok(tieFound, "no seed among the first 80 produced a tie at the top makeProb — the tie-break was never exercised");
 });
 
 // ---------------------------------------------------------------------------
