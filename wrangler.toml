@@ -5,6 +5,22 @@ name = "trump-multiplayer"
 main = "src/worker/index.js"
 compatibility_date = "2025-09-01"
 
+# Runaway guard, not a budget. The platform meters CPU per *invocation*, and the
+# DO's unit of work is one invocation per event: WebSocket hibernation
+# (ctx.acceptWebSocket in src/worker/room-do.js) makes every inbound message its
+# own invocation rather than accumulating across a connection, and each alarm
+# fires exactly one bot action (src/core/room/timers.js -> drive.js's aiAct).
+# Measured with `node scripts/bench-auction-search.js cost`, all four seats on
+# "hard": p95 ~2 ms an invocation, worst single decision 3.9-8.1 ms across runs
+# (one 18.6 ms outlier attributable to GC, not to search width). 300 ms is ~15x
+# that worst case — wide enough that a legitimate alarm can never be killed, since
+# a killed alarm stalls a live game — and 100x below the Paid plan's 30 s default,
+# which the docs recommend lowering explicitly to bound a denial-of-wallet or a
+# runaway loop. Raise it only against a fresh measurement, never to make a stall
+# go away.
+[limits]
+cpu_ms = 300
+
 # Static client served from the same origin as the /ws WebSocket.
 # Remove this block for the "Pages + separate Worker" split (then set WS_BASE in the client).
 [assets]

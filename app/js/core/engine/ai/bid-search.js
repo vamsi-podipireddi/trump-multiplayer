@@ -72,11 +72,17 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
 const BID_PLAY_BUDGET = 3000;
 const TRUMP_PLAY_BUDGET = 24000;
 const CALL_PLAY_BUDGET = 24000;
+/* Exported for scripts/bench-auction-search.js, which prints the world counts
+   this comment block quotes: a bench carrying its own copy of the formula would
+   keep printing numbers after a change here, and those numbers are pasted into
+   this comment and into ROADMAP D35/D36 as if they were measured. */
 const worldsFor = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
 
 /* aiPickPartner reads G.trump to decide which ace to call; during the auction no
    trump has been named yet, so handing it G unchanged makes it call the "null"
-   ace. Every candidate trump therefore gets scored with the call it implies. */
+   ace. Every candidate trump therefore gets scored with the call it implies.
+   Exported for the bench alongside worldsFor, same reason: its copy there had
+   silently dropped the identity short-circuit. */
 const withTrump = (G, trump) => (G.trump === trump ? G : { ...G, trump });
 
 /* At bid time nothing has been played, no void is known and no card has been
@@ -212,4 +218,4 @@ function aiPickPartnerSearch(G, seat, opts) {
 }
 
 export { bidValue, aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch,
-         BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET };
+         BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET, worldsFor, withTrump };

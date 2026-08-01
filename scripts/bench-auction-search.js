@@ -31,18 +31,26 @@
  */
 import * as E from "../app/js/core/engine/index.js";
 import { chooseAICard, aiPickTrump, aiPickPartner, aiBidDecision } from "../app/js/core/engine/ai/heuristic.js";
+/* worldsFor and withTrump are imported, never re-typed: every world count this
+   script prints is quoted verbatim in bid-search.js's own budget comment and in
+   ROADMAP D35/D36, so a local copy of the formula would keep printing stale
+   numbers into two places contributors read as measured fact. (The copy this
+   replaced had also silently dropped withTrump's `G.trump === trump ? G :`
+   identity short-circuit.) */
 import { aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch,
-         BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET } from "../app/js/core/engine/ai/bid-search.js";
+         BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET,
+         worldsFor, withTrump } from "../app/js/core/engine/ai/bid-search.js";
 import { sortHand } from "../app/js/core/engine/cards.js";
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
 const ci = xs => 1.96 * sd(xs) / Math.sqrt(xs.length);
 const key = c => c.suit + c.rank;
-const withTrump = (G, t) => ({ ...G, trump: t });
 const fresh = () => { const G = E.createMatch(); E.startMatch(G); return G; };
-const worldsFor = (c, b) => Math.max(4, Math.floor(b / (c * 52)));
 const pm = (xs) => `${mean(xs) >= 0 ? "+" : ""}${mean(xs).toFixed(2)} +/- ${ci(xs).toFixed(2)}`;
+// up here rather than beside `table`'s tally(): `cost` runs first, and a const is
+// not usable before its own initialiser has evaluated
+const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
 /* Deliberately NOT bid-search.js's playOutWith: an oracle that shares the code
    under test cannot catch that code being wrong. The `cost` section asserts the
@@ -155,7 +163,48 @@ if (on("cost")) {
   console.log(`  independent oracle vs the module's own search: ${mismatch}/${checked} disagreements (must be 0)`);
   console.log(`  mean contract ${mean(contracts).toFixed(1)}, ${nb.toFixed(2)} bid decisions an auction, call shortlist ~${mean(sls).toFixed(1)}`);
   console.log(`  PIMC, all four seats, one deal : ${Math.round(P)} plays (${Math.round(P / 4)}/bot)`);
-  console.log(`  auction: bid ${Math.round(bid)} + trump ${trump} + call ${Math.round(call)} = ${Math.round(bid + trump + call)} plays  (+${(100 * (bid + trump + call) / P).toFixed(1)}% of PIMC)`);
+  console.log(`  auction search AS ROUTED (ai/index.js): bid ${Math.round(bid)} plays/deal  (+${(100 * bid / P).toFixed(1)}% of PIMC)`);
+  console.log(`  the same search if trump/call were also routed server-side: +${trump} +${Math.round(call)} = ${Math.round(bid + trump + call)} plays  (+${(100 * (bid + trump + call) / P).toFixed(1)}%)`);
+
+  /* Per-DEAL totals are the wrong unit for a Durable Object, which is what every
+     task on this branch reasoned in. src/core/room/timers.js fires ONE alarm per
+     bot action (drive.js arms an "ai" timer; fireTimers -> aiAct -> aiActionFor),
+     so the figure a CPU limit has to clear is the worst SINGLE decision. Timed
+     through aiActionFor rather than through the search functions directly, so it
+     keeps measuring whatever ai/index.js actually routes where — including that
+     trump and call no longer reach a search at all. */
+  const inv = { bid: [], trump: [], call: [], play: [] };
+  const perDeal = [];
+  let cold = null;
+  for (let d = 0; d < Math.min(DEALS, 20); d++) {
+    const G = fresh();
+    let spent = 0, guard = 0;
+    while (G.phase !== "roundEnd" && G.phase !== "matchOver" && guard++ < 400) {
+      if (G.phase === "trickEnd") { E.advanceTrick(G); continue; }
+      const ra = E.requiredActor(G);
+      if (!ra) break;
+      const t0 = performance.now();
+      const act = E.aiActionFor(G, ra.seat, "hard");
+      const ms = performance.now() - t0;
+      if (cold === null) cold = { kind: ra.kind, ms };   // first search of the process: cold code, cold caches
+      inv[ra.kind].push(ms); spent += ms;
+      if (act.type === "bid") E.applyBid(G, ra.seat, act.value);
+      else if (act.type === "trump") E.applyTrump(G, act.suit);
+      else if (act.type === "call") E.applyCall(G, act.card);
+      else E.applyPlay(G, ra.seat, act.card);
+    }
+    perDeal.push(spent);
+  }
+  const warm = Object.entries(inv).filter(([, xs]) => xs.length);
+  console.log(`\n  == CPU per ALARM INVOCATION (${perDeal.length} deals, all four seats on "hard") ==`);
+  console.log(`     ${"kind".padEnd(6)}${"n".padStart(6)}${"mean".padStart(9)}${"p50".padStart(9)}${"p95".padStart(9)}${"max".padStart(9)}   ms`);
+  for (const [k, xs] of warm) {
+    const s = xs.slice().sort((a, b) => a - b);
+    console.log(`     ${k.padEnd(6)}${String(xs.length).padStart(6)}${mean(xs).toFixed(2).padStart(9)}${pct(s, 0.5).toFixed(2).padStart(9)}${pct(s, 0.95).toFixed(2).padStart(9)}${s[s.length - 1].toFixed(2).padStart(9)}`);
+  }
+  const worst = warm.reduce((w, [k, xs]) => { const m = Math.max(...xs); return m > w.ms ? { kind: k, ms: m } : w; }, { kind: "-", ms: 0 });
+  console.log(`     per deal, all four seats: ${mean(perDeal).toFixed(1)} ms  (max deal ${Math.max(...perDeal).toFixed(1)} ms)`);
+  console.log(`     WORST SINGLE INVOCATION: ${worst.ms.toFixed(2)} ms (${worst.kind})   first of the process, cold: ${cold.ms.toFixed(2)} ms (${cold.kind})`);
 }
 
 // -------------------------------------------------------------- regret
@@ -293,7 +342,6 @@ if (on("outcome")) {
    seat's paired result. */
 const CONTRACT_BUCKETS = [130, 140, 150, 160, 170, 180, 190, 200, 210];
 const bucketOf = (b) => Math.min(CONTRACT_BUCKETS.length - 1, Math.floor((b - 130) / 10));
-const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
 /* Continued from `G` mid-auction with the seed counter already at `turn`, so the
    `counterfactual` section can fork one snapshot into two branches whose seats

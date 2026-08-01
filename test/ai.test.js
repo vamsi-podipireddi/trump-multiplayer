@@ -338,7 +338,12 @@ test("the auction search bounds itself in simulated plays, not milliseconds", ()
    below shipped and ~4 sd above random. It is a catastrophe detector and nothing
    finer — a budget reset to 6000 lands at +0.4 (sd 2.1), which no assertion this
    cheap can separate from +2.8. That regression is caught by the constants
-   below, and quantified by scripts/bench-auction-search.js. */
+   below, and quantified by scripts/bench-auction-search.js.
+
+   Still worth its runtime after ROADMAP D35 cut the server-side routing: these
+   two functions now answer the coach's auction advisor in the player's own
+   browser (app/js/coach/worker.js), which is a shipped surface a human reads and
+   acts on — the search getting worse would be just as wrong there. */
 test("the searched trump and call are not weaker than the hand-count (paired deals)", () => {
   const DEALS = 12;
   let searched = 0, heuristic = 0;
@@ -368,7 +373,19 @@ test("the searched trump and call are not weaker than the hand-count (paired dea
    Measured basis (scripts/bench-auction-search.js): at 11 worlds the call search
    buys nothing measurable over the hand-count it replaces (-0.27 +/- 0.96 pts a
    deal); at ~46 it is worth +2.60 +/- 0.87. Lower these and the search stops
-   being an improvement — that is a real result, not a stylistic preference. */
+   being an improvement — that is a real result, not a stylistic preference.
+
+   What each row now guards is NOT the same, and saying so is the point.
+   BID_PLAY_BUDGET is live server-side: ai/index.js calls aiBidDecisionSearch
+   with no opts, so this constant is the depth every `hard` bot bids at.
+   TRUMP_PLAY_BUDGET/CALL_PLAY_BUDGET no longer govern any shipped call —
+   ai/index.js stopped routing to them (ROADMAP D35) and coach/worker.js passes
+   its own, wider playBudget — so those two rows pin the module's own calibrated
+   defaults, which the bench and the strength test above consume, rather than a
+   production cost or a bot's strength. Kept at exact strength anyway: the
+   defaults are the documented result of the 150-deal hold-out, and a silent
+   reset of them would quietly invalidate every number in bid-search.js's
+   comment block and in ROADMAP D36. */
 test("the auction budgets still buy enough worlds per candidate to beat the hand-count", () => {
   const worldsPer = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
   assert.ok(worldsPer(1, BID_PLAY_BUDGET) >= 50,
@@ -397,9 +414,13 @@ test("every difficulty produces a legal auction action", () => {
     let guard = 0;
     // an all-pass auction redeals and stays in "bidding", so this is not one pass of four
     while (G.phase !== "trumpSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
-    /* Drive the engine with hard's own answers rather than reading them: nothing
-       else in the suite hands a searched trump to applyTrump, so without this the
-       engine accepting what aiPickTrumpSearch returns is untested. */
+    /* Drive the engine with hard's own answers rather than reading them, so the
+       whole tier is exercised end to end: aiActionFor -> applyTrump -> applyCall
+       -> "playing". Every other test in this file calls the trump/call
+       *functions* and asserts on their return value; this is the only one that
+       feeds the router's output back into the engine and checks the engine
+       accepts it, which is what would break if a routing change ever returned
+       something of the wrong shape. */
     const trump = E.aiActionFor(G, G.declarer, "hard");
     assert.equal(trump.type, "trump");
     E.applyTrump(G, trump.suit);
@@ -460,31 +481,45 @@ test("hard bids from the search: it contradicts verdicts the hand-count cannot",
     `hard's bid left the hand-count's forced verdict only ${contradicted} times of ${forced} — the search is not wired in`);
 });
 
-/* Unlike the bid, aiPickTrump and aiPickPartner are deterministic, so any
-   disagreement at all proves the search answered. Measured over 60 declared
-   deals: the searched trump differs 20% of the time and the searched call 50%,
-   so 16 deals expect ~11 of 32 decisions to move; requiring 3 is ~3 sd low.
-   The easy/normal assertions are exact — those tiers must not drift. */
-test("hard picks trump and the call from the search; easy and normal keep the hand-count", () => {
+/* Trump and the call come from the hand-count at EVERY tier, hard included.
+   ROADMAP D35: a Durable Object meters CPU per *invocation*, and a searched
+   trump or call turns an otherwise ~0.01 ms alarm into an ~8 ms one to buy
+   +0.56 +/- 0.42 pp of deals won — indistinguishable from zero. Only the bid
+   (+2.77 +/- 0.91 pp) is routed to the search server-side. aiPickTrump and
+   aiPickPartner are deterministic, so every assertion here is exact equality.
+
+   On its own that would be a weak test: it also passes if the router still
+   called the search and the search merely agreed. So the same loop runs the two
+   search functions directly and counts how often they WOULD have answered
+   differently on these exact positions — over 60 declared deals the searched
+   trump differs 20% of the time and the searched call 50%, so 16 deals expect
+   ~11 of 32 and requiring 3 is ~3 sd low. That count is what makes the equality
+   assertions above discriminate between "routed to the hand-count" and "routed
+   to a search that happened to agree", and it double-books as the pin that
+   ai/bid-search.js is still alive and still disagrees with the heuristic — it
+   answers the browser-side auction advisor now (app/js/coach/worker.js), which
+   costs the server nothing. */
+test("every tier takes trump and the call from the hand-count, on positions where the search would differ", () => {
   const DEALS = 16;
-  let differ = 0;
+  let wouldDiffer = 0;
   for (let d = 0; d < DEALS; d++) {
     const G = E.createMatch(); E.startMatch(G);
     let guard = 0;
     while (G.phase !== "trumpSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
     const seat = G.declarer;
     const hT = aiPickTrump(G, seat);
-    for (const level of ["easy", "normal"])
+    for (const level of ["easy", "normal", "hard"])
       assert.equal(E.aiActionFor(G, seat, level).suit, hT, `${level} must keep the hand-count's trump`);
-    if (E.aiActionFor(G, seat, "hard").suit !== hT) differ++;
-    E.applyTrump(G, hT);                                // both tiers judged on one position
+    if (E.aiPickTrumpSearch(G, seat, { rnd: E.mulberry32(d) }) !== hT) wouldDiffer++;
+    E.applyTrump(G, hT);                                // every tier judged on one position
     const hC = aiPickPartner(G, seat);
-    for (const level of ["easy", "normal"])
+    for (const level of ["easy", "normal", "hard"])
       assert.deepEqual(E.aiActionFor(G, seat, level).card, hC, `${level} must keep the hand-count's call`);
-    if (!E.sameCard(E.aiActionFor(G, seat, "hard").card, hC)) differ++;
+    if (!E.sameCard(E.aiPickPartnerSearch(G, seat, { rnd: E.mulberry32(d) }), hC)) wouldDiffer++;
   }
-  assert.ok(differ >= 3,
-    `hard's trump and call never left the hand-count (${differ} of ${2 * DEALS} decisions) — the search is not wired in`);
+  assert.ok(wouldDiffer >= 3,
+    `the auction search agreed with the hand-count on ${2 * DEALS - wouldDiffer} of ${2 * DEALS} decisions — ` +
+    `too few for the equality assertions above to prove anything about the routing`);
 });
 
 /* Difficulty is one room setting applied to every bot, so the shape that ships
