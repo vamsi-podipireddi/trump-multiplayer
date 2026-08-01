@@ -137,8 +137,17 @@ test("hard AI is not weaker than the heuristic (paired-deal comparison)", () => 
   // Same dealt round played twice from the identical position: once all-heuristic,
   // once with the declaring side on PIMC. Paired deals kill most variance; assert
   // the PIMC side is at least as good within a small tolerance.
+  //
+  // DEALS was 16, which left the tolerance only ~2.3 sd out: over 200 runs of
+  // this body the statistic sits at +13.1 (sd 9.2) and 1 run in 200 fell below
+  // the -8 line. At 40 the sd is 5.5 and 0 of 80 did, so this is the cheap end
+  // of a real de-flake (~+350ms) rather than a loosened assertion — the -8 line
+  // is untouched and now ~3.8 sd out. Seeding is the fix that does NOT work
+  // here: choosePIMCCard does take an `rnd`, but the deal comes off the platform
+  // CSPRNG (random.js shuffle, deliberately per ROADMAP D9a) and deal variance
+  // is what dominates, not the sampler's.
   let heurPts = 0, pimcPts = 0;
-  const DEALS = 16;
+  const DEALS = 40;
   for (let d = 0; d < DEALS; d++) {
     const base = gameAtPlay();
     const snap = JSON.stringify(base);
@@ -387,10 +396,19 @@ test("every difficulty produces a legal auction action", () => {
     }
     let guard = 0;
     // an all-pass auction redeals and stays in "bidding", so this is not one pass of four
-    while (G.phase !== "partnerSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
+    while (G.phase !== "trumpSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
+    /* Drive the engine with hard's own answers rather than reading them: nothing
+       else in the suite hands a searched trump to applyTrump, so without this the
+       engine accepting what aiPickTrumpSearch returns is untested. */
+    const trump = E.aiActionFor(G, G.declarer, "hard");
+    assert.equal(trump.type, "trump");
+    E.applyTrump(G, trump.suit);
+    assert.equal(G.phase, "partnerSelect", "the engine did not accept hard's trump");
     const call = E.aiActionFor(G, G.declarer, "hard");
     assert.equal(call.type, "call");
     assert.ok(E.callIsLegal(G, call.card), "hard called a card it already holds");
+    E.applyCall(G, call.card);
+    assert.equal(G.phase, "playing", "the engine did not accept hard's call");
   }
 });
 
@@ -410,7 +428,12 @@ test("every difficulty produces a legal auction action", () => {
    Measured over 400 opening positions: the search contradicts a forced verdict
    16.3% of the time (22.6% across every turn of a live auction, where the target
    is higher and the hand-count's flat +60 hurts most). At 80 positions the
-   expected count is ~13; requiring 2 is ~5 sd low, P(fail) ~ 2e-5. */
+   expected count is ~13; requiring 2 is ~5 sd low, P(fail) ~ 2e-5.
+
+   The same bracket pins easy and normal exactly, the way the trump/call test
+   below does: a forced verdict is one the hand-count reaches for every draw, so
+   a tier that still hand-counts must land on it every time. Those assertions
+   cost two more calls on a position already built. */
 test("hard bids from the search: it contradicts verdicts the hand-count cannot", () => {
   const POSITIONS = 80;
   let forced = 0, contradicted = 0;
@@ -421,8 +444,14 @@ test("hard bids from the search: it contradicts verdicts the hand-count cannot",
     // rnd() = 0 is the estimate's floor (-8), rnd() ~ 1 its ceiling (+8)
     const floorBids = bids(aiBidDecision(G, seat, false, () => 0));
     const ceilBids = bids(aiBidDecision(G, seat, false, () => 1 - 1e-9));
+    // easy shifts the same estimate by -18, so its band is its own
+    const easyFloor = bids(aiBidDecision(G, seat, true, () => 0));
+    const easyCeil = bids(aiBidDecision(G, seat, true, () => 1 - 1e-9));
+    if (easyFloor === easyCeil)
+      assert.equal(bids(E.aiActionFor(G, seat, "easy").value), easyFloor, "easy must keep the hand-count's bid");
     if (floorBids === ceilBids) {                       // the hand-count is forced either way
       forced++;
+      assert.equal(bids(E.aiActionFor(G, seat, "normal").value), floorBids, "normal must keep the hand-count's bid");
       if (bids(E.aiActionFor(G, seat, "hard").value) !== floorBids) contradicted++;
     }
   }

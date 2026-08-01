@@ -16,8 +16,10 @@
  *   DEALS=40 node scripts/bench-auction-search.js     # smaller/faster
  *
  * Sections: cost | regret | shortlist | calibration | outcome | table | threshold
+ *           | counterfactual
  *
- * `table` and `threshold` answer a question the others structurally cannot.
+ * `table`, `threshold` and `counterfactual` answer a question the others
+ * structurally cannot.
  * Every number above comes from ONE searching seat against three hand-counters,
  * but difficulty is a single room setting applied to every bot
  * (src/core/room/drive.js), so the shipped shape is four searching seats bidding
@@ -293,9 +295,12 @@ const CONTRACT_BUCKETS = [130, 140, 150, 160, 170, 180, 190, 200, 210];
 const bucketOf = (b) => Math.min(CONTRACT_BUCKETS.length - 1, Math.floor((b - 130) / 10));
 const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
 
-function playTable(seats, card, probe = {}) {
-  const G = fresh();
-  let turn = 0, guard = 0, redeals = 0;
+/* Continued from `G` mid-auction with the seed counter already at `turn`, so the
+   `counterfactual` section can fork one snapshot into two branches whose seats
+   answer identically wherever the two positions are identical. playTable is this
+   from a fresh deal. */
+function finishDeal(G, seats, card, probe, turn) {
+  let guard = 0, redeals = 0;
   while (G.phase === "bidding" && guard++ < 80) {
     redeals = Math.max(redeals, G.redealCount);
     const seat = E.findBidActor(G);
@@ -321,6 +326,7 @@ function playTable(seats, card, probe = {}) {
            prob: pr && pr.level === G.bid ? pr : null,
            winners: G.lastResult.winners, redeals, forced, turns: turn };
 }
+const playTable = (seats, card, probe = {}) => finishDeal(fresh(), seats, card, probe, 0);
 
 /* aiBidDecisionSearch inlined so the make-probability behind each bid can be
    kept (probe) and its 0.5 line swept (thresh). Identical to the shipped
@@ -343,13 +349,17 @@ const searcher = (d, thresh, probe) => ({
   trump: (G, s) => aiPickTrumpSearch(G, s, { rnd: E.mulberry32(d * 13 + 1) }),
   call: (G, s) => aiPickPartnerSearch(G, s, { rnd: E.mulberry32(d * 17 + 2) }),
 });
-const counter = () => ({
-  bid: (G, s) => aiBidDecision(G, s, false, Math.random),
+/* Seeded on (deal, seat, turn) for the same reason the searcher is: the deal
+   itself comes off the platform CSPRNG and cannot be pinned, but everything a
+   policy decides on top of it can, so a rerun at the same size is reproducible
+   for both arms rather than only the searching one. */
+const counter = (d) => ({
+  bid: (G, s, n) => aiBidDecision(G, s, false, E.mulberry32(d * 31 + s * 7 + n)),
   trump: (G, s) => aiPickTrump(G, s),
   call: (G, s) => aiPickPartner(G, s),
 });
 /* `who` is the set of seats that search; everyone else hand-counts. */
-const tableOf = (who, d, thresh, probe) => [0, 1, 2, 3].map(s => (who.includes(s) ? searcher(d, thresh, probe) : counter()));
+const tableOf = (who, d, thresh, probe) => [0, 1, 2, 3].map(s => (who.includes(s) ? searcher(d, thresh, probe) : counter(d)));
 
 /* Accumulates one arm's deals into the distribution the deal-win metric cannot
    see. seatWin is reported for seat 3 specifically: exactly two of four seats win
@@ -373,13 +383,20 @@ function tally(rows) {
     forced: rows.filter(r => r.forced).length / rows.length,
     turns: mean(rows.map(r => r.turns)),
     margin: mean(rows.map(r => r.dPts - r.bid)),
+    /* Pooled margin is not independent of the set rate: a set deal contributes a
+       negative margin, so a policy that is set more often has a lower pooled
+       margin whatever it does with the contracts it makes. madeMargin is the
+       part of the claim "the extra contract comes out of surplus, not risk" that
+       does not simply restate the set rate. */
+    madeMargin: mean(rows.filter(r => r.made).map(r => r.dPts - r.bid)),
     seatWin: rows.filter(r => r.winners.includes(3)).length / rows.length,
   };
 }
 function report(label, t) {
   console.log(`  ${label.padEnd(22)} contract ${t.mean.toFixed(1)} +/- ${t.ci.toFixed(1)}  p50 ${String(t.p50).padStart(3)}  p90 ${String(t.p90).padStart(3)}  max ${t.max}` +
     `   set ${(100 * t.set).toFixed(1)}%   >=180 ${(100 * t.big).toFixed(1)}%   250 ${(100 * t.ceiling).toFixed(1)}%` +
-    `   redeal ${(100 * t.redeal).toFixed(1)}%  forced ${(100 * t.forced).toFixed(1)}%   ${t.turns.toFixed(1)} bids   margin ${t.margin >= 0 ? "+" : ""}${t.margin.toFixed(1)}   seat3 wins ${(100 * t.seatWin).toFixed(1)}%`);
+    `   redeal ${(100 * t.redeal).toFixed(1)}%  forced ${(100 * t.forced).toFixed(1)}%   ${t.turns.toFixed(1)} bids` +
+    `   margin ${t.margin >= 0 ? "+" : ""}${t.margin.toFixed(1)} (made only ${t.madeMargin >= 0 ? "+" : ""}${t.madeMargin.toFixed(1)})   seat3 wins ${(100 * t.seatWin).toFixed(1)}%`);
 }
 function histTable(labels, tallies) {
   const w = 6;
@@ -489,4 +506,67 @@ if (on("threshold")) {
     const pp = win.map(x => x * 100);
     console.log(`    bid @ ${T}: ${pm(pp)} pp of deals won  ${Math.abs(mean(pp)) > ci(pp) ? "(significant)" : "(CI spans 0)"}   contract ${mean(lvl) >= 0 ? "+" : ""}${mean(lvl).toFixed(1)} pts`);
   }
+}
+
+// ----------------------------------------------------- counterfactual
+/* What §4.3 of the task report could not answer.
+ *
+ * "Bidding at p returns X%, passing is worth (1/3)(1-set) + (2/3)(set)" is an
+ * algebraic identity, not a counterfactual: exactly two of four seats win every
+ * deal, so that expression is 1/2 for every set rate, and it compares a rate
+ * conditioned on the search liking the hand AND winning the auction against one
+ * conditioned on nothing. It says "bid more" at every threshold, which makes it
+ * evidence for none of them.
+ *
+ * The real question is a same-hand one, so ask it that way. Walk an all-search
+ * auction to the first decision whose make-probability is marginal, snapshot,
+ * and finish the deal twice from that one position: once with that seat bidding
+ * (what 0.50 does) and once with it passing (what a higher line would do). The
+ * seats' seeds continue from the fork, so wherever the two branches face the
+ * same position they answer it the same way, and the only difference is the
+ * decision under test. Statistic: that seat's own deal-win rate, paired.
+ */
+if (on("counterfactual")) {
+  const N = Number(process.env.CDEALS || 4000);
+  const LO = 0.5, HI = 0.6;
+  const heurCard = (G) => chooseAICard(G, G.turn, false, Math.random);
+  const bands = { "0.50-0.55": [], "0.55-0.60": [] };
+  let forks = 0, dropped = 0;
+  for (let d = 0; d < N; d++) {
+    const G = fresh(), seats = tableOf([0, 1, 2, 3], d);
+    let turn = 0, guard = 0, seat = null, p = 0;
+    while (G.phase === "bidding" && guard++ < 80) {
+      const s = E.findBidActor(G);
+      if (s === null) break;
+      const need = E.minNextBid(G);
+      if (need > E.MAX_BID) { E.applyBid(G, s, null); turn++; continue; }
+      turn++;
+      p = E.bidValue(G, s, { rnd: E.mulberry32(d * 977 + turn) }).makeProb(need);
+      if (p >= LO && p < HI) { seat = s; break; }
+      E.applyBid(G, s, p >= 0.5 ? need : null);
+    }
+    if (seat === null) continue;
+    const snap = JSON.stringify(G);
+    /* A branch whose fork triggers an all-pass redeal is dealt new cards, and
+       the pairing — the whole point — is gone with them. */
+    const branch = (takesIt) => {
+      const g = JSON.parse(snap);
+      E.applyBid(g, seat, takesIt ? E.minNextBid(g) : null);
+      const r = finishDeal(g, seats, heurCard, {}, turn);
+      return r && !r.redeals ? (r.winners.includes(seat) ? 1 : 0) : null;
+    };
+    const bidW = branch(true), passW = branch(false);
+    if (bidW === null || passW === null) { dropped++; continue; }
+    forks++;
+    bands[p < 0.55 ? "0.50-0.55" : "0.55-0.60"].push({ bidW, passW });
+  }
+  console.log(`\n== counterfactual: the same hand, bidding a marginal level or passing (${N} deals -> ${forks} forks, ${dropped} dropped to redeals) ==`);
+  for (const [label, rows] of Object.entries(bands)) {
+    if (rows.length < 30) { console.log(`  p in [${label}): only ${rows.length} forks, skipped`); continue; }
+    const diff = rows.map(r => 100 * (r.bidW - r.passW));
+    console.log(`  p in [${label}): n ${String(rows.length).padStart(5)}   bidding wins ${(100 * mean(rows.map(r => r.bidW))).toFixed(1)}%` +
+      `   passing wins ${(100 * mean(rows.map(r => r.passW))).toFixed(1)}%   bid - pass ${pm(diff)} pp` +
+      `  ${Math.abs(mean(diff)) > ci(diff) ? "(significant)" : "(CI spans 0)"}`);
+  }
+  console.log(`  a positive [0.50-0.55) row is the case for keeping 0.50; a negative one is the case for 0.55.`);
 }
