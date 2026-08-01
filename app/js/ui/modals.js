@@ -3,7 +3,7 @@ import { SUIT_NAME } from "../cards/labels.js";
 import { cardEl } from "../cards/deck.js";
 import { sfx } from "./sound.js";
 import { requestReview } from "../coach/client.js";
-import { renderReview } from "./coach.js";
+import { renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
 
 /* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
    pages hand these functions their own view and their own handlers, and solo
@@ -127,7 +127,6 @@ let roundKey = null;
 let reviewOpen = false;
 let reviewState = null;
 
-const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const REVIEW_WAIT = `<div class="deal-review"><p class="muted">Analysing your play<span class="think"><i></i><i></i><i></i></span></p></div>`;
 
 function showRoundResult(v, o, h) {
@@ -236,18 +235,17 @@ function paintRoundBody(v, o) {
   const myKey = roundKey;   // a slow response landing after the NEXT deal has already opened must not paint over it
   requestReview(v, seat).then(res => {
     if (roundKey !== myKey) return;
-    reviewState = (res && res.ok) ? { ok: true, result: res.result }
-                                   : { ok: false, message: cap((res && res.error) || "the review could not be run") + "." };
+    reviewState = (res && res.ok) ? { ok: true, result: res.result } : { ok: false, message: reviewErrorMessage(res) };
     paintRoundBody(v, o);
   }, () => {
     if (roundKey !== myKey) return;
     /* A rejection is a real path, not a hypothetical one — client.js rejects
        every pending request when the worker dies and again after its own
        10s timeout, never merely because review is unavailable (that comes
-       back as ok:false above instead). Same lesson coach.js's own hint
-       rejection handler documents: the player asked for something and
-       deserves evidence it did something, not a pane that quietly reverts. */
-    reviewState = { ok: false, message: "The review search failed — try again." };
+       back as ok:false above, via reviewErrorMessage instead). See
+       REVIEW_REJECTED_MESSAGE (coach.js) for why the message is a fixed,
+       honest constant rather than the rejection's own Error#message. */
+    reviewState = { ok: false, message: REVIEW_REJECTED_MESSAGE };
     paintRoundBody(v, o);
   });
 }

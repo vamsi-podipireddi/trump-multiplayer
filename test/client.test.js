@@ -488,6 +488,12 @@ test("renderReview: forced (no decisions) and clean-among-real print different, 
   const clean = renderReview({ decisions: [decision(), decision()], worst: [], samples: 24 }, declarerView, 0);
   assert.match(clean, /Clean deal.*\b2\b decisions/i);
   assert.doesNotMatch(clean, /forced/i);
+
+  // singular vs. plural: every other clean-deal check above uses count 2 and
+  // so never reaches the "1 decision" (no trailing s) branch on its own
+  const one = renderReview({ decisions: [decision()], worst: [], samples: 24 }, declarerView, 0);
+  assert.match(one, /1 decision cost the contract/i);
+  assert.doesNotMatch(one, /decisions/i, "one real decision must read as singular, not '1 decisions'");
 });
 
 test("renderReview: caveats a thin search and doesn't caveat a full one, right at the boundary", async () => {
@@ -524,8 +530,9 @@ test("renderReview: prints trick, both cards, both percentages and the grade for
   assert.ok(html.indexOf("Trick 5") < html.indexOf("Trick 9"));
 
   // a third entry is never shown even if a caller hands one in — reviewDeal
-  // itself already caps worst at two; this pins renderReview's own defence
-  // of that contract rather than trusting the caller to have honoured it
+  // itself already caps worst at two; this pins describeReview's own
+  // .slice(0, 2) defence of that contract rather than trusting the caller
+  // to have honoured it
   const three = [worst[0], worst[1], decision({ trickNo: 11 })];
   assert.doesNotMatch(renderReview({ decisions: three, worst: three, samples: 24 }, declarerView, 0), /Trick 11/);
 });
@@ -548,4 +555,32 @@ test("renderReview escapes a card label the same way voidsHtml escapes a name", 
   const html = renderReview({ decisions: [hostile], worst: [hostile], samples: 24 }, declarerView, 0);
   assert.ok(!html.includes("<img"), "an unescaped card label would inject markup into the modal");
   assert.match(html, /&lt;img/);
+});
+
+/* reviewErrorMessage(res) / REVIEW_REJECTED_MESSAGE — what ui/modals.js's
+   paintRoundBody shows on the two ways requestReview can fail to hand back a
+   real result: the worker answers ok:false (reviewErrorMessage), or the
+   request rejects outright — a dead worker or client.js's own 10s timeout
+   (REVIEW_REJECTED_MESSAGE). Both used to be built inline inside
+   paintRoundBody, a DOM-writing function no test here can reach (this repo
+   has no jsdom), which is exactly the failure-message-with-no-regression-net
+   gap Task 10 already shipped once with the hint tray. Pulled out so these
+   two lines get the same direct coverage every other wording branch in this
+   panel already has. */
+test("reviewErrorMessage: the worker's own words, capitalised and read as a sentence", async () => {
+  const { reviewErrorMessage } = await import("../app/js/ui/coach.js");
+  assert.equal(reviewErrorMessage({ ok: false, error: "no finished deal in this view" }),
+    "No finished deal in this view.");
+  // no error string at all — still a real, honest sentence, not "undefined."
+  assert.equal(reviewErrorMessage({ ok: false }), "The review could not be run.");
+  assert.equal(reviewErrorMessage(null), "The review could not be run.");
+});
+
+test("REVIEW_REJECTED_MESSAGE: a fixed, honest string for a genuine rejection", async () => {
+  const { REVIEW_REJECTED_MESSAGE } = await import("../app/js/ui/coach.js");
+  assert.equal(REVIEW_REJECTED_MESSAGE, "The review search failed — try again.");
+  // never a raw Error#message: that text is runtime/browser-controlled, not
+  // this file's to promise a stable reading of (same rule initCoach's own
+  // hint-rejection handler already follows)
+  assert.doesNotMatch(REVIEW_REJECTED_MESSAGE, /\bError\b|\[object/);
 });

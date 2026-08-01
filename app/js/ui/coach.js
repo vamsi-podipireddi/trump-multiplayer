@@ -418,8 +418,32 @@ function renderReview(result, v, seat) {
   return `<div class="deal-review">${rows}<div class="note">${esc(note)}</div></div>`;
 }
 
+/* What ui/modals.js's paintRoundBody shows when requestReview *resolves* but
+   the worker declined the request — res is the raw { ok:false, error }
+   response (worker.js's own review guard: "no finished deal in this view" is
+   the one that can currently reach here, from a stale click racing a phase
+   change). cap()'d and full-stopped the same way describeHint's own
+   res.error branch above already reads one — a single house style for "the
+   worker's own words, as a sentence" rather than two. Pure and exported for
+   the same reason describeReview is: this is exactly the kind of wording
+   branch that goes untested once it is inline inside a DOM-writing function
+   (Task 10's own regression class), so it does not get to live there. */
+function reviewErrorMessage(res) {
+  return cap((res && res.error) || "the review could not be run") + ".";
+}
+
+/* What paintRoundBody shows when the request rejects outright instead of
+   resolving — client.js's own dead-worker (onerror) and 10s-timeout paths,
+   never merely "review unavailable" (that resolves ok:false and reads
+   through reviewErrorMessage above instead). A fixed, honest constant rather
+   than the rejection's own Error#message — same reasoning initCoach's
+   hint-rejection handler above already documents: that text is
+   runtime/browser text this file does not control, not a string safe to
+   promise a stable reading of. */
+const REVIEW_REJECTED_MESSAGE = "The review search failed — try again.";
+
 export {
   hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
   describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
-  describeReview, renderReview,
+  describeReview, renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE,
 };
