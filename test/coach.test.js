@@ -11,8 +11,9 @@ import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest } from "../app/js/coach/worker.js";
-import { reviewDeal, REVIEW_PLAY_BUDGET } from "../app/js/coach/review.js";
+import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coach/review.js";
 import { matchReport } from "../app/js/coach/report.js";
+import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor } from "../app/js/coach/auction.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -39,6 +40,40 @@ function drive(onStep) {
     R.message(room, pids[ra.seat], act, 0);
     onStep(room, pids);
   }
+}
+
+/* A finished deal's view for the seat that declared it, driven by the engine's
+   own AI so every action is legal. drive()'s own comment above explains why
+   onStep never actually observes phase "roundEnd" (it is reached only through
+   a fired timer, with no action — and so no onStep call — in between). Reaching
+   the *match's* own end sidesteps that the same way review.js's finishedDeal()
+   already does: capture (room, pids) once, on the very first step, and read
+   them back only after drive() itself returns. By then room.G.phase is
+   "matchOver" and room.G.declarer/G.auction/G.tricks still hold exactly the
+   last deal played — a real, finished, fully public deal either way. */
+function finishedDealView() {
+  let ref = null;
+  drive((room, pids) => { if (!ref) ref = { room, pids }; });
+  assert.ok(ref, "a deal must have finished");
+  const seat = ref.room.G.declarer;
+  return { v: R.buildView(ref.room, ref.pids[seat], 0), seat };
+}
+
+/* Five consecutive passed-out auctions force the eldest to the minimum. */
+function forcedBidView() {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  while (G.phase === "bidding") E.applyBid(G, E.findBidActor(G), null);
+  assert.ok(G.auction.some(a => a.forced), "the auction must have been forced");
+  const seat = G.declarer;
+  E.applyTrump(G, E.SUITS[0]);
+  E.applyCall(G, E.callableCards(G, seat)[0]);
+  while (G.phase !== "roundEnd" && G.phase !== "matchOver") {
+    if (G.phase === "trickEnd") { E.advanceTrick(G); continue; }
+    const ra = E.requiredActor(G);
+    E.applyPlay(G, ra.seat, E.legalCards(G, ra.seat)[0]);
+  }
+  return { v: E.publicView(G), seat };
 }
 
 test("the shadow's public facts match the server's exactly", () => {
@@ -915,4 +950,87 @@ test("worst is the two costliest across the whole match, not per deal", () => {
   assert.equal(r.worst.length, 2);
   assert.equal(r.worst[0].delta, 0.40);
   assert.equal(r.worst[1].delta, 0.30);
+});
+
+// ---------------------------------------------------------------------------
+// auction.js — the auction's half of the post-deal review: grade the bid,
+// the trump pick and the partner call from exactly what the player knew at
+// the time, the same discipline review.js applies to card play. The tests
+// below check the same three things review.js's own section does — shape,
+// reproducibility, and (D32) that no position handed to the search ever
+// carries a trump, call or partner the player had not yet chosen — plus the
+// world floor's own arithmetic (D43/D44) and the forced-bid/non-declarer
+// skip paths.
+
+/* D43/D44 as arithmetic, not as a comment: the band must be able to express the
+   finest grade there is, for the widest candidate list the call can offer. */
+test("the review's world floor keeps the dead band under the mistake threshold", () => {
+  assert.equal(MIN_REVIEW_WORLDS, Math.ceil(1 / MISTAKE_WIN_DELTA ** 2));
+  for (const candidates of [1, 4, 13]) {
+    const budget = auctionBudgetFor(candidates);
+    const worlds = Math.max(4, Math.floor(budget / (candidates * 52)));   // worldsFor's own formula
+    assert.ok(bandFor(worlds) <= MISTAKE_WIN_DELTA,
+      `band ${bandFor(worlds)} must not swallow the mistake grade at ${candidates} candidates`);
+  }
+});
+
+/* D32, executable. Every auction position must be built from what the player
+   knew then — never from the finished deal's own trump, call or partner. */
+test("reviewAuction never lets a later fact reach an earlier position", () => {
+  const finished = finishedDealView();          // helper below
+  const seen = [];
+  reviewAuction(finished.v, finished.seat, { _tap: (pos, kind) => seen.push({ pos, kind }) });
+  assert.ok(seen.length, "at least one auction position was searched");
+  for (const { pos, kind } of seen) {
+    assert.equal(pos.partner, null, `${kind}: partner must not be known`);
+    assert.equal(pos.teamsRevealed, false, `${kind}: teams must not be revealed`);
+    assert.equal(pos.calledCard, null, `${kind}: the called card must not be known`);
+    assert.deepEqual(pos.playedCards, [], `${kind}: no card has been played yet`);
+    assert.equal(pos.trickNumber, 0);
+    if (kind !== "call") assert.equal(pos.trump, null, `${kind}: trump must not be known`);
+    assert.equal(pos.hands[finished.seat].length, 13, `${kind}: the full starting hand`);
+    assert.ok(pos.hands.filter((h, p) => p !== finished.seat).every(h => h.every(c => c === null)),
+      `${kind}: other hands must be placeholders`);
+  }
+});
+
+test("reviewAuction repeats exactly when asked twice", () => {
+  const { v, seat } = finishedDealView();
+  const a = reviewAuction(v, seat, {});
+  const b = reviewAuction(v, seat, {});
+  assert.deepEqual(a.decisions, b.decisions);
+});
+
+test("a correct pass on a weak hand is not an error", () => {
+  // one-sided by construction: distance from the line on the RIGHT side is 0
+  const { v, seat } = finishedDealView();
+  const r = reviewAuction(v, seat, {});
+  for (const d of r.decisions) assert.ok(d.delta >= 0, "delta is never negative");
+});
+
+test("a forced minimum bid is skipped, not graded", () => {
+  const { v, seat } = forcedBidView();           // helper below
+  const r = reviewAuction(v, seat, {});
+  assert.ok(r.skipped.some(s => s.kind === "bid" && s.reason === "forced"));
+  /* forceBid() (bidding.js) APPENDS its synthetic entry to the round's own
+     auction log rather than replacing it, and bidActive only empties out —
+     the precondition for the redeal that can end in a force — once every
+     seat, including the one about to be forced, has already passed of its
+     own accord in that same round. So the forced seat also owns one genuine,
+     un-forced pass immediately before its forced entry: a real decision,
+     taken before anyone knew the round would be forced, which reviewAuction
+     is right to grade. What must never happen is the SYNTHETIC entry itself
+     doubling as a graded decision — checked structurally rather than by
+     assuming "zero", which this seat's own real pass would always violate. */
+  const gradable = v.auction.filter(a => a.seat === seat && !a.forced).length;
+  assert.equal(r.decisions.filter(d => d.kind === "bid").length, gradable,
+    "only the seat's non-forced auction entries may surface as bid decisions");
+});
+
+test("trump and call are skipped for a seat that did not declare", () => {
+  const { v, seat } = finishedDealView();
+  const other = [0, 1, 2, 3].find(s => s !== v.declarer);
+  const r = reviewAuction(v, other, {});
+  assert.ok(r.skipped.some(s => s.kind === "trump" && s.reason === "not-declarer"));
+  assert.ok(r.skipped.some(s => s.kind === "call" && s.reason === "not-declarer"));
 });
