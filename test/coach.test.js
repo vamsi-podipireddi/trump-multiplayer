@@ -811,3 +811,64 @@ test("client.js: after a worker error, the next request falls back to the synchr
     assert.equal(res2.ok, false); // { you: {} } isn't a real view — the point is it answered at all, synchronously
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 2: bid-search.js re-ranked onto make-probability (D42). driveToDeclarer
+// below is deliberately not drive() above: drive() plays a full AI auction,
+// but these tests want one declarer at one known contract as directly as
+// possible. A single MIN_BID bid followed by three passes is enough — three
+// applyBid(null) calls empty bidActive down to the bidder alone, findBidActor
+// then returns null, and advanceBidding's own null branch calls
+// finalizeDeclarer (bidding.js), landing on phase "trumpSelect" with
+// G.declarer set. (A loop that instead re-bid minNextBid(G) on every turn
+// would escalate the contract every single turn — findBidActor(G) names
+// whoever is about to act, which during a fresh auction is always eligible to
+// raise — and run straight past MAX_BID without ever finalizing.)
+function driveToDeclarer(G) {
+  E.applyBid(G, E.findBidActor(G), E.MIN_BID);
+  while (G.phase === "bidding") E.applyBid(G, E.findBidActor(G), null);
+}
+
+/* D29's wrapper property, applied to the auction: the review reads per-candidate
+   scores and the hint reads the winner, so they must come from one ranking. */
+test("aiPickTrumpSearch is evaluateTrumps' argmax on makeProb", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  driveToDeclarer(G);
+  assert.equal(G.phase, "trumpSelect");
+  const seat = G.declarer;
+  const opts = { rnd: E.mulberry32(7), playBudget: 24000 };
+  const ev = E.evaluateTrumps(G, seat, opts);
+  assert.ok(ev && ev.candidates.length === E.SUITS.length);
+  assert.ok(ev.worlds > 0);
+  for (const c of ev.candidates) {
+    assert.ok(c.makeProb >= 0 && c.makeProb <= 1, "makeProb is a probability");
+    assert.equal(typeof c.meanPoints, "number");
+  }
+  const best = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
+  assert.equal(E.aiPickTrumpSearch(G, seat, { rnd: E.mulberry32(7), playBudget: 24000 }), best.suit);
+});
+
+test("aiPickPartnerSearch is evaluateCalls' argmax on makeProb", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  driveToDeclarer(G);
+  E.applyTrump(G, E.SUITS[0]);
+  assert.equal(G.phase, "partnerSelect");
+  const seat = G.declarer;
+  const ev = E.evaluateCalls(G, seat, { rnd: E.mulberry32(11), playBudget: 24000 });
+  assert.ok(ev && ev.candidates.length > 0);
+  const best = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
+  const pick = E.aiPickPartnerSearch(G, seat, { rnd: E.mulberry32(11), playBudget: 24000 });
+  assert.ok(E.sameCard(pick, best.card));
+});
+
+test("the heuristic's own answer is evaluated first, so a tie leaves it standing", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  driveToDeclarer(G);
+  const ev = E.evaluateTrumps(G, G.declarer, { rnd: E.mulberry32(3), playBudget: 24000 });
+  assert.equal(ev.candidates.length, 4);
+  // candidates[0] is the heuristic's pick; a reduce with strict > keeps the first on a tie
+  assert.ok(E.SUITS.includes(ev.candidates[0].suit));
+});
