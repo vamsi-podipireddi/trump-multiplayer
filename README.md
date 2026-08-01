@@ -4,7 +4,8 @@ A 250-point bid & capture trick-taking card game for 2–4 people. Empty seats a
 half-full table still plays a proper game. No accounts, no install — share a 4-letter room code.
 
 Two interchangeable backends run the same game core: a small **node + ws** server for LAN/self-hosting,
-and **Cloudflare Workers + Durable Objects** for a free global deploy.
+and **Cloudflare Workers + Durable Objects** for a global deploy that fits inside Cloudflare's free tier
+([caveats](#deploy-to-cloudflare)).
 
 ## Run it
 
@@ -27,7 +28,10 @@ Open **http://localhost:3000**.
 |---|---|
 | **Seats** | Sit, stand, and swap seats freely in the lobby; the host can kick (removed players stay out for the life of the room). Extra people spectate and are promoted automatically when a seat frees up. |
 | **Joining mid-match** | You can walk into a game in progress and take over an AI seat — but you are dealt in at the **next deal**, not mid-hand. Taking a seat is what reveals a hand, so handing one out mid-deal would let a player stand up, sit elsewhere, and read the table. Standing up mid-match gives your seat to the AI immediately. |
-| **AI skill** | `easy` / `normal` / `hard`. Hard is Perfect-Information Monte Carlo: it samples deals consistent with everything it has seen (voids, the called card) and rolls each candidate move out, under a fixed budget of simulated card plays. Changeable mid-match. |
+| **AI skill** | `easy` / `normal` / `hard`. Hard's card play is Perfect-Information Monte Carlo: it samples deals consistent with everything it has seen (voids, the called card) and rolls each candidate move out, under a fixed budget of simulated card plays. Hard also searches **the bid** the same way — sampling whole deals and bidding on a real make-probability instead of the linear hand-count `easy`/`normal` use — which is what gives the three tiers an identity beyond card play. Naming trump and calling a partner stay on the hand-count at every tier: searching them measured as worth +0.56 ± 0.42 pp of deals won, indistinguishable from zero, for 43% of the auction's server CPU (ROADMAP D35). Changeable mid-match. |
+| **Hints** | A button suggests the strongest bid, trump, call or card, with one line of reasoning from a search. For the bid and the card that's the identical search `hard` bots run; trump and the call stay on the hand-count for bots at every tier (see AI skill, above) — the hint searches those two anyway, in the browser, at zero server cost. Host-controlled from the lobby or mid-match settings, defaults on, and shown to every seat as a settings chip. This is a table agreement, not an enforcement boundary: the engine ships to every browser, so nothing stops a determined player from running the identical search in a console regardless of what the setting says. |
+| **Table read** | A rail panel (folded into the mobile Score tab) showing points still live, what your side still needs, the bonus three's status, known voids, and outstanding cards per suit. Public information the whole table already watched happen, so — unlike hints — it is never gated by a setting. |
+| **Deal review** | A `Review this deal ▸` toggle on the round-result modal, and on the match summary for the deal that clinches it, replays your own decision points against the same search and grades what you played against what it preferred. Computed on click; never blocks the ready gate or the rematch button. |
 | **Match length** | First to **3, 5 or 7** deals. |
 | **Turn timer** | Off / 15 / 30 / 45 / 60 / 90s. When it expires the AI plays your turn and marks you *away*; the next thing you do (or the **I'm back** button) takes you off autopilot. |
 | **Between deals** | The next deal starts when every present player clicks **ready**, or after 30s — whichever comes first. |
@@ -39,9 +43,18 @@ Open **http://localhost:3000**.
 
 Room codes are 4 characters; ticking **Private room** mints an 8-character one instead.
 
-## Deploy to Cloudflare (free)
+## Deploy to Cloudflare
 
 One Durable Object per room holds the authoritative state, so it works globally with nothing to manage.
+
+**Free plan or paid?** Both work — the DO is SQLite-backed (`new_sqlite_classes`), which is the backend
+Workers Free supports. Two things to know before deploying on the free plan:
+
+- Free-plan Workers are capped at **10 ms of CPU per invocation** (paid: 30 s by default). The `hard`
+  tier's worst single decision measures 3.3–8.1 ms here, so it fits — but with less headroom than paid,
+  and a busier machine can eat it. `easy`/`normal` never search at all.
+- The `[limits]` block in `wrangler.toml` is a paid-plan feature (Standard Usage Model). **Delete it** if
+  you deploy on the free plan; it is a denial-of-wallet guard, and the free plan has no wallet to defend.
 
 ```bash
 npm install
@@ -60,7 +73,14 @@ whose players vanished mid-hibernation is still collected.
 
 The hard AI budgets itself in *simulated card plays*, not milliseconds: Workers freeze `Date.now()` between
 I/O operations, so a wall-clock cutoff never fires inside a Durable Object and the widest search position
-(13 legal moves, 52 cards live) would run at full width on every deal. Worst-case search is ~2–3 ms warm.
+(13 legal moves, 52 cards live) would run at full width on every deal.
+
+**What that costs, in the unit the platform bills.** Hibernation makes every inbound message its own
+invocation, and each alarm fires exactly one bot action — so the number that matters is the worst *single*
+decision, not a per-deal total. Measured through the real router (`node scripts/bench-auction-search.js
+cost`, all four seats on `hard`, ~8,500 invocations): median 0.5 ms, p95 ~2 ms, worst 3.3–8.1 ms run to
+run; a whole deal's four seats come to ~50 ms spread over ~53 separate invocations. `wrangler.toml` sets
+`[limits] cpu_ms = 300` as a runaway guard well clear of that.
 
 **Pages + separate Worker (optional split):** remove the `[assets]` block from `wrangler.toml`, set
 `WS_BASE` in `app/js/net.js` to your Worker URL (e.g. `wss://trump.<you>.workers.dev`), deploy the

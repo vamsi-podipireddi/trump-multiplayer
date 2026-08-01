@@ -36,6 +36,7 @@ import { startAmbient } from "./ui/ambient.js";
 import { openSheet, closeSheet } from "./ui/chat.js";
 import { setFourColor, initPrefs } from "./util/prefs.js";
 import { initSound, toggleSound } from "./ui/sound.js";
+import { initCoach, renderCoach, resetCoach } from "./ui/coach.js";
 
 const ME = 0;
 
@@ -90,6 +91,7 @@ function resetForNewMatch() {
   resetTable();
   resetHandFor();
   resetActionBar();
+  resetCoach();
 }
 
 export function startSolo(opts) {
@@ -197,8 +199,13 @@ function render(v) {
   renderTricks(v, ctx);
   renderHand(v, H.play);
   renderActionBar(v, H);
-  /* after the action bar, never before — see the identical comment in
-     screens/game.js's renderGame(): fitTable() measures what the tray left over. */
+  /* after renderActionBar, never before — see the identical comment in
+     screens/game.js's renderGame(): both write #hand-hint, and a hint answer
+     is meant to override the phase's own contextual tip, not the reverse. */
+  renderCoach(v, ctx, H);
+  /* after the action bar (and the coach line above), never before — see the
+     identical comment in screens/game.js's renderGame(): fitTable() measures
+     what the tray left over. */
   fitTable();
   renderLog(v);
 
@@ -278,6 +285,10 @@ function boot() {
   $("btn-start").onclick = () => startSolo({ difficulty: $("sel-difficulty").value, targetDeals: Number($("sel-deals").value) });
   $("btn-help").onclick = () => { paused = true; showHelp(lastView); };
   $("btn-new").onclick = toStart;
+  // paint(), not render: the click handler is wired once, long before any G
+  // exists, so it needs a no-arg repaint it can call once a response lands —
+  // paint() is solo's, rebuilding v from the current G on every call.
+  initCoach(paint);
 
   initPrefs();
   initSound();

@@ -75,6 +75,7 @@ function handleSettings(room, pid, msg, now, fx) {
   if (room.host !== pid) return fx;
   const s = room.settings;
   if (DIFFICULTIES.includes(msg.difficulty)) s.difficulty = msg.difficulty; // allowed anytime
+  if (typeof msg.coach === "boolean") s.coach = msg.coach;   // a table agreement, not an enforcement boundary
   if (!room.started && TARGET_DEAL_CHOICES.includes(msg.targetDeals)) s.targetDeals = msg.targetDeals;
   if (TURN_TIMER_CHOICES.includes(msg.turnTimerSec) && msg.turnTimerSec !== s.turnTimerSec) {
     s.turnTimerSec = msg.turnTimerSec;   // timer tweaks mid-match are harmless…

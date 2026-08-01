@@ -35,6 +35,10 @@
     transition:background .15s,color .15s,border-color .15s; }
   header button[aria-pressed="true"] { color:var(--acc); border-color:var(--acc); }
   header button.danger { color:var(--txt3); }
+  /* #btn-hint, off your own turn or mid-request — matches .act-btn:disabled's
+     dimming rather than hiding: the button's relevance flips every turn, and
+     hiding it would blink the header on every render. */
+  header button:disabled { opacity:.4; cursor:default; }
 
 /* ---- the felt ----
    A rounded slab lit from above, not an oval: at 16:9 the oval flung the seats
@@ -364,6 +368,13 @@
      white glow over a brass one. */
   #my-hand .card.legal-hint.trumpcard { box-shadow:0 0 24px 2px var(--trump-glow); }
   #my-hand .card.legal-hint.bonuscard { box-shadow:0 0 24px 2px var(--bonus-glow); }
+  /* The coach's mark: an outline, not a colour change. Colour on a card is
+     already owned by the optional 4-colour deck (♦ blue, ♣ green — see
+     body.fourcolor above), so recolouring the hinted card would collide with
+     that; an outline is a layer the box-shadow-based marks above (trumpcard,
+     bonuscard, legal-hint) never touch, so it reads cleanly stacked with any
+     of them. Mirrors .mini-card.win's own outline exactly. */
+  #my-hand .card.hint { outline:2px solid var(--acc); outline-offset:2px; }
   #hand-hint { display:flex; justify-content:center; align-items:flex-start; min-height:15px; margin-top:10px;
     font-size:var(--t-sm); line-height:1.25; color:var(--txt3); text-align:center; visibility:hidden; }
   #hand-hint.show { visibility:visible; }

@@ -120,6 +120,7 @@
     <!-- the icon carries the button on a phone, the label on a desktop;
          aria-label keeps the accessible name stable across both -->
     <div class="hdr-actions">
+      <button id="btn-hint" data-ic="hint" aria-label="Hint" title="Suggest what to do here"><span class="wide">Hint</span></button>
       <button id="btn-sound" data-ic="sound" aria-pressed="false" aria-label="Table sound" title="Table sound"><span class="wide">Sound</span></button>
       <button id="btn-colors" data-ic="deck" aria-pressed="false" aria-label="Four-colour deck" title="Colour diamonds blue and clubs green"><span class="wide">4-Colour</span></button>
       <button id="btn-help" data-ic="help" aria-label="How to play"><span class="wide">How to play</span></button>
@@ -161,6 +162,15 @@
       <div id="my-tricks"></div>
       <div class="note empty" id="my-tricks-empty">Every trick you take lands here — and as a pile in front of your seat.</div>
     </div>
+    <!-- Public info only — every number here is something every seat watched happen, so
+         (unlike the hint button) this is never gated behind the room's coach setting. Its
+         own show/hide preference doubles as the disclosure this needs if it ever runs long
+         on a short sheet: collapsing hides #tr-body, not this header, so the toggle stays
+         reachable either way. -->
+    <div class="panel-section" id="tableread">
+      <h2>Table read<button class="mini-btn" id="btn-read-toggle" type="button" aria-expanded="true" aria-controls="tr-body" aria-label="Hide the table read">Hide</button></h2>
+      <div id="tr-body"></div>
+    </div>
   </aside>
 
   <div id="table-wrap">
@@ -193,7 +203,7 @@
       <div id="action-tray"><div class="tray"><div id="action-buttons"></div><div id="call-grid"></div></div></div>
       <div id="action-bar"></div>
       <div id="my-hand"></div>
-      <div id="hand-hint"></div>
+      <div id="hand-hint" aria-live="polite"></div>
     </div>
   </div>
 

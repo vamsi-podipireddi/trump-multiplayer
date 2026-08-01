@@ -10,7 +10,7 @@ function createRoom(code, opts) {
     code,
     G: E.createMatch(),
     started: false,
-    settings: { difficulty: "normal", targetDeals: 5, turnTimerSec: 45 },
+    settings: { difficulty: "normal", targetDeals: 5, turnTimerSec: 45, coach: true },
     seatOwner: [null, null, null, null],   // pid per seat (null = AI / open)
     players: {},                            // pid -> {name, uid, seat|null, wantSeat|null, connected, away, ready}
     host: null,

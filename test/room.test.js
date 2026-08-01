@@ -395,14 +395,46 @@ test("settings: host-only, validated, difficulty switchable any time", () => {
   R.message(room, other, { type: "settings", difficulty: "hard" }, now);
   assert.equal(room.settings.difficulty, "normal", "non-host ignored");
   R.message(room, host, { type: "settings", difficulty: "hard", targetDeals: 3, turnTimerSec: 30 }, now);
-  assert.deepEqual(room.settings, { difficulty: "hard", targetDeals: 3, turnTimerSec: 30 });
+  assert.deepEqual(room.settings, { difficulty: "hard", targetDeals: 3, turnTimerSec: 30, coach: true });
   R.message(room, host, { type: "settings", difficulty: "impossible", targetDeals: 4, turnTimerSec: 7 }, now);
-  assert.deepEqual(room.settings, { difficulty: "hard", targetDeals: 3, turnTimerSec: 30 }, "invalid values ignored");
+  assert.deepEqual(room.settings, { difficulty: "hard", targetDeals: 3, turnTimerSec: 30, coach: true }, "invalid values ignored");
   R.message(room, host, { type: "start" }, now);
-  R.message(room, host, { type: "settings", targetDeals: 7, difficulty: "easy" }, now);
+  R.message(room, host, { type: "settings", targetDeals: 7, difficulty: "easy", coach: false }, now);
   assert.equal(room.settings.targetDeals, 3, "targetDeals locked once started");
   assert.equal(room.settings.difficulty, "easy", "difficulty still switchable");
+  assert.equal(room.settings.coach, false, "hints still switchable mid-match too — a table can decide to play clean partway through");
   assert.equal(room.G.targetGames, 3, "match uses the lobby-time target");
+});
+
+test("coach defaults on, is host-only, and rejects non-booleans", () => {
+  const room = R.createRoom("TEST");
+  const [host, other] = joinN(room, 2, 0);
+  assert.equal(room.settings.coach, true, "hints default on");
+  R.message(room, other, { type: "settings", coach: false }, 0);
+  assert.equal(room.settings.coach, true, "a non-host must not change settings");
+  R.message(room, host, { type: "settings", coach: false }, 0);
+  assert.equal(room.settings.coach, false, "the host may switch hints off");
+  R.message(room, host, { type: "settings", coach: "yes" }, 0);
+  assert.equal(room.settings.coach, false, "a non-boolean must be ignored, not coerced");
+});
+
+test("the coach setting reaches every viewer", () => {
+  const room = R.createRoom("TEST");
+  const [host, other] = joinN(room, 2, 0);
+  R.message(room, host, { type: "settings", coach: false }, 0);
+  for (const pid of [host, other]) assert.equal(R.buildView(room, pid, 0).settings.coach, false);
+});
+
+/* A room persisted before `coach` existed has no key at all — buildView must not
+   paper over that with a default. Tolerance for "missing means on" belongs at
+   the read sites (app/js/coach/read.js's coachOn), not here: if the core ever
+   started normalizing this, a stored `false` written by an older client next to
+   a field it doesn't know about could get silently overwritten to `true`. */
+test("a room predating the coach field is not normalized by the core — buildView passes undefined through", () => {
+  const room = R.createRoom("TEST");
+  const [pid] = joinN(room, 1, 0);
+  delete room.settings.coach;
+  assert.equal(R.buildView(room, pid, 0).settings.coach, undefined);
 });
 
 test("turn timer: AFK human is put on autopilot and the AI acts", () => {
