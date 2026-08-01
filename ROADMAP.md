@@ -24,6 +24,8 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   Hard = PIMC (Perfect Information Monte Carlo): sample N determinizations of unseen cards consistent with
   observed voids + called-card holder, roll out each legal move with the heuristic AI, pick best mean score.
   Budget: `{determinizations: 24, timeMs: 25}` server-side. Bid/trump/call keep heuristics at all levels.
+  (Superseded in part by D35: `hard` now searches the **bid** too. Trump and the call kept their
+  heuristics at every level, which is where this decision ended up after M10 measured the alternative.)
 - **D4. Turn timer**: room setting `turnTimerSec` (0=off, default 45). Runs whenever required actor is a
   connected, non-away human. On expiry: AI acts for them, player marked `away: true` (AI keeps playing their
   turns instantly-ish with normal AI_DELAY). Any message from that player clears `away`.
@@ -151,8 +153,9 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   setting — every number in it (points live, captured split, the bonus three, known voids, outstanding
   cards) is something the player watched happen at the table, sourced from the same derivation
   (`shadowFromView`) the search itself uses to stay honest.
-- **D35. Bid/trump/call search is `hard`-only.** Gives the three difficulty tiers a real meaning beyond
-  card play, and keeps the added DO cost on the tier that opts into it.
+- **D35. The auction search is `hard`-only, and — after re-measuring in the unit the platform bills —
+  ~~bid/trump/call~~ the *bid alone* server-side.** Gives the three difficulty tiers a real meaning
+  beyond card play, and keeps the added DO cost on the tier that opts into it.
   ~~Estimated cost: "at most ~6 times per deal at 6000 plays ≈ 36k plays, against a play phase that
   already spends up to 13 × 4 × 8000 ≈ 416k. Roughly a 9% increase in the DO's per-deal search work."~~ —
   **CORRECTED, measured** (`scripts/bench-auction-search.js cost`): PIMC's real per-deal cost is
@@ -168,21 +171,53 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   falling as `legal.length`/`cardsLeft` keep shrinking through the endgame even though `maxDet` itself
   is flat at 24 (the same traced late decision costs 384 plays). On top of that, `choosePIMCCard`
   spends nothing at all on a forced play (`legal.length <= 1`) — `evaluateMoves` is never even called
-  for one. The auction search's real cost is **~79,500** plays/deal: **+64%, not +9%** — an order of
-  magnitude off in relative terms, though the absolute cost (tens of ms, warm, in a DO idle between
-  messages) is still small enough that the recommendation is unchanged. Recorded so the next person to
-  reason about DO cost starts from the measured mechanism, not the interface contract's arithmetic.
-  **More consequential than the cost:** the auction search's two halves are not equally valuable. Paired
-  A/B on real outcomes — deals won, the game's own scoring unit — found the **bid** worth
+  for one. The full auction search's real cost was **~79,500** plays/deal: **+64%, not +9%** — an order
+  of magnitude off in relative terms. Recorded so the next person to reason about DO cost starts from the
+  measured mechanism, not the interface contract's arithmetic.
+
+  ~~"the absolute cost (tens of ms, warm, in a DO idle between messages) is still small enough that the
+  recommendation is unchanged"~~ — **the unit was wrong too.** Every figure above is *per deal*, and a
+  Durable Object does not bill per deal: it bills **per invocation**. WebSocket hibernation
+  (`ctx.acceptWebSocket`, `src/worker/room-do.js`) makes each inbound message its own invocation instead
+  of accumulating across a connection, and each alarm fires exactly **one** bot action
+  (`src/core/room/timers.js` → `drive.js`'s `aiAct` → `aiActionFor`). So trump and call were not "~16 ms
+  spread across a deal": they were two *separate* invocations of ~8 ms each, in a slot that would
+  otherwise cost ~0.01 ms. Measured through the real router
+  (`node scripts/bench-auction-search.js cost`, all four seats on `hard`, ~8,500 invocations):
+
+  | | before (bid+trump+call) | after (bid only) |
+  |---|---|---|
+  | trump invocation | 8.4 ms median, 10.1 max | **0.00 ms** (hand-count) |
+  | call invocation | 7.5 ms median, 11.7 max | **0.01 ms** (hand-count) |
+  | bid invocation | 1.3 ms median, p95 2.3 | unchanged |
+  | card invocation (PIMC) | 0.5 ms median, p95 1.9 | unchanged |
+  | worst single invocation | ~19 ms | **3.3–8.1 ms**, always a card decision |
+  | whole deal, all four seats | 68 ms | **48–54 ms** |
+  | auction plays/deal | ~79,500 (+64% of PIMC) | **~32,000 (+25%)** |
+
+  **What that bought, and what it cost.** The auction search's two halves are not equally valuable.
+  Paired A/B on real outcomes — deals won, the game's own scoring unit — found the **bid** worth
   **+2.77 ± 0.91 pp** (n=5998) for ~40% of the auction's compute, while **trump and call together** are
   worth only **+0.56 ± 0.42 pp** (n=9991) for the other ~60% (independently reproduced by review at
   +2.80 ± 0.80 pp, n=7993). Why: a deal is scored **made or set** — a binary — so points captured beyond
   the contract line buy nothing. Trump and call raise mean captured points by ~2.5/deal in-model, which
   mostly lands as margin a binary score discards; the bid changes *whether the contract is won at all*.
   Points per deal was the wrong objective to have designed against; deals won is the scoring unit.
-  Rejected (after measurement): cutting trump/call for their smaller deals-won yield — they still measure
-  as a real, positive, cheap improvement (~16 ms/deal) and also feed the hint's trump/call advisor, which
-  the bot-outcome analysis alone does not price.
+
+  ~~Rejected (after measurement): cutting trump/call for their smaller deals-won yield — they still
+  measure as a real, positive, cheap improvement (~16 ms/deal) and also feed the hint's trump/call
+  advisor, which the bot-outcome analysis alone does not price.~~ — **REVERSED.** 43% of the added
+  compute, delivered as two of the four most expensive invocations a deal has, bought an effect
+  indistinguishable from zero. `ai/index.js` now routes only the bid; every tier takes trump and the call
+  from `aiPickTrump`/`aiPickPartner`. The advisor argument survives intact and is the reason nothing was
+  deleted: `aiPickTrumpSearch`/`aiPickPartnerSearch` and all of `ai/bid-search.js` still answer the
+  coach's auction advisor (`app/js/coach/worker.js`) — in the player's own browser, off the main thread,
+  at a budget of its own and at zero server cost. Only the server-side routing was cut.
+
+  This project is on **Workers Paid**, so the 30 s per-invocation CPU limit was never a blocker and none
+  of the above was forced. It is a cost decision taken on measurement: `wrangler.toml` now carries a
+  `[limits] cpu_ms = 300` runaway guard sized from the table above, per Cloudflare's own recommendation
+  to bound denial-of-wallet rather than leave the default in place.
 - **D36. Common random numbers in the auction search.** Candidates are compared on one shared set of
   sampled worlds. Rejected: independent sampling per candidate — same cost, strictly more variance in
   exactly the comparison the decision turns on.
@@ -354,9 +389,12 @@ measurement corrected the plan's numbers, not just its conclusions.
       disagree about what a table has agreed to.
 - [x] Task 7: `ai/bid-search.js`, the auction search — samples whole deals to answer the bid, trump and
       partner call. Shipped with three budgets rather than the plan's one (D36).
-- [x] Task 8: `hard` routes bid/trump/call through the search; `easy`/`normal` keep the hand-count
-      (D35). The all-`hard` regime measured healthy: contract settles higher (163.5 vs. 150.3) but no
-      runaway — 0 of 4000 deals at the 250 ceiling, redeal rate unchanged at 0.0%.
+- [x] Task 8: `hard` routes ~~bid/trump/call~~ **the bid** through the search; `easy`/`normal` keep the
+      hand-count, and so does every tier for trump and the call (D35 — cut on the whole-branch review,
+      once the cost was re-measured per *invocation* rather than per deal). The all-`hard` regime
+      measured healthy: contract settles higher (163.5 vs. 150.3) but no runaway — 0 of 4000 deals at
+      the 250 ceiling, redeal rate unchanged at 0.0%. That result is unaffected by the cut: the contract
+      level is decided entirely by the bidding, which still searches.
 - [x] Task 9: `coach/review.js` — re-searches each decision from the information the player had at the
       time (D32). Its cross-checking test (against a live `shadowFromView` snapshot, not a second copy of
       its own logic) caught two real bugs a bare card-count check would have missed: a copied-through

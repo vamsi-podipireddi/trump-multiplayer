@@ -4,7 +4,11 @@ Turn the search the hard AI already runs into something the player can use: a hi
 review, a table-read panel, and — the same machinery pointed back at the bots — an auction that
 actually thinks.
 
-Status: design approved 2026-07-29. Implementation plan: `docs/superpowers/plans/2026-07-29-coach.md`.
+Status: design approved 2026-07-29; **shipped with two measured amendments**, struck through and
+corrected in place below (the auction's play budgets, and the server cost of the auction search — see
+"`core/engine/ai/bid-search.js`"). Implementation plan:
+`docs/superpowers/plans/2026-07-29-coach.md`. Decision log: `ROADMAP.md` D28–D37, where D35 and D36
+record the same two corrections against the evidence that forced them.
 
 ## Why
 
@@ -135,7 +139,15 @@ secondary guard stays (a no-op on Workers, per M9).
 ### `core/engine/ai/bid-search.js` (new)
 
 ```js
-const BID_PLAY_BUDGET = 6000;   // simulated card plays, not milliseconds (D3 discipline)
+// AMENDED, measured — one budget for all three questions is exactly backwards.
+// worldsFor divides the budget by the candidate count, so precision FALLS as the
+// candidate list grows, while an argmax over more near-equal candidates needs
+// MORE samples. Shipped as three (ROADMAP D36):
+//   ~~const BID_PLAY_BUDGET = 6000;~~
+const BID_PLAY_BUDGET = 3000;    // 1 candidate, a threshold test; halving it cost -0.09 +/- 0.38 pp
+const TRUMP_PLAY_BUDGET = 24000; // 4 candidates
+const CALL_PLAY_BUDGET = 24000;  // ~10 candidates; at 6000 the call search was WORSE than the heuristic
+                                 // simulated card plays, not milliseconds (D3 discipline)
 
 function auctionSamples(G, seat, opts) -> [{ hands, trumpBySuit }]  // K sampled worlds, reused
 function bidValue(G, seat, opts)       -> { samples: number[], makeProb(target), median }
@@ -162,23 +174,53 @@ Method, for a seat holding 13 known cards:
    up to 39 cards; searching all of them buys nothing, because nobody calls a seven.
 
 Wall-clock is bounded the same way PIMC's is — in simulated card plays, because Workers freeze
-`Date.now()` between I/O (M9). One full deal is ~52 plays, so `BID_PLAY_BUDGET = 6000` buys ~115
-deal-simulations, split across candidates.
+`Date.now()` between I/O (M9). One full deal is ~52 plays, so ~~`BID_PLAY_BUDGET = 6000` buys ~115
+deal-simulations, split across candidates~~ — as shipped, 3000 buys ~57 worlds for the bid's single
+candidate, and 24000 buys ~115 a suit for trump and ~46 a card for the call.
 
-**Server cost.** Bid/trump/call search runs at most ~6 times per deal at 6000 plays ≈ 36k plays,
+**Server cost.** ~~Bid/trump/call search runs at most ~6 times per deal at 6000 plays ≈ 36k plays,
 against a play phase that already spends up to 13 × 4 × 8000 ≈ 416k. Roughly a 9% increase in the
-DO's per-deal search work, and only at `hard`.
+DO's per-deal search work, and only at `hard`.~~ — **WITHDRAWN. Wrong by ~7×, and in the wrong unit.**
+Corrected against measurement (`scripts/bench-auction-search.js cost`; full derivation in `ROADMAP.md`
+D35):
+
+- **The denominator was wrong.** `13 × 4 × 8000 ≈ 416k` treats 8000 as a per-decision cost that PIMC
+  pays 52 times. It is not: `evaluateMoves` divides the budget by `legal.length × cardsLeft` to get
+  `maxDet`, so the budget *caps* each decision rather than being spent by it, and a forced play
+  (`legal.length <= 1`) costs nothing at all. PIMC's real per-deal cost, all four seats, is **~124,500**
+  plays.
+- **The numerator was wrong.** The full bid+trump+call search cost **~79,500** plays a deal, not ~36k —
+  so the real figure was **+64%**, not +9%.
+- **The unit was wrong, and that is the amendment that changed the design.** A Durable Object bills
+  per *invocation*, not per deal: WebSocket hibernation makes each message its own invocation, and each
+  alarm fires exactly one bot action. Trump and call were therefore not "~16 ms spread thinly across a
+  deal" — they were two separate ~8 ms invocations in slots that otherwise cost ~0.01 ms.
+
+Measured against what they buy (paired A/B on deals won: bid **+2.77 ± 0.91 pp**, trump and call
+together **+0.56 ± 0.42 pp**), only the bid survives server-side. See the amended `ai/index.js` below.
+As shipped, the auction costs the DO **~32,000** plays a deal (**+25%** of PIMC) and adds ~1.3 ms
+median to a bidding invocation that would otherwise be near-free.
 
 ### `core/engine/ai/index.js`
 
 ```js
+// AMENDED, measured (ROADMAP D35): only the bid is worth a server-side search.
 if (ra.kind === "bid")   return { type: "bid",   value: hard ? aiBidDecisionSearch(G, seat) : aiBidDecision(G, seat, easy) };
-if (ra.kind === "trump") return { type: "trump", suit:  hard ? aiPickTrumpSearch(G, seat)   : aiPickTrump(G, seat) };
-if (ra.kind === "call")  return { type: "call",  card:  hard ? aiPickPartnerSearch(G, seat) : aiPickPartner(G, seat) };
+// ~~if (ra.kind === "trump") return { type: "trump", suit: hard ? aiPickTrumpSearch(G, seat)   : aiPickTrump(G, seat) };~~
+// ~~if (ra.kind === "call")  return { type: "call",  card: hard ? aiPickPartnerSearch(G, seat) : aiPickPartner(G, seat) };~~
+if (ra.kind === "trump") return { type: "trump", suit:  aiPickTrump(G, seat) };
+if (ra.kind === "call")  return { type: "call",  card:  aiPickPartner(G, seat) };
 ```
 
 `easy` and `normal` keep the heuristic auction — that is what the three tiers now mean, and it gives
 `normal` a real identity instead of "hard, but worse at cards".
+
+Trump and the call keep it at *every* tier: they are two of the four most expensive invocations in a
+deal and they measured worth +0.56 ± 0.42 pp of deals won, which is not distinguishable from zero. A
+deal is scored made-or-set, so the ~2.5 points/deal they add mostly lands as margin a binary score
+throws away — the bid is the only auction question that changes *whether the contract is won*.
+`aiPickTrumpSearch` and `aiPickPartnerSearch` are not dead: they still answer the coach's auction
+advisor in `coach/worker.js`, which runs in the player's own browser at zero server cost.
 
 ### `coach/shadow.js`
 
