@@ -225,6 +225,82 @@ test("choosePIMCCard still short-circuits a forced play", () => {
   assert.deepEqual(E.choosePIMCCard(G, seat), G.hands[seat][0]);
 });
 
+/* ---- the auction search (ai/bid-search.js) ---- */
+
+test("the auction search returns legal decisions", () => {
+  for (let trial = 0; trial < 10; trial++) {
+    const G = E.createMatch(); E.startMatch(G);
+    const seat = E.findBidActor(G);
+    const bid = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(trial) });
+    assert.ok(bid === null || E.bidIsLegal(G, seat, bid), `illegal bid ${bid}`);
+    while (G.phase !== "trumpSelect") stepAI(G);
+    const suit = E.aiPickTrumpSearch(G, G.declarer, { rnd: E.mulberry32(trial) });
+    assert.ok(["♠", "♥", "♦", "♣"].includes(suit), `not a suit: ${suit}`);
+    E.applyTrump(G, suit);
+    const call = E.aiPickPartnerSearch(G, G.declarer, { rnd: E.mulberry32(trial) });
+    assert.ok(E.callIsLegal(G, call), `illegal call ${JSON.stringify(call)}`);
+  }
+});
+
+test("bidValue produces a monotone make-probability", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  const seat = E.findBidActor(G);
+  const val = E.bidValue(G, seat, { rnd: E.mulberry32(4) });
+  assert.ok(val.samples.length > 0, "no deals were sampled");
+  assert.ok(val.makeProb(130) >= val.makeProb(250) , "a higher target cannot be easier to make");
+  assert.ok(val.makeProb(0) === 1, "every deal captures at least nothing");
+  assert.ok(val.median >= 0 && val.median <= 250);
+});
+
+test("the auction search is seed-reproducible", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  const seat = E.findBidActor(G);
+  const a = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(77) });
+  const b = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(77) });
+  assert.equal(a, b);
+});
+
+test("the search bids more sanely than the hand-count on a strong hand", () => {
+  /* A hand with four aces and long trumps should not pass at the minimum.
+     Build it explicitly rather than hoping a random deal produces one. */
+  const G = E.createMatch(); E.startMatch(G);
+  const seat = E.findBidActor(G);
+  G.hands[seat] = [
+    { suit: "♠", rank: 14 }, { suit: "♠", rank: 13 }, { suit: "♠", rank: 12 }, { suit: "♠", rank: 11 },
+    { suit: "♠", rank: 10 }, { suit: "♠", rank: 9 }, { suit: "♠", rank: 5 },
+    { suit: "♥", rank: 14 }, { suit: "♥", rank: 13 }, { suit: "♦", rank: 14 },
+    { suit: "♦", rank: 13 }, { suit: "♣", rank: 14 }, { suit: "♣", rank: 13 },
+  ];
+  assert.notEqual(E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(2) }), null,
+    "a hand like this must not pass at 130");
+});
+
+/* The auction search must bound itself the way PIMC does — on simulated plays,
+   never on the clock — because Date.now() is frozen between I/O operations
+   inside a Durable Object. Unlike PIMC this search has no wall-clock guard at
+   all, so the sample count is exactly the budget divided by a deal's worth of
+   plays, and a frozen clock changes nothing. */
+test("the auction search bounds itself in simulated plays, not milliseconds", () => {
+  const G = E.createMatch(); E.startMatch(G);
+  const seat = E.findBidActor(G);
+  assert.equal(E.bidValue(G, seat, { rnd: E.mulberry32(9), playBudget: 5200 }).samples.length, 100);
+  assert.equal(E.bidValue(G, seat, { rnd: E.mulberry32(9), playBudget: 1040 }).samples.length, 20);
+
+  const realNow = Date.now;
+  Date.now = () => 1_700_000_000_000;
+  try {
+    const t0 = realNow(), need = E.minNextBid(G);
+    const bid = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(9) });
+    assert.ok(bid === null || bid === need, "a bidder takes the next step or passes");
+    while (G.phase !== "trumpSelect") stepAI(G);
+    const suit = E.aiPickTrumpSearch(G, G.declarer, { rnd: E.mulberry32(9) });
+    E.applyTrump(G, suit);
+    const call = E.aiPickPartnerSearch(G, G.declarer, { rnd: E.mulberry32(9) });
+    assert.ok(E.SUITS.includes(suit) && E.callIsLegal(G, call), "a frozen clock must not break the search");
+    assert.ok(realNow() - t0 < 2000, "a frozen clock must not uncap the search");
+  } finally { Date.now = realNow; }
+});
+
 /* ============================================================
    Frozen oracle — pre-refactor choosePIMCCard, for a one-time equivalence
    proof against the post-refactor evaluateMoves/choosePIMCCard split.

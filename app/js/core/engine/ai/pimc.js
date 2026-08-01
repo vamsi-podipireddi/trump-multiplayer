@@ -145,4 +145,7 @@ function choosePIMCCard(G, me, opts) {
   return legal[best];
 }
 
-export { determinize, PIMC_PLAY_BUDGET, evaluateMoves, choosePIMCCard };
+/* rolloutClone/playOutRound are exported for ai/bid-search.js, which simulates
+   whole deals from the auction. Copying this object's 20 fields a second time is
+   how two searches quietly start disagreeing about the same position. */
+export { determinize, rolloutClone, playOutRound, PIMC_PLAY_BUDGET, evaluateMoves, choosePIMCCard };
