@@ -243,38 +243,74 @@ test("the worker refuses a request it cannot serve", () => {
   assert.ok(typeof res.error === "string" && res.error.length, "a failure must explain itself");
 });
 
-/* A bidding/trump/call view has a real dealt hand and a real seat — shadowFromView
-   happily builds a position from it — so only an explicit phase/actKind check stops
-   evaluateMoves from rolling out a non-"playing" position and quietly handing back an
-   all-zero "best" card instead of refusing (playOutRound no-ops the instant
-   sim.phase !== "playing", per ai/pimc.js). */
-test("the worker refuses a hint request outside a card-play decision, even with a real dealt hand", () => {
-  let checked = 0;
+/* Task 10: the hint branch above now answers bid/trump/call too, sharing
+   ai/bid-search.js's search — a bidding/trump/call view has a real dealt hand
+   and a real seat, shadowFromView happily builds a position from it, and
+   neither bidValue nor aiPickTrumpSearch/aiPickPartnerSearch has a phase check
+   of its own, so this is the one place the answer could quietly come from the
+   wrong search entirely. One instance of each kind, not a full sweep: trump
+   and call default to TRUMP_PLAY_BUDGET/CALL_PLAY_BUDGET-sized searches
+   (bid-search.js's own tuning comment), and a full match's worth of those
+   would make this test itself the slow one. */
+test("the worker answers a bid/trump/call hint request from a view alone", () => {
+  const seen = new Set();
   drive((room, pids) => {
-    if (room.G.phase === "playing" || checked > 3) return;
+    if (seen.size >= 3) return;
     const ra = E.requiredActor(room.G);
-    if (!ra || ra.kind === "play") return;   // only the pre-play decisions: bid, trump, call
+    if (!ra || ra.kind === "play" || seen.has(ra.kind)) return;
     const v = R.buildView(room, pids[ra.seat], 0);
     if (!v.you.toAct) return;
     assert.ok(Array.isArray(v.you.hand) && v.you.hand.length, "this decision point must carry a real hand");
     const res = handleRequest({ id: 3, kind: "hint", view: v, seed: 1 });
-    assert.equal(res.ok, false, `a "${ra.kind}" decision must not answer a card-play hint`);
-    assert.match(res.error, /card-play/i);
+    assert.ok(res.ok, `${ra.kind} hint failed: ${res.error}`);
+    assert.equal(res.result.kind, ra.kind);
+    if (ra.kind === "bid") {
+      assert.equal(res.result.target, v.you.minBid, "a bid hint must be about the bid actually on offer");
+      assert.ok(res.result.makeProb >= 0 && res.result.makeProb <= 1, "makeProb must be a probability");
+      assert.ok(Number.isFinite(res.result.median));
+    }
+    if (ra.kind === "trump") assert.ok(E.SUITS.includes(res.result.suit), "a trump hint must name a real suit");
+    if (ra.kind === "call") {
+      assert.ok(res.result.card && E.SUITS.includes(res.result.card.suit), "a call hint must name a real card");
+      assert.ok(!v.you.hand.some(c => c.suit === res.result.card.suit && c.rank === res.result.card.rank),
+        "a called card must never be one the caller already holds");
+    }
+    seen.add(ra.kind);
+  });
+  assert.deepEqual([...seen].sort(), ["bid", "call", "trump"], "expected to exercise all three auction decisions");
+});
+
+/* trickEnd/roundEnd/matchOver never hand anyone a decision (requiredActor()
+   returns null or a timed phase, per flow.js), so PHASE_FOR_ACT admits none of
+   them — this is what stops a stray request from one of those phases getting
+   an answer built from whatever G.phase happened to be instead of a refusal. */
+test("the worker refuses a hint request when no decision is on offer", () => {
+  let checked = 0;
+  drive((room, pids) => {
+    if (checked > 3 || !["trickEnd", "roundEnd", "matchOver"].includes(room.G.phase)) return;
+    const v = R.buildView(room, pids[0], 0);
+    const res = handleRequest({ id: 9, kind: "hint", view: v, seed: 1 });
+    assert.equal(res.ok, false, `"${room.G.phase}" must not answer a hint`);
     checked++;
   });
-  assert.ok(checked > 0, "no bid/trump/call decision point was exercised");
+  assert.ok(checked > 0, "no dead-decision phase was exercised");
 });
 
 test("a seeded hint repeats", () => {
+  const seen = new Set();
   drive((room, pids) => {
-    if (room.G.phase !== "playing") return;
-    const seat = room.G.turn;
-    const v = R.buildView(room, pids[seat], 0);
+    if (seen.size >= 4) return;
+    const ra = E.requiredActor(room.G);
+    if (!ra || seen.has(ra.kind)) return;
+    const v = R.buildView(room, pids[ra.seat], 0);
     if (!v.you.toAct) return;
     const a = handleRequest({ id: 1, kind: "hint", view: v, seed: 9 });
     const b = handleRequest({ id: 2, kind: "hint", view: v, seed: 9 });
-    assert.deepEqual(a.result, b.result, "same seed, same answer");
+    assert.deepEqual(a.result, b.result, `same seed, same answer (${ra.kind})`);
+    assert.ok(a.ok, `${ra.kind} hint failed: ${a.error}`);
+    seen.add(ra.kind);
   });
+  assert.deepEqual([...seen].sort(), ["bid", "call", "play", "trump"], "expected to exercise all four decision kinds");
 });
 
 // ---------------------------------------------------------------------------

@@ -30,6 +30,13 @@ import { reviewDeal } from "./review.js";
 const HINT_BUDGET = { determinizations: 48, playBudget: 120000, timeMs: Infinity };
 const FALLBACK_HINT_BUDGET = { determinizations: 8, playBudget: 6000, timeMs: 30 };
 
+/* Which phase a view must be in for a given actKind to be a real decision —
+   checked as a pair, not actKind alone, so a view whose phase and actKind have
+   drifted apart (which should never happen, but would otherwise roll out
+   whatever G.phase says and hand back a quiet, wrong verdict) is refused
+   instead of guessed at. Mirrors flow.js's own requiredActor() switch. */
+const PHASE_FOR_ACT = { play: "playing", bid: "bidding", trump: "trumpSelect", call: "partnerSelect" };
+
 /* Pure: takes a request, returns a response. Exported separately from the
    worker's own message wiring so the tests can execute the real thing in Node,
    where `self` does not exist. */
@@ -38,22 +45,60 @@ function handleRequest(msg) {
     const seed = (msg && msg.seed) || 1;
     if (msg.kind === "hint") {
       const view = msg.view;
-      /* evaluateMoves rolls out from G.phase, and playOutRound returns
-         immediately once the phase isn't "playing" — so a bidding/trump/call
-         position (or a view where it isn't even my turn) would otherwise come
-         back with a quiet all-zero "best" card instead of an honest refusal. */
-      if (!view || view.phase !== "playing" || !view.you || view.you.actKind !== "play")
-        return { id: msg.id, ok: false, error: "not a card-play decision" };
+      const actKind = view && view.you && view.you.actKind;
+      /* evaluateMoves and the auction search both roll out from *some* reading
+         of G regardless of what phase it actually is — playOutRound just
+         returns the instant phase isn't "playing", and bidValue/aiPickTrumpSearch/
+         aiPickPartnerSearch have no phase check of their own at all — so this
+         phase/actKind pairing (plus toAct) is the one thing standing between a
+         mismatched request and a quiet, wrong verdict instead of an honest
+         refusal. */
+      if (!view || !view.you || !view.you.toAct || PHASE_FOR_ACT[actKind] !== view.phase)
+        return { id: msg.id, ok: false, error: "not your decision to make" };
       const G = shadowFromView(view);
       if (!G) return { id: msg.id, ok: false, error: "no position in this view" };
       const seat = view.you.seat;
       const budget = (msg && msg.budget) || HINT_BUDGET;
-      const ev = E.evaluateMoves(G, seat, { ...budget, rnd: E.mulberry32(seed) });
-      if (!ev) return { id: msg.id, ok: false, error: "the sampler could not build a consistent deal" };
-      const moves = ev.moves.slice().sort((a, b) =>
-        (b.winProb * 1000 + b.meanPoints) - (a.winProb * 1000 + a.meanPoints));
-      return { id: msg.id, ok: true, result: { kind: "play", moves, best: moves[0],
-                                               determinizations: ev.determinizations } };
+      const rnd = E.mulberry32(seed);
+
+      if (actKind === "play") {
+        const ev = E.evaluateMoves(G, seat, { ...budget, rnd });
+        if (!ev) return { id: msg.id, ok: false, error: "the sampler could not build a consistent deal" };
+        const moves = ev.moves.slice().sort((a, b) =>
+          (b.winProb * 1000 + b.meanPoints) - (a.winProb * 1000 + a.meanPoints));
+        return { id: msg.id, ok: true, result: { kind: "play", moves, best: moves[0],
+                                                 determinizations: ev.determinizations } };
+      }
+
+      /* bid/trump/call run ai/bid-search.js's search instead of evaluateMoves' —
+         a different budget shape (just rnd + playBudget: bid-search.js has no
+         timeMs of its own, deliberately, per its own file comment — Workers
+         freeze Date.now() between I/O, so a wall-clock cutoff would never fire
+         there either). Reusing HINT_BUDGET/FALLBACK_HINT_BUDGET's playBudget
+         rather than each function's own tuned default (aiActionFor's "hard" bot
+         calls all three with none, see ai/index.js) keeps the one asymmetry that
+         matters here — thorough off-thread, cheap on the thread painting the
+         UI — without a second pair of constants to keep in sync with the first;
+         it costs only that a hint searches wider than the bot's own move would,
+         which is already true of the card-play hint above (HINT_BUDGET's 120000
+         against PIMC_PLAY_BUDGET's 8000). makeProb/median/samples.length are
+         read into plain values here, not left as bidValue's own closure — a
+         function cannot cross postMessage's structured clone. */
+      const searchOpts = { rnd, playBudget: budget.playBudget };
+      if (actKind === "bid") {
+        const bv = E.bidValue(G, seat, searchOpts);
+        const target = view.you.minBid;
+        return { id: msg.id, ok: true, result: { kind: "bid", median: bv.median, target,
+                                                 makeProb: bv.makeProb(target), worlds: bv.samples.length } };
+      }
+      if (actKind === "trump") {
+        const suit = E.aiPickTrumpSearch(G, seat, searchOpts);
+        return { id: msg.id, ok: true, result: { kind: "trump", suit } };
+      }
+      // actKind === "call" — PHASE_FOR_ACT above admits no other value here
+      const card = E.aiPickPartnerSearch(G, seat, searchOpts);
+      if (!card) return { id: msg.id, ok: false, error: "no callable card found" };
+      return { id: msg.id, ok: true, result: { kind: "call", card } };
     }
     if (msg.kind === "review") {
       const view = msg.view;

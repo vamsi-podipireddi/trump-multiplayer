@@ -24,6 +24,10 @@ const ICONS = {
      a cross and the button does not jump when you press it */
   sound: '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="M15.6 9.2a4 4 0 0 1 0 5.6M18.4 6.4a8 8 0 0 1 0 11.2"/>',
   mute:  '<path d="M11.4 4.6 6.8 8.6H3.6a1 1 0 0 0-1 1v4.8a1 1 0 0 0 1 1h3.2l4.6 4Z"/><path d="m16 9.6 5.4 4.8M21.4 9.6 16 14.4"/>',
+  /* the coach's hint: a bulb, glass over a two-bar base, standing for "an idea"
+     rather than anything about cards — the mark it leaves on a card is a separate,
+     outlined .hint class, not this icon repeated smaller */
+  hint:  '<path d="M12 3.4a6.3 6.3 0 0 0-3.7 11.4c.8.6 1.3 1.5 1.3 2.5v.3h4.8v-.3c0-1 .5-1.9 1.3-2.5A6.3 6.3 0 0 0 12 3.4Z"/><path d="M9.8 20.6h4.4M10.4 22.4h3.2"/>',
 };
 function icon(name, cls) {
   const d = ICONS[name]; if (!d) return "";

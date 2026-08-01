@@ -21,6 +21,7 @@ import { EMOTES } from "../app/js/cards/icons.js";
 import { DIFF_OPTS, DEAL_OPTS, TIMER_OPTS, COACH_OPTS } from "../app/js/screens/lobby.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const root = path.join(__dirname, "..");
 
 const jsFiles = (function walk(dir) {
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap(e =>
@@ -187,4 +188,16 @@ test("client handles every error code the core can send", () => {
 test("no leftover debug hooks in the shipped client", () => {
   assert.ok(!/console\.log\(/.test(CLIENT), "client should not ship console.log calls");
   assert.ok(!/\bdebugger\b/.test(CLIENT), "client should not ship a debugger statement");
+});
+
+test("the hint button exists in both shells and is gated on the coach setting", async () => {
+  for (const shell of ["app/index.html", "app/solo.html"]) {
+    const html = fs.readFileSync(path.join(root, shell), "utf8");
+    assert.ok(/id="btn-hint"/.test(html), `${shell} has no hint button`);
+    assert.ok(/aria-label="[^"]*[Hh]int/.test(html), `${shell}'s hint button has no accessible name`);
+  }
+  const { hintEnabled } = await import("../app/js/ui/coach.js");
+  assert.equal(hintEnabled({ settings: {}, you: { toAct: true } }), true, "a room predating the setting must allow hints");
+  assert.equal(hintEnabled({ settings: { coach: false }, you: { toAct: true } }), false);
+  assert.equal(hintEnabled({ settings: { coach: true }, you: { toAct: false } }), false, "no hint when it is not your turn");
 });

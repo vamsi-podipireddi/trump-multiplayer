@@ -12,6 +12,7 @@ import { showHelp, setRenderHandler } from "./ui/modals.js";
 import { startTicking, initResize } from "./ui/layout.js";
 import { startAmbient } from "./ui/ambient.js";
 import { initSound, toggleSound } from "./ui/sound.js";
+import { initCoach } from "./ui/coach.js";
 import { doJoin, doSolo, loadStats, showNotice } from "./screens/join.js";
 import { render, posOfSeat } from "./screens/game.js";
 
@@ -95,6 +96,10 @@ function boot() {
   initSound();
   $("btn-colors").onclick = () => setFourColor(!document.body.classList.contains("fourcolor"));
   $("btn-sound").onclick = toggleSound;
+  // render, not a fresh closure: the click handler is wired once, long before
+  // any S.view exists, so it needs a no-arg repaint it can call once a
+  // response lands — render() is already this file's own view→DOM entry point.
+  initCoach(render);
 
   document.querySelectorAll("#sheet-tabs button").forEach(b => { b.onclick = () => openSheet(b.dataset.tab); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });

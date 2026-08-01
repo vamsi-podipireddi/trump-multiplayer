@@ -11,6 +11,7 @@ import { hideOverlay, showMatchOver, showRoundResult, maybeShowReveal, hideRevea
 import { fitTable, tickTimers } from "../ui/layout.js";
 import { renderLobby, renderSettings, showSettingsModal, DIFF_OPTS } from "./lobby.js";
 import { coachOn } from "../coach/read.js";
+import { renderCoach } from "../ui/coach.js";
 
 // ---------- orientation ----------
 const orient = () => (S.mySeat == null ? 0 : S.mySeat);
@@ -124,9 +125,14 @@ function renderGame() {
   renderTricks(S.view, ctx);
   renderHand(S.view, HANDLERS.play);
   renderActionBar(S.view, HANDLERS);
-  /* after the action bar, never before: the tray is what --tray-lift is measured
-     from and the felt is sized by what is left over, so measuring first reads the
-     *previous* phase's layout — which is how your own plate ended up under it. */
+  /* after renderActionBar, never before: both write #hand-hint, and a hint
+     answer is meant to override the phase's own contextual tip, not be
+     overwritten by it on the very next line. */
+  renderCoach(S.view, ctx, HANDLERS);
+  /* after the action bar (and the coach line above), never before: the tray is
+     what --tray-lift is measured from and the felt is sized by what is left
+     over, so measuring first reads the *previous* phase's layout — which is
+     how your own plate ended up under it. */
   fitTable();
   renderLog(S.view);
   renderChat(S.view, S.mySeat, e => send({ type: "emote", e }));
