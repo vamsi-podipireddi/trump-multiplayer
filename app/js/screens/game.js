@@ -10,6 +10,7 @@ import { renderChat, closeSheet } from "../ui/chat.js";
 import { hideOverlay, showMatchOver, showRoundResult, maybeShowReveal, hideReveal } from "../ui/modals.js";
 import { fitTable, tickTimers } from "../ui/layout.js";
 import { renderLobby, renderSettings, showSettingsModal, DIFF_OPTS } from "./lobby.js";
+import { coachOn } from "../coach/read.js";
 
 // ---------- orientation ----------
 const orient = () => (S.mySeat == null ? 0 : S.mySeat);
@@ -104,8 +105,13 @@ function tableCtx() {
 function settingsChips() {
   const st = S.view.settings || {};
   const diff = (DIFF_OPTS.find(d => d[0] === st.difficulty) || ["", "?"])[1];
+  /* Hints is host-changeable mid-match (see lobby.js), so the three non-host
+     seats need a way to see it changed without opening the settings modal —
+     the modal itself is host-only (see onSettings below), so this chip row
+     is the only place a guest can discover it at all. */
   return `<span class="chip">AI <b>${esc(diff)}</b></span>` +
-         `<span class="chip">Timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b></span>`;
+         `<span class="chip">Timer <b>${st.turnTimerSec ? st.turnTimerSec + "s" : "off"}</b></span>` +
+         `<span class="chip">Hints <b>${coachOn(st) ? "on" : "off"}</b></span>`;
 }
 function renderGame() {
   const ph = phaseLabel(S.view.phase);

@@ -425,6 +425,18 @@ test("the coach setting reaches every viewer", () => {
   for (const pid of [host, other]) assert.equal(R.buildView(room, pid, 0).settings.coach, false);
 });
 
+/* A room persisted before `coach` existed has no key at all — buildView must not
+   paper over that with a default. Tolerance for "missing means on" belongs at
+   the read sites (app/js/coach/read.js's coachOn), not here: if the core ever
+   started normalizing this, a stored `false` written by an older client next to
+   a field it doesn't know about could get silently overwritten to `true`. */
+test("a room predating the coach field is not normalized by the core — buildView passes undefined through", () => {
+  const room = R.createRoom("TEST");
+  const [pid] = joinN(room, 1, 0);
+  delete room.settings.coach;
+  assert.equal(R.buildView(room, pid, 0).settings.coach, undefined);
+});
+
 test("turn timer: AFK human is put on autopilot and the AI acts", () => {
   let now = 1_000_000;
   const room = mkRoom();

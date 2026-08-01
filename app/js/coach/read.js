@@ -6,6 +6,11 @@
 import { SUITS, RANKS, TOTAL_POINTS } from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
 
+/* A room restored from storage predating this setting has no `coach` key, and a
+   missing agreement is not a ban: absent reads as on. One predicate, so the lobby,
+   the table and the hint affordance can never disagree about what a table agreed to. */
+function coachOn(settings) { return !settings || settings.coach !== false; }
+
 /* The 30 goes to whoever captured the trick the 3 fell in. The wire carries no
    "bonus taken by", so the trick history is where that is written down.
    Answers only once that trick has resolved: a bonus that has fallen but
@@ -61,4 +66,4 @@ function tableRead(v) {
   return { pointsLive, captured, needed, bonus, voids, outstanding, trumpLeft };
 }
 
-export { bonusTakenBy, tableRead };
+export { coachOn, bonusTakenBy, tableRead };

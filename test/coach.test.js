@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
-import { tableRead } from "../app/js/coach/read.js";
+import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest } from "../app/js/coach/worker.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
@@ -93,6 +93,19 @@ test("a seated player yields no position before the match starts", () => {
   const v = R.buildView(room, pid, 0);
   assert.equal(v.you.hand, undefined, "buildView only deals out a hand once room.started");
   assert.equal(shadowFromView(v), null);
+});
+
+/* The one invariant the room setting's design leans on hardest: a room persisted
+   before `coach` existed has no key at all, and that must read the same as an
+   explicit `true` — never as `false`. Direct assertions on the predicate itself,
+   not on a room or a view, because this is the one thing about it that a DOM-only
+   read site (lobby.js, game.js) can't be tested through at all. */
+test("coachOn: absent — whether no settings object or no key — reads on; only strict false reads off", () => {
+  assert.equal(coachOn(undefined), true, "no settings object at all");
+  assert.equal(coachOn({}), true, "a room restored from storage predating this field");
+  assert.equal(coachOn({ coach: true }), true);
+  assert.equal(coachOn({ coach: false }), false, "the one value that actually turns hints off");
+  assert.equal(coachOn({ coach: "yes" }), true, "a non-boolean is not a ban either — only strict false is");
 });
 
 test("points live plus points captured is always 250", () => {
