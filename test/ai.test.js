@@ -9,7 +9,11 @@ import * as E from "../app/js/core/engine/index.js";
    frozen oracle below must NOT duplicate. It is unmodified by this task, so
    importing the live function is safe: only the oracle's own accumulator math
    needs to be frozen, not everything it calls. */
-import { chooseAICard as legacyChooseAICard } from "../app/js/core/engine/ai/heuristic.js";
+import { chooseAICard as legacyChooseAICard, aiPickTrump, aiPickPartner } from "../app/js/core/engine/ai/heuristic.js";
+/* Same exception, same reason: the auction budgets are internal tuning constants
+   deliberately kept off the barrel (as PIMC_PLAY_BUDGET is), but they encode a
+   measured result and a silent reset of them would undo this task's content. */
+import { BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET } from "../app/js/core/engine/ai/bid-search.js";
 
 const key = c => c.suit + c.rank;
 
@@ -258,6 +262,15 @@ test("the auction search is seed-reproducible", () => {
   const a = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(77) });
   const b = E.aiBidDecisionSearch(G, seat, { rnd: E.mulberry32(77) });
   assert.equal(a, b);
+  /* The decision above is near-binary, so two runs on *different* seeds would
+     agree most of the time too — it barely discriminates against an unseeded
+     Math.random leaking in. The sample vector costs the same and cannot. */
+  assert.deepEqual(E.bidValue(G, seat, { rnd: E.mulberry32(77) }).samples,
+                   E.bidValue(G, seat, { rnd: E.mulberry32(77) }).samples,
+                   "same seed, same position, same sampled deals");
+  assert.notDeepEqual(E.bidValue(G, seat, { rnd: E.mulberry32(77) }).samples,
+                      E.bidValue(G, seat, { rnd: E.mulberry32(78) }).samples,
+                      "a different seed must sample different deals");
 });
 
 test("the search bids more sanely than the hand-count on a strong hand", () => {
@@ -299,6 +312,66 @@ test("the auction search bounds itself in simulated plays, not milliseconds", ()
     assert.ok(E.SUITS.includes(suit) && E.callIsLegal(G, call), "a frozen clock must not break the search");
     assert.ok(realNow() - t0 < 2000, "a frozen clock must not uncap the search");
   } finally { Date.now = realNow; }
+});
+
+/* The four tests above are plumbing: legality, determinism, and the shape of
+   makeProb. Every one of them passes for a searcher that returns a random legal
+   answer, so none of them would notice this task being undone. This is the
+   strength test — the same paired-deal idiom as "hard AI is not weaker than the
+   heuristic" above, moved to the auction.
+
+   One shared set of sampled deals judges both answers (bidValue plays out
+   whatever trump and call it is handed), so the comparison is exactly paired and
+   far tighter than replaying two realised deals would be.
+
+   Calibrated, not guessed: over 40 runs the statistic sits at +2.8 (sd 1.5) as
+   shipped and at -32 (sd 7.3) for a searcher answering at random, so -5 is ~5 sd
+   below shipped and ~4 sd above random. It is a catastrophe detector and nothing
+   finer — a budget reset to 6000 lands at +0.4 (sd 2.1), which no assertion this
+   cheap can separate from +2.8. That regression is caught by the constants
+   below, and quantified by scripts/bench-auction-search.js. */
+test("the searched trump and call are not weaker than the hand-count (paired deals)", () => {
+  const DEALS = 12;
+  let searched = 0, heuristic = 0;
+  for (let d = 0; d < DEALS; d++) {
+    const G = E.createMatch(); E.startMatch(G);
+    while (G.phase !== "trumpSelect") stepAI(G);
+    const seat = G.declarer;
+    const hT = aiPickTrump(G, seat), hC = aiPickPartner({ ...G, trump: hT }, seat);
+    const sT = E.aiPickTrumpSearch(G, seat, { rnd: E.mulberry32(d) });
+    const sC = E.aiPickPartnerSearch({ ...G, trump: sT }, seat, { rnd: E.mulberry32(d) });
+    const value = (trump, call) => {
+      const s = E.bidValue({ ...G, trump, calledCard: call }, seat,
+                           { rnd: E.mulberry32(9000 + d), playBudget: 6000 }).samples;
+      return s.reduce((a, b) => a + b, 0) / s.length;
+    };
+    searched += value(sT, sC); heuristic += value(hT, hC);
+  }
+  const gain = (searched - heuristic) / DEALS;
+  assert.ok(gain > -5, `searched trump+call averaged ${gain.toFixed(2)} pts against the hand-count`);
+});
+
+/* The budgets are the content of this task, and the in-suite strength test above
+   provably cannot see them change. Assert the quantity that actually matters —
+   worlds per candidate, the thing worldsFor computes — so that either a budget
+   reset or a change to the formula fails loudly and lands the reader here.
+
+   Measured basis (scripts/bench-auction-search.js): at 11 worlds the call search
+   buys nothing measurable over the hand-count it replaces (-0.27 +/- 0.96 pts a
+   deal); at ~46 it is worth +2.60 +/- 0.87. Lower these and the search stops
+   being an improvement — that is a real result, not a stylistic preference. */
+test("the auction budgets still buy enough worlds per candidate to beat the hand-count", () => {
+  const worldsPer = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
+  assert.ok(worldsPer(1, BID_PLAY_BUDGET) >= 50,
+    `the bid threshold test needs ~57 worlds, got ${worldsPer(1, BID_PLAY_BUDGET)}`);
+  assert.ok(worldsPer(4, TRUMP_PLAY_BUDGET) >= 100,
+    `the trump argmax needs ~115 worlds a suit, got ${worldsPer(4, TRUMP_PLAY_BUDGET)}`);
+  assert.ok(worldsPer(10, CALL_PLAY_BUDGET) >= 40,
+    `the call argmax needs ~46 worlds a card, got ${worldsPer(10, CALL_PLAY_BUDGET)}`);
+  // and the budget really is what sizes the sample, not a coincidence of defaults
+  const G = E.createMatch(); E.startMatch(G);
+  assert.equal(E.bidValue(G, E.findBidActor(G), { rnd: E.mulberry32(5) }).samples.length,
+               worldsPer(1, BID_PLAY_BUDGET));
 });
 
 /* ============================================================

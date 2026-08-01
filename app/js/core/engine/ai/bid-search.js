@@ -30,31 +30,46 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    against the best available candidate (lower is better; the hand-count these
    replace is the bar to beat):
 
-     bid    1 candidate     6000 -> 115 worlds  0 of 120 decisions differ from a
-                                                2000-world oracle. A 0.5
-                                                threshold test needs far less
-                                                than an argmax does, and this is
-                                                the one that runs on every
-                                                bidding turn (~10.7 an auction,
-                                                all four seats together).
+     bid    1 candidate     3000 ->  57 worlds  6 of 250 decisions differ from a
+                                                2000-world oracle (6000 gives 4),
+                                                all on hands within 0.08 of the
+                                                0.5 line, where the decision is
+                                                near-indifferent by construction.
+                                                Halving 6000 -> 3000 ends 17.3%
+                                                of auctions differently and
+                                                changes deals won by -0.09 +/-
+                                                0.38 pp over 7998 paired deals:
+                                                nothing, for 29% of the auction's
+                                                whole compute. A threshold test
+                                                needs far less than an argmax
+                                                does, and this is the one that
+                                                runs on every bidding turn
+                                                (~10.7 an auction, all seats).
      trump  4 candidates    6000 ->  28 worlds  regret 1.02 vs heuristic 2.28
                            24000 -> 115 worlds  regret 0.48 vs heuristic 2.96
      call  ~10 candidates   6000 ->  11 worlds  regret 3.60 vs heuristic 3.33 —
-                                                WORSE than the hand-count it
-                                                replaces. Eleven worlds cannot
-                                                rank ten cards whose true spread
-                                                is ~20 points, so the argmax is
-                                                mostly ranking its own sampling
-                                                noise, and the winner's curse
-                                                does the rest.
+                                                at this width the call search
+                                                buys nothing measurable (-0.27
+                                                +/- 0.96 pts a deal, pooled).
+                                                Eleven worlds cannot rank ten
+                                                cards whose true spread is ~20
+                                                points, so the argmax is largely
+                                                ranking its own sampling noise.
                            24000 ->  46 worlds  regret 1.06 vs heuristic 3.65
 
    The 24000 rows are a 150-deal hold-out on seeds disjoint from the tuning runs:
-   +2.47 +/- 0.95 pts a deal for trump, +2.60 +/- 0.87 for the call. Both are
-   asked once a deal and only of the seat that won the auction, so 24000 plays
-   (~16ms) sits against the 104000 (8000 x 13 cards) the same bot already spends
-   playing that deal out under PIMC. */
-const BID_PLAY_BUDGET = 6000;
+   +2.47 +/- 0.95 pts a deal for trump, +2.60 +/- 0.87 for the call, and the
+   raise rests on those, not on the 6000 result. Confirmed out of model on 9991
+   played deals: +2.08 +/- 1.25 pts to the declaring side, +0.56 +/- 0.42 pp of
+   deals won. Both are asked once a deal and only of the seat that won it.
+
+   The whole auction costs ~79500 plays a deal against PIMC's measured ~124500
+   for the same deal's card play (+64%) — PIMC's real figure, not 8000 x 13:
+   maxDet shrinks as cardsLeft does, and forced plays short-circuit entirely.
+   The bid is 40% of that and buys +2.77 +/- 0.91 pp of deals won; trump and call
+   are the other 60% and buy +0.56 +/- 0.42 pp. scripts/bench-auction-search.js
+   re-derives every number in this comment. */
+const BID_PLAY_BUDGET = 3000;
 const TRUMP_PLAY_BUDGET = 24000;
 const CALL_PLAY_BUDGET = 24000;
 const worldsFor = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
@@ -113,8 +128,8 @@ const meanOver = (G, seat, worlds, trump, call, rnd) =>
 /* Pick the argmax of mean captured points, with the heuristic's own answer
    evaluated first so that a tie — these are means of integer point totals over
    a few dozen worlds, so exact ties do happen — leaves the heuristic's choice
-   standing. The search must earn a strict improvement to depart from the answer
-   it replaces. */
+   standing. Only a strictly better *estimate* displaces it; that is a tie-break
+   rule, not a guarantee about true value (see aiPickPartnerSearch). */
 function argmaxCandidate(cands, score) {
   let best = cands[0], bestMean = score(cands[0]);
   for (let i = 1; i < cands.length; i++) {
@@ -174,8 +189,11 @@ function aiPickTrumpSearch(G, seat, opts) {
 
 /* callableCards offers up to 39 cards and nobody calls a seven, so the shortlist
    is the Q/K/A the seat does not hold — at most 12 — plus the heuristic's own
-   pick, which keeps the search's floor at the answer it replaces and covers the
-   (barely possible) hand holding all twelve honours. Cutting the shortlist
+   pick, which makes that answer *reachable* (so the search converges to at least
+   the heuristic as worlds -> infinity) and covers the barely-possible hand
+   holding all twelve honours. Reachable is all it is: an argmax over noisy
+   estimates is biased upward and will sometimes select a truly worse card, which
+   is exactly what the 6000-world row above measures. Cutting the shortlist
    further would be the cheap way to buy precision, and it does not work: over
    100 deals the best call was an ace 70% of the time but a king 23% and a queen
    7%, and an aces-only shortlist forfeits 2.09 of the 3.33 points the full one
