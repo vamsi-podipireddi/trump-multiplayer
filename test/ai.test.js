@@ -415,12 +415,12 @@ test("every difficulty produces a legal auction action", () => {
     // an all-pass auction redeals and stays in "bidding", so this is not one pass of four
     while (G.phase !== "trumpSelect") { assert.ok(guard++ < 200, "the auction never declared"); stepAI(G); }
     /* Drive the engine with hard's own answers rather than reading them, so the
-       whole tier is exercised end to end: aiActionFor -> applyTrump -> applyCall
-       -> "playing". Every other test in this file calls the trump/call
-       *functions* and asserts on their return value; this is the only one that
-       feeds the router's output back into the engine and checks the engine
-       accepts it, which is what would break if a routing change ever returned
-       something of the wrong shape. */
+       tier is exercised end to end: aiActionFor -> applyTrump -> applyCall ->
+       "playing". stepAI/gameAtPlay above do the same loop at "normal", and the
+       tests below feed the search *functions'* output to applyTrump directly —
+       but this is the only place `hard`'s own router output reaches the engine,
+       which is what would catch a routing change returning the wrong shape (a
+       suit where a card is expected, or an undefined). */
     const trump = E.aiActionFor(G, G.declarer, "hard");
     assert.equal(trump.type, "trump");
     E.applyTrump(G, trump.suit);
@@ -653,10 +653,23 @@ test("choosePIMCCard agrees with a frozen pre-refactor oracle (genuine equivalen
     const G = E.createMatch(); E.startMatch(G);
     while (G.phase !== "playing") stepAI(G);
     const seat = G.turn;
-    // each call gets its own freshly-seeded generator — sharing one instance
-    // would desynchronise the two streams and fail this for the wrong reason
-    const a = E.choosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial) });
-    const b = legacyChoosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial) });
+    /* Each call gets its own freshly-seeded generator — sharing one instance
+       would desynchronise the two streams and fail this for the wrong reason.
+
+       timeMs: Infinity on BOTH sides for the same reason, and it is the last
+       thing on this branch still coupled to a wall clock after Task 9 made
+       `timeMs: Infinity` the discipline everywhere the play budget is meant to
+       be the only bound. Both loops honour opts.timeMs and both default it to
+       25, but they are structurally different loops doing the same work, so on
+       a slow or loaded machine the clock could cut one of them at a different
+       determinization count and desynchronise the rng streams — failing an
+       equivalence test for a reason that has nothing to do with equivalence.
+       maxDet already bounds the work identically on both sides, so this costs
+       nothing and removes the last desync vector. Passed as an option, never as
+       an edit to the oracle: the oracle is a deliberately frozen pre-refactor
+       reference and must never be "fixed" to track pimc.js. */
+    const a = E.choosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial), timeMs: Infinity });
+    const b = legacyChoosePIMCCard(G, seat, { rnd: E.mulberry32(500 + trial), timeMs: Infinity });
     assert.deepEqual(a, b, "refactored search must agree with the pre-refactor fused-accumulator oracle");
   }
 });
