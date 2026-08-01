@@ -17,6 +17,11 @@ reasoning behind these choices, see `docs/superpowers/specs/2026-07-27-project-s
 | `app/css/panels.css` | Join, lobby, both rails, scoreboard, log, chat, bottom sheet |
 | `app/css/responsive.css` | All `@media` blocks |
 | `app/js/core/engine/*` | Game rules + AI. Shared by browser, Node server and Worker |
+| `app/js/coach/shadow.js` | Redacted view -> a search-ready position; placeholder hands are what make cheating structurally impossible |
+| `app/js/coach/read.js` | Table read (points live, captured split, bonus, voids, outstanding) + `coachOn`, the one "hints on" predicate |
+| `app/js/coach/review.js` | Re-searches each of a finished deal's decision points from the information the player had at the time, and grades the play |
+| `app/js/coach/worker.js` | Module-worker entry: `handleRequest` for hint/review requests, guarded so it also imports cleanly in Node |
+| `app/js/coach/client.js` | Main-thread facade: spawns the worker, correlates request/response by id, synchronous reduced-budget fallback |
 | `app/js/session.js` | Mutable session state `S`, uid, token, `leaveRoom`, `mintCode` |
 | `app/js/net.js` | Socket connect/reconnect/send, message dispatch |
 | `app/js/screens/*` | Join, lobby, game — one module per screen |
@@ -24,6 +29,7 @@ reasoning behind these choices, see `docs/superpowers/specs/2026-07-27-project-s
 | `app/js/ui/rails.js` | Contract card, scoreboard, "tricks you won", phone contract strip |
 | `app/js/ui/sound.js` | Synthesised table cues (no audio assets) + the mute preference |
 | `app/js/ui/ambient.js` | The join/start screen's ambient loop — lamp, deal, suit motes, pointer parallax |
+| `app/js/ui/coach.js` | Hint affordance, table-read panel, post-deal review — the coach's DOM-writing half |
 | `app/js/ui/*` | Hand, action bar/tray, chat, log, modals, layout |
 | `app/js/cards/*` | SVG deck, chrome icons, the avatar emblems (`FACES`), text labels |
 | `app/js/util/*` | DOM helpers, persisted preferences |
@@ -32,6 +38,7 @@ reasoning behind these choices, see `docs/superpowers/specs/2026-07-27-project-s
 | `src/core/room/*` | Room state machine — server-only, never shipped to a client |
 | `src/server/*` | Node + ws adapter |
 | `src/worker/*` | Cloudflare Worker + Durable Object adapter |
+| `scripts/bench-auction-search.js` | Re-derives the auction search's budget constants and measures the all-`hard` regime; outside `npm test` — minutes, not seconds |
 
 Also at the root: `test/` (11 files, run via `node --test`), `scripts/` (`build-assets.js`,
 `gen-icons.js`, `bench-auction-search.js` — the last deliberately outside `npm test`, it takes

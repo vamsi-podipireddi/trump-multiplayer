@@ -116,6 +116,87 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   front of all four seats, so it adds no redaction surface. Rejected: reconstructing it on the client
   from the log — the log is prose, and a client that has to parse prose to draw the table is a client
   that breaks the next time the wording changes.
+- **D28. The coach runs client-side, from the redacted view.** `determinize()` (`ai/pimc.js`) reads only
+  `G.hands[me]`, `G.playedCards`, `G.voids`, `G.calledCard`, `G.partner` and the other seats' hand
+  *counts* — every one of those is already in the redacted per-viewer view (`src/core/room/view.js`) or
+  derivable from it. So the coach is structurally unable to cheat, costs the DO nothing, and works
+  offline. Rejected: a DO-side coach — billed CPU per hint, no solo, and it would have to redact itself
+  before searching.
+- **D29. One evaluator, two consumers.** `evaluateMoves` is factored out of `choosePIMCCard`
+  (`ai/pimc.js`) so bots and the coach share one implementation; `choosePIMCCard` becomes its argmax
+  wrapper, and the refactor is behaviour-preserving by construction (`winProb*1000 + meanPoints` is
+  exactly the old `win*1000 + margin`, averaged) — pinned by a frozen pre-refactor oracle, not merely
+  argued in prose. Rejected: a separate coach evaluator — two searchers that disagree about the same
+  position is a bug generator, and the bot's search is the one that has been tuned.
+- **D30. A seeded RNG is threaded through the search** (`mulberry32`, a `rnd` parameter defaulting to
+  `Math.random`). Bought for review reproducibility — reopening a review must print the same numbers —
+  and it also converts `test/ai.test.js`'s tolerance-checked head-to-head into an exact assertion.
+  Rejected: accepting a review whose numbers drift between openings — a coach that contradicts itself on
+  refresh is not believed.
+- **D31. The deal RNG is untouched.** Only AI-internal sampling becomes seedable; `randomInt`/`shuffle`
+  keep the CSPRNG (D9a). Rejected: one seedable RNG for everything — that is exactly the shared stream
+  D9a was written to eliminate.
+- **D32. The review judges the decision, not the outcome.** Each position (`coach/review.js`) is
+  re-searched from the player's own information set at that moment — never from the reconstructed full
+  deal, and never carrying a later trick's cards into an earlier trick's position (mirrors `applyPlay`'s
+  own void rule). Rejected: hindsight analysis — cheaper and much easier to build, but it flags correct
+  plays as blunders whenever the cards were unkind, which is precisely the advice that teaches people
+  wrong.
+- **D33. `coach` is a host setting defaulting to on, and it is signalling rather than enforcement.**
+  Documented everywhere it surfaces — the lobby's settings row reads "a table agreement — the engine runs
+  in every browser," and a mid-match settings chip shows the current agreement to every seat, not just the
+  host. Rejected: silently pretending it is enforced; rejected: no setting at all, which leaves a table
+  unable to agree to play clean.
+- **D34. The table-read panel is ungated public information.** Rejected: hiding it behind the `coach`
+  setting — every number in it (points live, captured split, the bonus three, known voids, outstanding
+  cards) is something the player watched happen at the table, sourced from the same derivation
+  (`shadowFromView`) the search itself uses to stay honest.
+- **D35. Bid/trump/call search is `hard`-only.** Gives the three difficulty tiers a real meaning beyond
+  card play, and keeps the added DO cost on the tier that opts into it.
+  ~~Estimated cost: "at most ~6 times per deal at 6000 plays ≈ 36k plays, against a play phase that
+  already spends up to 13 × 4 × 8000 ≈ 416k. Roughly a 9% increase in the DO's per-deal search work."~~ —
+  **CORRECTED, measured** (`scripts/bench-auction-search.js cost`): PIMC's real per-deal cost is
+  **~124,500** simulated plays, not ~416,000 — `maxDet = Math.min(24, affordable)` shrinks as
+  `cardsLeft` falls through a deal, and `choosePIMCCard` spends nothing at all on a forced play, so
+  `8000 × 13` badly overstates it. The auction search's real cost is **~79,500** plays/deal:
+  **+64%, not +9%** — an order of magnitude off in relative terms, though the absolute cost (tens of ms,
+  warm, in a DO idle between messages) is still small enough that the recommendation is unchanged.
+  Recorded so the next person to reason about DO cost starts from the measured mechanism, not the
+  interface contract's arithmetic.
+  **More consequential than the cost:** the auction search's two halves are not equally valuable. Paired
+  A/B on real outcomes — deals won, the game's own scoring unit — found the **bid** worth
+  **+2.77 ± 0.91 pp** (n=5998) for ~40% of the auction's compute, while **trump and call together** are
+  worth only **+0.56 ± 0.42 pp** (n=9991) for the other ~60% (independently reproduced by review at
+  +2.80 ± 0.80 pp, n=7993). Why: a deal is scored **made or set** — a binary — so points captured beyond
+  the contract line buy nothing. Trump and call raise mean captured points by ~2.5/deal in-model, which
+  mostly lands as margin a binary score discards; the bid changes *whether the contract is won at all*.
+  Points per deal was the wrong objective to have designed against; deals won is the scoring unit.
+  Rejected (after measurement): cutting trump/call for their smaller deals-won yield — they still measure
+  as a real, positive, cheap improvement (~16 ms/deal) and also feed the hint's trump/call advisor, which
+  the bot-outcome analysis alone does not price.
+- **D36. Common random numbers in the auction search.** Candidates are compared on one shared set of
+  sampled worlds. Rejected: independent sampling per candidate — same cost, strictly more variance in
+  exactly the comparison the decision turns on.
+  ~~One shared `BID_PLAY_BUDGET = 6000` for the bid, trump and call.~~ — **CORRECTED, measured:** a
+  single budget splits the three questions exactly backwards. `worldsFor` divides the budget by the
+  candidate count, so precision *falls* as the candidate list grows — but an argmax over more near-equal
+  candidates needs *more* samples, not fewer, to tell them apart. At a uniform 6000, the bid (1
+  candidate, ~115 worlds) was already over-provisioned, while the call (~10 candidates, ~11 worlds) was
+  measurably no better than the hand-count it was meant to replace (regret 3.60 vs. the heuristic's own
+  3.33). Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
+  measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), `TRUMP_PLAY_BUDGET =
+  CALL_PLAY_BUDGET = 24000` (a 150-deal hold-out on seeds disjoint from tuning: +2.47 ± 0.95 and
+  +2.60 ± 0.87 points/deal respectively). Rejected, once measured: a single shared budget for all three
+  questions. Common random numbers itself is unaffected — worlds are still shared within each question's
+  own candidate set — only their count stopped being one constant across all three.
+- **D37. The review opens on demand from the round-result modal, never automatically.** Rejected:
+  auto-opening — it would sit on top of the ready gate that three other players are waiting on.
+  **Extended by Task 14:** a deal that wins the match never reaches `roundEnd` (`match.js`'s `endRound`
+  routes it straight to `matchOver`), so the deal that decides the match — plausibly the one a player
+  most wants to review — had no review affordance at all. The identical on-demand contract (never
+  automatic, computed lazily, never displacing the modal's primary action — rematch, here, rather than
+  ready) now also lives on the match-over modal, via the same body/action sibling split Task 12 proved on
+  the round-result modal.
 
 ## Milestones
 
@@ -239,3 +320,55 @@ they amend the decisions above rather than extending them.
       see; hand secrecy is now asserted across a *sequence* of views; the PWA/mobile assertions read parsed
       CSS declarations per context instead of matching the stylesheet's exact bytes; `syncWindow` and `esc`
       are lifted out of the HTML and executed for real. Regression-checked by reverting each fix.
+
+### M10 — Coach: hints, table read, deal review, and an auction that thinks
+
+Turns the hard AI's Perfect-Information Monte Carlo search into player-facing help — a hint, a table
+read, a post-deal review — and points the same machinery back at the bots' own auction, which previously
+bid, named trump and called a partner by a linear hand-count at every difficulty. Design:
+`docs/superpowers/specs/2026-07-29-coach-design.md`. Plan: `docs/superpowers/plans/2026-07-29-coach.md`.
+Decisions D28–D37 above are this milestone's design log (C1–C10 in the spec); D35 and D36 record where
+measurement corrected the plan's numbers, not just its conclusions.
+
+- [x] Task 1: seedable RNG (`mulberry32`) threaded through the AI's internal sampling (D30); deals
+      themselves keep the CSPRNG untouched (D31).
+- [x] Task 2: `evaluateMoves` factored out of `choosePIMCCard` (D29) — one evaluator, two consumers.
+- [x] Task 3: `coach/shadow.js` — a redacted view rebuilt as a search-ready position (D28); its
+      `playedCards`/`voids` checked equal to the server's own exactly, across hundreds of sampled live
+      positions per run.
+- [x] Task 4: `coach/read.js`'s table read (D34) — points live, captured split, the bonus three, voids,
+      outstanding cards; `bonusTakenBy` relocated out of `rails.js` so there is one implementation.
+- [x] Task 5: `coach/worker.js` + `coach/client.js` — one lazily-spawned module worker, request/response
+      correlated by id, synchronous reduced-budget fallback when a worker cannot be built.
+- [x] Task 6: the `coach` room setting (D33) — host-controlled, defaults on; `coachOn()` is the one
+      predicate the lobby, the mid-match settings chip and the hint button all read, so they cannot
+      disagree about what a table has agreed to.
+- [x] Task 7: `ai/bid-search.js`, the auction search — samples whole deals to answer the bid, trump and
+      partner call. Shipped with three budgets rather than the plan's one (D36).
+- [x] Task 8: `hard` routes bid/trump/call through the search; `easy`/`normal` keep the hand-count
+      (D35). The all-`hard` regime measured healthy: contract settles higher (163.5 vs. 150.3) but no
+      runaway — 0 of 4000 deals at the 250 ceiling, redeal rate unchanged at 0.0%.
+- [x] Task 9: `coach/review.js` — re-searches each decision from the information the player had at the
+      time (D32). Its cross-checking test (against a live `shadowFromView` snapshot, not a second copy of
+      its own logic) caught two real bugs a bare card-count check would have missed: a copied-through
+      `phase` that made every rollout a no-op, and the deal's own final outcome leaking into the search
+      baseline.
+- [x] Task 10: the hint affordance (`#btn-hint`, `app/js/ui/coach.js`) in both shells.
+- [x] Task 11: the table-read panel in the rail and the mobile Score tab (D34).
+- [x] Task 12: the review panel on the round-result modal (D37) — a body/action sibling split makes "a
+      review can never displace the ready gate" true by DOM construction, not by discipline.
+- [x] Task 13: this documentation and decision log, plus the tooling fix below.
+- [x] Task 14: review the match-clinching deal (D37) — a deal that wins the match routes straight to
+      `matchOver` and never reaches `roundEnd`, so it had no review affordance; ported Task 12's
+      body/action split onto `showMatchOver`, next to (never replacing) the rematch button.
+
+**`scripts/bench-auction-search.js` fixed to stop asserting a retracted claim.** The tool behind D35/D36
+used to print a "break-even" — `(1/3)(1-set) + (2/3)(set)` — as the crux of whether the bid's 0.5
+make-probability threshold was well calibrated. That expression is an algebraic identity: exactly two of
+four seats win every deal, so it equals 50% for every set rate, which made every threshold from 0.5 to
+0.65 read as conservative. It was replaced by a genuine same-hand fork (the script's `counterfactual`
+section, which snapshots a marginal bidding decision and finishes the deal twice — once bidding, once
+passing): the marginal bid measured at **−0.35 ± 1.40 pp**, no detectable effect, leaving 0.50 and 0.55
+statistically indistinguishable and 0.50 kept as the measured incumbent, not as a winner. Task 13 deleted
+the retracted computation from the script rather than merely annotating it, so nobody re-derives a
+withdrawn argument from the tool.

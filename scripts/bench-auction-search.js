@@ -437,14 +437,20 @@ if (on("table")) {
   }
   histTable(labels, tallies);
 
-  /* The crux of "is 0.5 too loose for a symmetric table": what the declarer's own
-     make-probability was at the level it won the auction with, against whether it
-     then made it. A line is too loose if the deals bid at it are lost more often
-     than passing would have been — and passing is worth (1/3)(1-set) + (2/3)(set),
-     since the called card lands with each of the other three seats a third of the
-     time. Both sides of that comparison are printed. */
+  /* Calibration, not a break-even: what the declarer's own make-probability was
+     at the level it won the auction with, against whether it then made it. This
+     used to be followed by a comparison against (1/3)(1-set) + (2/3)(set) as "the
+     value of passing instead," presented as the crux of whether 0.5 is too loose.
+     That comparison is RETRACTED (task-8-report.md section 8.2; ROADMAP.md D35) —
+     the expression is an algebraic identity, not a counterfactual: exactly two of
+     four seats win every deal, so it equals 50% for every set rate, which made
+     every threshold from 0.5 to 0.65 read as "conservative." It also compared a
+     rate conditioned on the search liking the hand and winning the auction against
+     a rate conditioned on nothing. The real answer is the same-hand fork in the
+     `counterfactual` section below: bidding a marginal level measured at
+     -0.35 +/- 1.40 pp against passing it instead — no detectable effect, which is
+     why 0.50 stands as the incumbent rather than as a measured winner. */
   const BANDS = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.85], [0.85, 1.01]];
-  const setRate = tallies[1].set;
   console.log(`\n  all-search declarers, by the make-probability they bid the winning level on:`);
   for (const [lo, hi] of BANDS) {
     const in_ = calib.filter(r => r.prob.p >= lo && r.prob.p < hi);
@@ -452,7 +458,6 @@ if (on("table")) {
     console.log(`    p in [${lo}, ${hi === 1.01 ? "1.0" : hi})  n ${String(in_.length).padStart(5)}  contract ${mean(in_.map(r => r.bid)).toFixed(1)}` +
       `  actually made ${(100 * in_.filter(r => r.made).length / in_.length).toFixed(1)}%  (= the declaring side's deal-win rate; scoring is binary)`);
   }
-  console.log(`    passing instead is worth ${(100 * ((1 / 3) * (1 - setRate) + (2 / 3) * setRate)).toFixed(1)}% of deals at this table's ${(100 * setRate).toFixed(1)}% set rate`);
 
   /* The rows above roll out with the heuristic, which is what the search itself
      assumes — so they could be self-consistent and still wrong about the table
