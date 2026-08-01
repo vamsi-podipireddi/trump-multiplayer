@@ -201,3 +201,40 @@ test("the hint button exists in both shells and is gated on the coach setting", 
   assert.equal(hintEnabled({ settings: { coach: false }, you: { toAct: true } }), false);
   assert.equal(hintEnabled({ settings: { coach: true }, you: { toAct: false } }), false, "no hint when it is not your turn");
 });
+
+/* describeHint is pure and produces every user-facing hint string — the
+   easiest thing in coach.js to unit-test, and previously untested. Both
+   sides of the "holds"/"sets" ternary are pinned separately: invert it and a
+   defender's own success reads as "holding the contract," which is
+   backwards, not just mis-worded — a mutation node --test must not let
+   through silently. The bid branch's "of sampled deals" hedge is pinned too
+   (makeProb is a model estimate over sampled deals, not a calibrated
+   frequency — see the play branch's identical hedge), so a later edit can't
+   quietly drop it. */
+test("describeHint: text and card mark for each decision kind, including both sides of holds/sets", async () => {
+  const { describeHint } = await import("../app/js/ui/coach.js");
+
+  const declarer = { you: { seat: 0 }, declarer: 0, partner: 2 };
+  const holds = describeHint(declarer, { kind: "play", best: { card: { suit: "♠", rank: 5 }, winProb: 0.60 } });
+  assert.equal(holds.cardKey, "♠5");
+  assert.equal(holds.text, "5 of spades — holds the contract in 60% of sampled deals");
+
+  // same shape, opposite side: v.you.seat (0) is neither declarer nor partner
+  const defender = { you: { seat: 0 }, declarer: 1, partner: 3 };
+  const sets = describeHint(defender, { kind: "play", best: { card: { suit: "♥", rank: 4 }, winProb: 0.17 } });
+  assert.equal(sets.cardKey, "♥4");
+  assert.equal(sets.text, "4 of hearts — sets the contract in 17% of sampled deals");
+
+  // bid/trump/call carry no card to mark
+  const bid = describeHint({}, { kind: "bid", median: 175, target: 140, makeProb: 0.84 });
+  assert.equal(bid.cardKey, null);
+  assert.equal(bid.text, "Worth about 175 · you make 140 in 84% of sampled deals");
+
+  const trump = describeHint({}, { kind: "trump", suit: "♦" });
+  assert.equal(trump.cardKey, null);
+  assert.equal(trump.text, "Diamonds — the search's pick for trump");
+
+  const call = describeHint({}, { kind: "call", card: { suit: "♠", rank: 14 } });
+  assert.equal(call.cardKey, null);
+  assert.equal(call.text, "Ace of spades — the search's pick to call");
+});

@@ -73,7 +73,10 @@ function describeHint(v, result) {
   }
   if (result.kind === "bid") {
     const pct = Math.round(result.makeProb * 100);
-    return { cardKey: null, text: cap(`worth about ${Math.round(result.median)} · you make ${result.target} in ${pct}%`) };
+    // "of sampled deals" hedge, same as the play branch above: makeProb is a
+    // model estimate over sampled deals, not a calibrated frequency — stated
+    // unhedged it reads as a promise the search cannot actually make.
+    return { cardKey: null, text: cap(`worth about ${Math.round(result.median)} · you make ${result.target} in ${pct}% of sampled deals`) };
   }
   if (result.kind === "trump")
     return { cardKey: null, text: cap(`${SUIT_NAME[result.suit]} — the search's pick for trump`) };
@@ -103,7 +106,19 @@ function initCoach(render) {
       if (res && res.ok) { if (positionKey(latestView) === key) answer = { key, ...describeHint(v, res.result) }; }
       else if (res && res.error) answer = { key, cardKey: null, text: cap(res.error) };
       doRender();
-    }, () => { pending = false; doRender(); });
+    }, () => {
+      // A rejection is a real path, not a hypothetical one: client.js rejects
+      // every pending request when the worker dies (onerror) and again after
+      // its own 10s timeout. Without this the button just silently re-enables
+      // and the tray stays blank — the player pressed a button and deserves
+      // evidence it did something, not a wonder-if-I-mis-clicked silence.
+      // Same shape as the res.error branch above; no worker-reported reason
+      // to surface here, since a rejection's Error#message is runtime/browser
+      // text, not a string this file controls.
+      pending = false;
+      answer = { key, cardKey: null, text: cap("the hint search failed — try again") };
+      doRender();
+    });
   };
 }
 
@@ -151,4 +166,4 @@ function paintTrayLine(text) {
    clears every module's state for free. */
 function resetCoach() { pending = false; lastKey = null; answer = null; }
 
-export { hintEnabled, initCoach, renderCoach, resetCoach };
+export { hintEnabled, initCoach, renderCoach, resetCoach, describeHint };
