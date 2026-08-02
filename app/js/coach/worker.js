@@ -54,7 +54,14 @@ function gradeOneDeal(d, seat) {
   return {
     roundNumber: d.roundNumber,
     decisions: play.decisions.concat(auction.decisions),
-    skipped: auction.skipped,
+    /* No `skipped` here, deliberately. reviewAuction still reports its own —
+       that is how "not graded because the seat did not declare" is told apart
+       from "not graded because the grader broke", and test/coach.test.js
+       asserts exactly that distinction — but matchReport reads only
+       `decisions`, so threading it across this seam built a field into every
+       per-deal record that nothing downstream has ever opened. A consumer
+       that wants it (a "12 of 15 decisions gradable" line) should read it
+       from reviewAuction and say so, not inherit a payload nobody asked for. */
     /* reviewDeal's own deal-level minimum, carried up rather than dropped
        (fix round I3): the report pools card-play deltas — which have no
        noise floor and are sampled at whatever evaluateMoves' formula
@@ -159,7 +166,7 @@ function handleRequest(msg) {
       const deals = Array.isArray(msg.deals) ? msg.deals : [];
       if (!deals.length) return { id: msg.id, ok: false, error: "no finished deal to report on" };
       const graded = deals.map(d => gradeOneDeal(d, msg.seat));
-      return { id: msg.id, ok: true, result: matchReport(graded, msg.seat, msg.dealsInMatch) };
+      return { id: msg.id, ok: true, result: matchReport(graded, msg.dealsInMatch) };
     }
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
   } catch (e) {

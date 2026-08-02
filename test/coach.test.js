@@ -12,8 +12,8 @@ import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
 import { handleRequest, gradeOneDeal } from "../app/js/coach/worker.js";
 import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coach/review.js";
-import { matchReport } from "../app/js/coach/report.js";
-import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide } from "../app/js/coach/auction.js";
+import { matchReport, HEADLINE_KINDS } from "../app/js/coach/report.js";
+import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide, bestOf } from "../app/js/coach/auction.js";
 /* Deliberate exception to "consumers import the barrel" (docs/STRUCTURE.md
    rule 1), the same one test/ai.test.js:16 already takes and for the same
    reason: worldsFor is a tuning-internal deliberately kept off the barrel,
@@ -21,8 +21,8 @@ import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBan
    formula — which the review's band guard did, until fix round I6. Importing
    the real one is the whole point. */
 import { worldsFor } from "../app/js/core/engine/ai/bid-search.js";
-import { snapshotOf } from "../app/js/util/deals.js";
-import { describeReport, renderReport } from "../app/js/ui/coach.js";
+import { snapshotOf, saveDeal, loadDeals, roomKeyOf } from "../app/js/util/deals.js";
+import { describeReport, renderReport, describeMatchRecord, renderMatchRecord } from "../app/js/ui/coach.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -1053,8 +1053,8 @@ const dec = (kind, delta, grade) => ({ kind, delta, grade, roundNumber: 1 });
 test("matchReport's headline is a mean over the commensurable kinds only, so match length cannot move it and the bid cannot either", () => {
   const three = [1, 2, 3].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine"), dec("bid", 0.9, "blunder")], skipped: [] }));
   const seven = [1, 2, 3, 4, 5, 6, 7].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine"), dec("bid", 0.9, "blunder")], skipped: [] }));
-  assert.ok(Math.abs(matchReport(three, 0, 3).headline - matchReport(seven, 0, 7).headline) < 1e-10);
-  assert.ok(Math.abs(matchReport(three, 0, 3).headline - 0.1) < 1e-10, "the bid's own 0.9 delta must not enter the headline's mean");
+  assert.ok(Math.abs(matchReport(three, 3).headline - matchReport(seven, 7).headline) < 1e-10);
+  assert.ok(Math.abs(matchReport(three, 3).headline - 0.1) < 1e-10, "the bid's own 0.9 delta must not enter the headline's mean");
 });
 
 /* Fix round F1: strengthened with a discriminating bid delta (0.9, distinct
@@ -1066,7 +1066,7 @@ test("matchReport's headline is a mean over the commensurable kinds only, so mat
 test("skipped decisions stay out of the denominator, band decisions stay in, and the bid stays out of headline's own denominator", () => {
   const deals = [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("bid", 0.9, "blunder")],
                    skipped: [{ kind: "trump", roundNumber: 1, reason: "not-declarer" }] }];
-  const r = matchReport(deals, 0, 1);
+  const r = matchReport(deals, 1);
   assert.equal(r.counts.fine, 1, "the band (fine) play decision counts");
   assert.equal(r.counts.blunder, 1, "the bid decision counts too — counts stays unified across all four kinds");
   assert.equal(r.byKind.trump.n, 0, "a skip is not a decision");
@@ -1074,7 +1074,7 @@ test("skipped decisions stay out of the denominator, band decisions stay in, and
 });
 
 test("headline is null, not zero, when nothing was graded", () => {
-  const r = matchReport([{ roundNumber: 1, decisions: [], skipped: [] }], 0, 1);
+  const r = matchReport([{ roundNumber: 1, decisions: [], skipped: [] }], 1);
   assert.equal(r.headline, null);
   assert.equal(r.counts.fine, 0);
 });
@@ -1086,13 +1086,13 @@ test("headline is null, not zero, when nothing was graded", () => {
    and the second must not print as the first just because the bid alone had
    something to say. */
 test("headline is null when only the bid was graded — that is not the same as a flawless play/trump/call record", () => {
-  const r = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.9, "blunder")], skipped: [] }], 0, 1);
+  const r = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.9, "blunder")], skipped: [] }], 1);
   assert.equal(r.headline, null, "no commensurable decision was graded, even though a bid blunder was");
   assert.equal(r.counts.blunder, 1, "the bid still counts toward the shared ordinal grade vocabulary");
 });
 
 test("coverage reports missing deals rather than hiding them", () => {
-  const r = matchReport([{ roundNumber: 2, decisions: [dec("play", 0.3, "blunder")], skipped: [] }], 0, 5);
+  const r = matchReport([{ roundNumber: 2, decisions: [dec("play", 0.3, "blunder")], skipped: [] }], 5);
   assert.equal(r.coverage.dealsGraded, 1);
   assert.equal(r.coverage.dealsInMatch, 5);
 });
@@ -1109,7 +1109,7 @@ test("worst is the two costliest among the commensurable kinds across the whole 
     { roundNumber: 1, decisions: [dec("play", 0.30, "blunder"), dec("play", 0.05, "fine")], skipped: [] },
     { roundNumber: 2, decisions: [dec("call", 0.40, "blunder"), dec("bid", 0.90, "blunder")], skipped: [] },
   ];
-  const r = matchReport(deals, 0, 2);
+  const r = matchReport(deals, 2);
   assert.equal(r.worst.length, 2);
   assert.equal(r.worst[0].delta, 0.40);
   assert.equal(r.worst[1].delta, 0.30);
@@ -1138,7 +1138,7 @@ const realPlayDecision = (delta, grade) => ({
 
 test("matchReport stamps kind and roundNumber onto a real reviewDeal-shaped decision, so worst never carries an undefined field", () => {
   const deals = [{ roundNumber: 7, decisions: [realPlayDecision(0.22, "mistake")], skipped: [] }];
-  const r = matchReport(deals, 0, 1);
+  const r = matchReport(deals, 1);
   assert.equal(r.worst.length, 1);
   assert.equal(r.worst[0].kind, "play", "a reviewDeal decision with no kind of its own must be inferred as play");
   assert.equal(r.worst[0].roundNumber, 7, "roundNumber must come from the owning deal record — the decision itself carries none");
@@ -1153,7 +1153,7 @@ test("matchReport stamps kind and roundNumber onto a real reviewDeal-shaped deci
    is fixed too. */
 test("renderReport never prints an undefined kind or deal number for a real reviewDeal decision", () => {
   const deals = [{ roundNumber: 4, decisions: [realPlayDecision(0.22, "mistake"), dec("bid", 0.9, "blunder")], skipped: [] }];
-  const report = matchReport(deals, 0, 1);
+  const report = matchReport(deals, 1);
   const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.doesNotMatch(html, /undefined/, 'no field the panel prints may ever render as the literal string "undefined"');
   assert.match(html, /play · deal 4/);
@@ -1164,7 +1164,7 @@ test("renderReport never prints an undefined kind or deal number for a real revi
    third row merged into it under the same "costliest" caption. */
 test("renderReport prints the bid's own worst separately from the commensurable 'Costliest decisions' list, never merged", () => {
   const deals = [{ roundNumber: 1, decisions: [realPlayDecision(0.10, "mistake"), dec("bid", 0.30, "blunder")], skipped: [] }];
-  const report = matchReport(deals, 0, 1);
+  const report = matchReport(deals, 1);
   const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(html, /Costliest decisions/);
   assert.match(html, /Furthest off the line/);
@@ -1449,7 +1449,7 @@ test("the worker refuses a report with no deals rather than reporting zero", () 
 });
 
 test("describeReport states coverage even when it is complete", () => {
-  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0, "fine")], skipped: [] }], 0, 1);
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0, "fine")], skipped: [] }], 1);
   const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(s.coverage, /1 of 1/);
 });
@@ -1461,7 +1461,7 @@ test("describeReport states coverage even when it is complete", () => {
    headline percentage itself is a mean over only the one commensurable
    (play) decision; the bid decision is graded but not part of that mean. */
 test("describeReport's headline states its own commensurable count, not the unified counts sum", () => {
-  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0.1, "mistake"), dec("bid", 0.9, "blunder")], skipped: [] }], 0, 1);
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0.1, "mistake"), dec("bid", 0.9, "blunder")], skipped: [] }], 1);
   const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(s.headline, /over 1 decision\./,
     "the headline's own count must be the one commensurable (play) decision, not both graded decisions");
@@ -1473,7 +1473,7 @@ test("describeReport's headline states its own commensurable count, not the unif
    headline's phrasing for the bid would misstate what byKind.bid.meanDelta
    actually measures. */
 test("describeReport words the bid's own line as distance from the line, never as probability given away", () => {
-  const report = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.3, "blunder")], skipped: [] }], 0, 1);
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.3, "blunder")], skipped: [] }], 1);
   const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(s.bidNote, /off the search's line/);
   assert.doesNotMatch(s.bidNote, /probability given away/i);
@@ -1653,7 +1653,7 @@ test("a distance inside its own band grades fine at exactly zero, and never surf
      list at all — not one row at 0.0%, which reads as a cost that was
      measured and found to be zero rather than a decision that was fine. */
   const flawless = matchReport(
-    [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("trump", 0, "fine"), dec("bid", 0, "fine")], skipped: [] }], 0, 1);
+    [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("trump", 0, "fine"), dec("bid", 0, "fine")], skipped: [] }], 1);
   assert.equal(flawless.worst.length, 0);
   assert.equal(flawless.worstBid.length, 0);
   const html = renderReport(flawless, { names: ["A", "B", "C", "D"] }, 0);
@@ -1698,7 +1698,7 @@ const S10 = { suit: "♠", rank: 10 }, SQ = { suit: "♠", rank: 12 }, HA = { su
 
 test("renderReport names the card play the reader made and the one the search preferred", () => {
   const report = matchReport([{ roundNumber: 4, samples: 24, skipped: [],
-    decisions: [playDec(3, 0.22, "mistake", S10, SQ)] }], 0, 1);
+    decisions: [playDec(3, 0.22, "mistake", S10, SQ)] }], 1);
   const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.doesNotMatch(html, /undefined/);
   assert.match(html, /You played 10 of spades; the search preferred queen of spades\./);
@@ -1707,7 +1707,7 @@ test("renderReport names the card play the reader made and the one the search pr
 
 test("renderReport tells two card plays from one deal apart", () => {
   const report = matchReport([{ roundNumber: 5, samples: 24, skipped: [],
-    decisions: [playDec(2, 0.30, "blunder", S10, SQ), playDec(9, 0.25, "mistake", HA, SQ)] }], 0, 1);
+    decisions: [playDec(2, 0.30, "blunder", S10, SQ), playDec(9, 0.25, "mistake", HA, SQ)] }], 1);
   const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(html, /play · deal 5 · trick 2/);
   assert.match(html, /play · deal 5 · trick 9/);
@@ -1718,12 +1718,12 @@ test("renderReport tells two card plays from one deal apart", () => {
 
 test("renderReport names the trump and the call in each kind's own vocabulary", () => {
   const trumpR = matchReport([{ roundNumber: 2, skipped: [], decisions: [
-    { kind: "trump", roundNumber: 2, played: "♠", best: "♥", playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 0, 1);
+    { kind: "trump", roundNumber: 2, played: "♠", best: "♥", playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 1);
   assert.match(renderReport(trumpR, { names: ["A", "B", "C", "D"] }, 0),
     /You chose spades; the search preferred hearts\./);
 
   const callR = matchReport([{ roundNumber: 2, skipped: [], decisions: [
-    { kind: "call", roundNumber: 2, played: S10, best: HA, playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 0, 1);
+    { kind: "call", roundNumber: 2, played: S10, best: HA, playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 1);
   const html = renderReport(callR, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(html, /You called 10 of spades; the search preferred ace of hearts\./);
   assert.doesNotMatch(html, /You played/, "a call is called, not played — the review's own vocabulary");
@@ -1736,7 +1736,7 @@ test("renderReport says what was bid and what the search's line was, in the bid'
   });
   // passed on a hand the search would have bid, and bid on one it would have passed
   const report = matchReport([{ roundNumber: 3, skipped: [], decisions: [bid(3, null, 180, 0.30)] },
-                              { roundNumber: 6, skipped: [], decisions: [bid(6, 200, null, 0.25)] }], 0, 2);
+                              { roundNumber: 6, skipped: [], decisions: [bid(6, 200, null, 0.25)] }], 2);
   const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.doesNotMatch(html, /undefined/);
   assert.match(html, /You passed; the search&#39;s line was to bid 180\./);
@@ -1755,7 +1755,7 @@ test("renderReport says what was bid and what the search's line was, in the bid'
    in test/client.test.js is. */
 test("describeReport caveats a thinly-sampled card play and doesn't caveat a full one, right at the boundary", () => {
   const at = (samples) => describeReport(
-    matchReport([{ roundNumber: 1, samples, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 0, 1),
+    matchReport([{ roundNumber: 1, samples, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 1),
     { names: ["A", "B", "C", "D"] }, 0);
 
   const thin = at(19);
@@ -1771,13 +1771,13 @@ test("describeReport caveats a thinly-sampled card play and doesn't caveat a ful
 
   // and a report with no card play graded at all says nothing about sampling
   const none = describeReport(
-    matchReport([{ roundNumber: 1, skipped: [], decisions: [dec("bid", 0.3, "blunder")] }], 0, 1),
+    matchReport([{ roundNumber: 1, skipped: [], decisions: [dec("bid", 0.3, "blunder")] }], 1),
     { names: ["A", "B", "C", "D"] }, 0);
   assert.strictEqual(none.note, null, "a caveat about card-play sample size means nothing next to a report with no card play in it");
 
   /* …and it has to actually reach the panel. A caveat computed and then not
      painted is exactly the state this fix round found describeReport in. */
-  const thinReport = matchReport([{ roundNumber: 1, samples: 19, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 0, 1);
+  const thinReport = matchReport([{ roundNumber: 1, samples: 19, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 1);
   assert.match(renderReport(thinReport, { names: ["A", "B", "C", "D"] }, 0), /Rough read/,
     "the caveat must be rendered, not merely described");
 });
@@ -1792,4 +1792,164 @@ test("a real match's report carries the thinnest card-play sample all the way to
     "reviewDeal's own deal-level minimum must survive gradeOneDeal's merge — describeReport has nowhere else to get it");
   const s = describeReport(res.result, v, seat);
   assert.ok(s.note, "a report over real card play must always state what its card-play numbers are worth");
+});
+
+// ---------------------------------------------------------------------------
+// M11 follow-ups. The report card's whole-branch review passed with four gaps
+// left open, each judged non-blocking and none recorded in git: a snapshot
+// that carried no seat, three duplicated spellings the branch introduced,
+// data threaded across seams and never read, and a zero-coverage panel whose
+// only offer was a retry that could not succeed. The tests below are what
+// stops each from coming back.
+
+/* util/deals.js reaches for localStorage as a bare global inside every
+   function and never at module scope (STRUCTURE.md rule 5) — which is exactly
+   what makes it stubbable from here. Enough of the API for saveDeal, its
+   evict() sweep, and loadDeals: getItem/setItem/removeItem plus length and
+   key(i), since evict walks the whole store by index. */
+function stubStorage() {
+  const map = new Map();
+  globalThis.localStorage = {
+    getItem: k => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => { map.set(k, String(v)); },
+    removeItem: k => { map.delete(k); },
+    get length() { return map.size; },
+    key: i => { const ks = [...map.keys()]; return i < ks.length ? ks[i] : null; },
+  };
+  return map;
+}
+
+test("a snapshot is stamped with the seat that played it, and never guesses one", () => {
+  const { v, seat } = finishedDealView();
+  const s = snapshotOf({ ...v, you: { seat } });
+  assert.equal(s.seat, seat, "the seat the deal was played in has to ride with the deal");
+  assert.equal(s.you, undefined, "…and still no hand: the seat is a number, not a view of cards");
+  const { you, ...seatless } = v;                 // publicView's own shape: no `you` at all
+  assert.equal(snapshotOf(seatless).seat, null,
+    "a view with no seat of its own stamps null rather than inventing one");
+});
+
+/* The gap this closes: stand mid-match, leave, rejoin into a DIFFERENT free
+   seat, and every deal stored under the old seat was graded as the new one at
+   match end — a bot's decisions charged to the player, reported at full
+   coverage (the one thing D45 forbids). Unreachable through the UI today (the
+   sit control hides once a match starts), which is why it was left open, and
+   one stamped field plus one filter is the whole fix. */
+test("loadDeals hands back one seat's deals, so a seat change cannot inherit another seat's", () => {
+  stubStorage();
+  saveDeal("ROOM", "m1", { seat: 0, roundNumber: 1 });
+  saveDeal("ROOM", "m1", { seat: 0, roundNumber: 3 });
+  saveDeal("ROOM", "m1", { seat: 2, roundNumber: 2 });
+  assert.deepEqual(loadDeals("ROOM", "m1", 0).map(d => d.roundNumber), [1, 3],
+    "seat 0 gets its own two deals, still in round order");
+  assert.deepEqual(loadDeals("ROOM", "m1", 2).map(d => d.roundNumber), [2]);
+  assert.deepEqual(loadDeals("ROOM", "m1", 1), [], "a seat that played none of them gets none of them");
+});
+
+test("a snapshot written before the seat stamp existed is graded as nobody's", () => {
+  stubStorage();
+  saveDeal("ROOM", "m1", { roundNumber: 1 });                 // a record from before this field
+  saveDeal("ROOM", "m1", { seat: 0, roundNumber: 2 });
+  assert.deepEqual(loadDeals("ROOM", "m1", 0).map(d => d.roundNumber), [2],
+    "an unstamped deal cannot be shown to be this seat's, so coverage states it as missing rather than grading it");
+  assert.deepEqual(loadDeals("ROOM", "m1"), [],
+    "and a caller that names no seat gets nothing — never the unstamped ones by default");
+});
+
+test("roomKeyOf is the one spelling of the deals key, solo's own view included", () => {
+  assert.equal(roomKeyOf({ room: { code: "ABCD" } }), "ABCD");
+  // solo.js builds exactly this: a room object that carries no code at all
+  assert.equal(roomKeyOf({ room: { isHost: true, hostName: null } }), "solo");
+  assert.equal(roomKeyOf({}), "solo");
+  assert.equal(roomKeyOf(null), "solo");
+});
+
+test("gradeOneDeal carries no skipped list across the worker seam", () => {
+  const empty = { roundNumber: 1, tricks: [], auction: [], declarer: null, names: ["A", "B", "C", "D"],
+                  scores: [0, 0, 0, 0], consts: { TARGET_GAMES: 5 } };
+  const merged = gradeOneDeal(empty, 0);
+  assert.ok(Array.isArray(merged.decisions), "the merge still produces the one field matchReport reads");
+  assert.equal("skipped" in merged, false,
+    "reviewAuction still reports its own skips — that is how 'not graded because you did not declare' stays " +
+    "distinguishable from 'not graded because the grader broke' — but nothing downstream of here has ever read " +
+    "them, so they do not get to ride in every per-deal record");
+  // …and the distinction itself is still available where it is actually made
+  assert.ok(Array.isArray(reviewAuction(empty, 0, {}).skipped));
+});
+
+test("coverage reports what was graded, and no seat", () => {
+  const r = matchReport([{ roundNumber: 1, decisions: [dec("play", 0, "fine")] }], 1);
+  assert.deepEqual(Object.keys(r.coverage).sort(), ["dealsGraded", "dealsInMatch"],
+    "the seat was threaded through three files to be echoed back to a caller that already knew it");
+});
+
+test("bestOf is the one argmax behind both the trump and call grades", () => {
+  const c = (suit, makeProb) => ({ suit, makeProb });
+  assert.equal(bestOf([c("♠", 0.4), c("♥", 0.7), c("♦", 0.55)]).suit, "♥");
+  assert.equal(bestOf([c("♠", 0.7), c("♥", 0.7)]).suit, "♠", "a tie keeps the first — strict >, one rule, both graders");
+  assert.equal(bestOf([]), null, "an empty candidate list is null, not a throw from a seedless reduce");
+  assert.equal(bestOf(undefined), null);
+});
+
+// ---- the zero-coverage panel (ui/coach.js) --------------------------------
+/* What used to happen here: the panel asked the worker anyway, got "no
+   finished deal to report on", and printed it under a Try again button that
+   re-read the same empty storage — an offer that could never succeed — while
+   the sentence explaining the emptiness lived in describeReport's `partial`
+   line, which only ever renders on the path that HAS deals. */
+const recordView = (dealHistory) => ({ names: ["You", "West", "North", "East"], dealHistory });
+const histDeal = (roundNumber, declarer, partner, bid, made, dPts) =>
+  ({ roundNumber, declarer, partner, bid, made, dPts, winners: made ? [declarer, partner] : [1, 3] });
+
+test("the zero-coverage panel states coverage at zero rather than leaving it to be inferred", () => {
+  const s = describeMatchRecord(recordView([histDeal(1, 0, 2, 180, true, 195), histDeal(2, 1, 3, 170, false, 140)]), 0);
+  assert.match(s.coverage, /graded 0 of 2 deals/);
+  assert.match(s.why, /stored in this browser/i, "the reader is told WHY it is empty, not just that it is");
+});
+
+test("the zero-coverage panel prints the match record the view always carries", () => {
+  const v = recordView([histDeal(1, 0, 2, 180, true, 195), histDeal(2, 1, 3, 170, false, 140), histDeal(3, 2, 0, 165, true, 170)]);
+  const s = describeMatchRecord(v, 0);
+  assert.equal(s.deals.length, 3, "every deal the match recorded — this half needs no local storage at all (D38)");
+  assert.match(s.deals[0].line, /^You bid 180/, "the seat's own contract reads in the first person");
+  assert.equal(s.deals[0].verdict, "made");
+  assert.match(s.deals[1].line, /West bid 170 with East/, "…and someone else's names both sides");
+  assert.equal(s.deals[1].verdict, "set");
+  assert.match(s.deals[2].line, /North bid 165 with you/, "…as does one the seat was called into");
+});
+
+test("the zero-coverage panel offers nothing to retry", () => {
+  const html = renderMatchRecord(recordView([histDeal(1, 0, 2, 180, true, 195)]), 0);
+  assert.doesNotMatch(html, /<button/, "nothing here is retryable: a second look reads the same empty storage");
+  assert.doesNotMatch(html, /undefined/, "the C1 class of bug: no half-built sentence may reach the panel");
+  assert.match(html, /graded 0 of 1 deal\b/);
+  assert.match(html, /You bid 180 and your side captured 195\./);
+});
+
+test("a match with no finished deal says so, and shows no record", () => {
+  const s = describeMatchRecord(recordView([]), 0);
+  assert.match(s.coverage, /graded 0 of 0 deals/);
+  assert.match(s.why, /nothing to grade/i);
+  assert.deepEqual(s.deals, []);
+  const html = renderMatchRecord(recordView([]), 0);
+  assert.doesNotMatch(html, /What this match recorded/, "an empty record prints no header over an empty list");
+  assert.doesNotMatch(html, /<button/);
+});
+
+test("a view that never carried a deal history still renders", () => {
+  // solo.js and screens/game.js both build views from publicView, which always
+  // carries the field — but a room restored from storage predating it does not.
+  assert.match(renderMatchRecord({ names: ["A", "B", "C", "D"] }, 0), /graded 0 of 0 deals/);
+  assert.match(renderMatchRecord(null, 0), /graded 0 of 0 deals/);
+});
+
+test("the panel's own kind rows are HEADLINE_KINDS' membership, not a second spelling of it", () => {
+  const report = matchReport([{ roundNumber: 1, decisions: [
+    dec("play", 0.1, "mistake"), dec("trump", 0.2, "blunder"), dec("call", 0.05, "fine"), dec("bid", 0.3, "blunder")] }], 1);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  for (const k of HEADLINE_KINDS)
+    assert.ok(report.byKind[k].n > 0 && html.includes(`<span>${{ play: "Card play", trump: "Trump", call: "The call" }[k]}</span>`),
+      `${k} is commensurable, so the card owes it a row`);
+  assert.equal(describeReport(report, { names: ["A", "B", "C", "D"] }, 0).headline.match(/over (\d+) decisions/)[1], "3",
+    "the headline's own count is HEADLINE_KINDS' three, never the four graded decisions");
 });

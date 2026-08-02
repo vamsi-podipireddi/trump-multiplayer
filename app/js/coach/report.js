@@ -39,7 +39,13 @@ const kindOf = (d) => d.kind || "play";
    headline as a mean over all four." */
 const HEADLINE_KINDS = new Set(["play", "trump", "call"]);
 
-function matchReport(deals, seat, dealsInMatch) {
+/* No `seat` parameter. Every decision here is already this seat's — util/deals.js
+   stamps the seat on each snapshot and loadDeals filters on it, so the seat is
+   established before a deal ever reaches the grader, and nothing in this
+   arithmetic varies by it. It was carried this far only to be re-emitted in
+   `coverage`, where no consumer ever read it: a seat threaded through three
+   files to be echoed back to a caller who already knew it. */
+function matchReport(deals, dealsInMatch) {
   /* Normalised once, here, rather than left for each consumer below (or
      worse, each consumer of THIS function's own return value) to
      rediscover: reviewDeal's own decisions carry neither `kind` nor
@@ -108,7 +114,6 @@ function matchReport(deals, seat, dealsInMatch) {
     coverage: {
       dealsGraded: (deals || []).length,
       dealsInMatch: dealsInMatch != null ? dealsInMatch : (deals || []).length,
-      seat,
     },
   };
 }
