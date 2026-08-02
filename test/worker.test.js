@@ -8,9 +8,28 @@
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert";
+import { writeMatchStats } from "../src/worker/stats.js";
 
 const load = () => import("../src/worker/index.js");
 const req = (url, headers) => new Request(url, { headers: headers || {} });
+
+/* A minimal D1 fake for the batched INSERT ... VALUES (?, ...) writeMatchStats
+   issues: it reads the column list straight out of the SQL text and zips it
+   with the bound args, so each captured row is a plain object keyed by
+   column name — no column this fake wasn't told about ever appears on it. */
+function fakeD1(captured) {
+  return {
+    prepare(sql) {
+      const cols = sql.slice(sql.indexOf("(") + 1, sql.indexOf(")")).split(",").map(s => s.trim());
+      return {
+        bind: (...args) => ({
+          run: async () => { captured.push(Object.fromEntries(cols.map((c, i) => [c, args[i]]))); },
+        }),
+      };
+    },
+    batch: (stmts) => Promise.all(stmts.map(s => s.run())),
+  };
+}
 
 test("/ws requires an upgrade header", async () => {
   const { default: worker } = await load();
@@ -88,4 +107,35 @@ test("everything else falls through to static assets", async () => {
   assert.strictEqual((await worker.fetch(req("https://trump.example/"), {})).status, 404); // no asset binding
   const health = await (await worker.fetch(req("https://trump.example/health"), env)).json();
   assert.deepStrictEqual(health, { ok: true });
+});
+
+test("stats count every deal's bids, not just the last one's", async () => {
+  const captured = [];
+  const env = { DB: fakeD1(captured) };
+  const room = {
+    code: "TEST",
+    seatOwner: [ "p0", "p1", "p2", "p3" ],
+    players: { p0: { uid: "u0", name: "A" }, p1: { uid: "u1", name: "B" },
+               p2: { uid: "u2", name: "C" }, p3: { uid: "u3", name: "D" } },
+    G: {
+      phase: "matchOver", matchId: "abc12345", scores: [3, 1, 3, 1],
+      dealHistory: [
+        { roundNumber: 1, declarer: 0, partner: 2, bid: 150, made: true,  dPts: 160, winners: [0, 2] },
+        { roundNumber: 2, declarer: 0, partner: 1, bid: 170, made: false, dPts: 140, winners: [2, 3] },
+        { roundNumber: 3, declarer: 1, partner: 3, bid: 130, made: true,  dPts: 200, winners: [1, 3] },
+      ],
+      lastResult: { declarer: 1, made: true },
+    },
+  };
+  await writeMatchStats(env, room);
+  const seat0 = captured.find(r => r.uid === "u0");
+  assert.equal(seat0.bids_won, 2, "seat 0 declared twice");
+  assert.equal(seat0.bids_made, 1, "seat 0 made one of them");
+  assert.equal(seat0.deals, 3);
+  assert.equal(seat0.match_id, "abc12345");
+  const seat1 = captured.find(r => r.uid === "u1");
+  assert.equal(seat1.bids_won, 1);
+  assert.equal(seat1.bids_made, 1);
+  // the old columns must no longer be written at all
+  assert.equal("was_declarer" in seat0, false);
 });

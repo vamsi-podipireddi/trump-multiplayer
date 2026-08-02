@@ -20,10 +20,15 @@ CREATE TABLE IF NOT EXISTS matches (
   name          TEXT    NOT NULL,          -- display name at match end
   room          TEXT    NOT NULL,
   won           INTEGER NOT NULL DEFAULT 0, -- 1 if this seat tied/held the top deal count
-  was_declarer  INTEGER NOT NULL DEFAULT 0, -- 1 if this seat won the final deal's bid
-  bid_made      INTEGER NOT NULL DEFAULT 0, -- 1 if that contract was made
+  was_declarer  INTEGER NOT NULL DEFAULT 0, -- DEPRECATED: final deal only; no longer written
+  bid_made      INTEGER NOT NULL DEFAULT 0, -- DEPRECATED: final deal only; no longer written
+  match_id      TEXT,                        -- groups the seats of one match
+  deals         INTEGER NOT NULL DEFAULT 0,  -- deals played in that match
+  bids_won      INTEGER NOT NULL DEFAULT 0,  -- deals this seat declared
+  bids_made     INTEGER NOT NULL DEFAULT 0,  -- of those, contracts made
   ts            INTEGER NOT NULL            -- epoch ms
 );
 
 CREATE INDEX IF NOT EXISTS matches_uid_idx ON matches (uid);
 CREATE INDEX IF NOT EXISTS matches_ts_idx  ON matches (ts);
+CREATE INDEX IF NOT EXISTS matches_match_idx ON matches (match_id);

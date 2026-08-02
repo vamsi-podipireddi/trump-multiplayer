@@ -5,7 +5,12 @@ async function readStats(env, uid) {
   if (!uid) return json({ error: "missing uid" }, 400);
   try {
     const row = await env.DB.prepare(
-      "SELECT COUNT(*) AS games, SUM(won) AS wins, SUM(was_declarer) AS bidsWon, SUM(bid_made) AS bidsMade FROM matches WHERE uid = ?"
+      "SELECT COUNT(*) AS games, SUM(won) AS wins, " +
+      /* COALESCE, not a filter: rows written before the migration keep
+         contributing their still-correct games and wins, and contribute zero —
+         rather than a wrong number — to the bid counters they never held. */
+      "SUM(COALESCE(bids_won, 0)) AS bidsWon, SUM(COALESCE(bids_made, 0)) AS bidsMade " +
+      "FROM matches WHERE uid = ?"
     ).bind(uid).first();
     return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0 });
   } catch {
@@ -22,15 +27,21 @@ async function writeMatchStats(env, room) {
   const max = Math.max(...G.scores);
   try {
     const stmts = [];
+    const history = G.dealHistory || [];
     for (let seat = 0; seat < 4; seat++) {
       const owner = room.seatOwner[seat];
       const p = owner != null ? room.players[owner] : null;
       if (!p || !p.uid) continue;
-      const r = G.lastResult || {};
+      /* Every deal this seat declared, not just the last one — the bug this
+         replaces read G.lastResult, so a player who won four bids and made all
+         four then lost the fifth deal recorded bidsWon: 0. */
+      const declared = history.filter(d => d.declarer === seat);
       stmts.push(env.DB.prepare(
-        "INSERT INTO matches (uid, name, room, won, was_declarer, bid_made, ts) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO matches (uid, name, room, won, match_id, deals, bids_won, bids_made, ts) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(p.uid, p.name, room.code, G.scores[seat] === max ? 1 : 0,
-             r.declarer === seat ? 1 : 0, r.declarer === seat && r.made ? 1 : 0, Date.now()));
+             G.matchId || null, history.length, declared.length,
+             declared.filter(d => d.made).length, Date.now()));
     }
     if (stmts.length) await env.DB.batch(stmts);
   } catch { /* stats are best-effort */ }
