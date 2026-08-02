@@ -81,12 +81,20 @@ test("/stats degrades to unavailable without a D1 binding, and reports totals wi
   const env = {
     DB: {
       prepare(sql) {
-        return { bind: (...args) => { bound.push([sql, args]); return { first: async () => ({ games: 7, wins: 3, bidsWon: 2, bidsMade: 1 }) }; } };
+        return {
+          bind: (...args) => {
+            bound.push([sql, args]);
+            return {
+              first: async () => ({ games: 7, wins: 3, bidsWon: 2, bidsMade: 1 }),
+              all: async () => ({ results: [] }), // no matches on record for the recent-form query
+            };
+          },
+        };
       },
     },
   };
   const res = await (await worker.fetch(req("https://trump.example/stats?uid=player-1"), env)).json();
-  assert.deepStrictEqual(res, { available: true, games: 7, wins: 3, bidsWon: 2, bidsMade: 1 });
+  assert.deepStrictEqual(res, { available: true, games: 7, wins: 3, bidsWon: 2, bidsMade: 1, recentForm: null });
   assert.strictEqual(bound[0][1][0], "player-1", "uid must be bound as a parameter, never interpolated");
   assert.ok(/WHERE uid = \?/.test(bound[0][0]), "stats query must be parameterised");
 
@@ -114,6 +122,7 @@ test("stats count every deal's bids, not just the last one's", async () => {
   const env = { DB: fakeD1(captured) };
   const room = {
     code: "TEST",
+    settings: { difficulty: "normal", targetDeals: 5, turnTimerSec: 45, coach: true },
     seatOwner: [ "p0", "p1", "p2", "p3" ],
     players: { p0: { uid: "u0", name: "A" }, p1: { uid: "u1", name: "B" },
                p2: { uid: "u2", name: "C" }, p3: { uid: "u3", name: "D" } },
@@ -138,4 +147,129 @@ test("stats count every deal's bids, not just the last one's", async () => {
   assert.equal(seat1.bids_made, 1);
   // the old columns must no longer be written at all
   assert.equal("was_declarer" in seat0, false);
+});
+
+test("writeMatchStats records the match's difficulty and whether it was mixed mid-match", async () => {
+  const captured = [];
+  const env = { DB: fakeD1(captured) };
+  const room = {
+    code: "TEST",
+    settings: { difficulty: "hard", targetDeals: 5, turnTimerSec: 45, coach: true },
+    seatOwner: [ "p0", "p1", "p2", "p3" ],
+    players: { p0: { uid: "u0", name: "A" }, p1: { uid: "u1", name: "B" },
+               p2: { uid: "u2", name: "C" }, p3: { uid: "u3", name: "D" } },
+    G: {
+      phase: "matchOver", matchId: "mix12345", scores: [3, 1, 3, 1],
+      _difficultyMixed: true, // handlers.js sets this when the host switches tiers mid-match
+      dealHistory: [
+        { roundNumber: 1, declarer: 0, partner: 2, bid: 150, made: true, dPts: 160, winners: [0, 2] },
+      ],
+    },
+  };
+  await writeMatchStats(env, room);
+  const seat0 = captured.find(r => r.uid === "u0");
+  assert.equal(seat0.difficulty, "hard", "difficulty comes from room.settings, the value in effect at match end");
+  assert.equal(seat0.difficulty_mixed, 1, "written as an integer, like won — D1/SQLite has no boolean type");
+
+  // A match whose difficulty was never touched must write a clean 0, not an
+  // undefined/falsy-but-wrong value — G._difficultyMixed is simply absent.
+  const captured2 = [];
+  const env2 = { DB: fakeD1(captured2) };
+  const room2 = {
+    code: "TEST",
+    settings: { difficulty: "easy", targetDeals: 5, turnTimerSec: 45, coach: true },
+    seatOwner: [ "p0", "p1", "p2", "p3" ],
+    players: { p0: { uid: "u0", name: "A" }, p1: { uid: "u1", name: "B" },
+               p2: { uid: "u2", name: "C" }, p3: { uid: "u3", name: "D" } },
+    G: {
+      phase: "matchOver", matchId: "clean1234", scores: [3, 1, 3, 1],
+      dealHistory: [
+        { roundNumber: 1, declarer: 0, partner: 2, bid: 150, made: true, dPts: 160, winners: [0, 2] },
+      ],
+    },
+  };
+  await writeMatchStats(env2, room2);
+  const clean0 = captured2.find(r => r.uid === "u0");
+  assert.equal(clean0.difficulty, "easy");
+  assert.equal(clean0.difficulty_mixed, 0, "never marked mixed on G means a written 0, not undefined/null");
+});
+
+test("/stats recent form scopes to one difficulty instead of pooling — a fixture where pooling would read as improvement", async () => {
+  const { default: worker } = await load();
+  /* 5 EASY wins first (oldest), then 3 HARD matches most recently, won only
+     once. Pooling all 8 reads like a strong 75% record; the truth for the
+     tier the player is actually about to face (hard, since that's their most
+     recent match) is 1-in-3 — exactly the "a run of easy matches would read
+     as improvement" failure mode the brief warned about, just relocated from
+     match length to difficulty. Already in ts-DESC order, as a real
+     `ORDER BY ts DESC` would hand back. */
+  const rows = [
+    { ts: 3, difficulty: "hard", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: 2, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 1, bids_made: 0 },
+    { ts: 1, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 0, bids_made: 0 },
+    { ts: -1, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: -2, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: -3, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: -4, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: -5, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+  ];
+  const totals = rows.reduce((a, r) => ({ games: a.games + 1, wins: a.wins + r.won,
+    bidsWon: a.bidsWon + r.bids_won, bidsMade: a.bidsMade + r.bids_made }),
+    { games: 0, wins: 0, bidsWon: 0, bidsMade: 0 });
+  const env = { DB: {
+    prepare() {
+      return { bind: () => ({ first: async () => totals, all: async () => ({ results: rows }) }) };
+    },
+  } };
+  const res = await (await worker.fetch(req("https://trump.example/stats?uid=player-1"), env)).json();
+  assert.equal(res.available, true);
+  assert.deepStrictEqual(res.recentForm, { difficulty: "hard", n: 3, wins: 1, bidsWon: 2, bidsMade: 1 },
+    "scoped to the most recent tier only, not every row on record");
+  assert.notEqual(res.recentForm.wins / res.recentForm.n, res.wins / res.games,
+    "pooled and scoped must disagree, or this fixture proves nothing");
+});
+
+test("/stats recent form excludes matches flagged difficulty_mixed from the count", async () => {
+  const { default: worker } = await load();
+  const rows = [
+    { ts: 4, difficulty: "hard", difficulty_mixed: 1, won: 1, bids_won: 1, bids_made: 1 }, // most recent, but mixed
+    { ts: 3, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 0, bids_made: 0 },
+    { ts: 2, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 0, bids_made: 0 },
+    { ts: 1, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 0, bids_made: 0 },
+  ];
+  const env = { DB: {
+    prepare() {
+      return { bind: () => ({
+        first: async () => ({ games: 4, wins: 1, bidsWon: 1, bidsMade: 1 }),
+        all: async () => ({ results: rows }),
+      }) };
+    },
+  } };
+  const res = await (await worker.fetch(req("https://trump.example/stats?uid=player-1"), env)).json();
+  assert.deepStrictEqual(res.recentForm, { difficulty: "hard", n: 3, wins: 0, bidsWon: 0, bidsMade: 0 },
+    "the mixed match must not leak into the tier's count — n stays 3 (not 4), wins stays 0 (not 1)");
+});
+
+test("/stats recent form says nothing when the current tier does not have enough data yet", async () => {
+  const { default: worker } = await load();
+  const rows = [
+    { ts: 12, difficulty: "hard", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    { ts: 11, difficulty: "hard", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+    // only 2 "hard" matches — plenty of older "easy" history doesn't help,
+    // since it isn't the tier a headline would even be about
+    ...Array.from({ length: 10 }, (_, i) => ({ ts: i, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 })),
+  ];
+  const env = { DB: {
+    prepare() {
+      return { bind: () => ({
+        first: async () => ({ games: 12, wins: 12, bidsWon: 12, bidsMade: 12 }),
+        all: async () => ({ results: rows }),
+      }) };
+    },
+  } };
+  const res = await (await worker.fetch(req("https://trump.example/stats?uid=player-1"), env)).json();
+  // strictEqual, not equal: undefined == null is true under loose equality,
+  // which would let this pass vacuously if the key were simply missing
+  // instead of explicitly null.
+  assert.strictEqual(res.recentForm, null, "2 same-tier matches is too little to say anything, even with 12 lifetime games");
 });

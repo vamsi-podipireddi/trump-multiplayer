@@ -1,6 +1,7 @@
 import { S, myUid, takeNotice } from "../session.js";
 import { $, esc } from "../util/dom.js";
 import { WS_BASE, connect } from "../net.js";
+import { DIFF_OPTS } from "./lobby.js";
 
 // ---------- join UI ----------
 function doJoin(create) {
@@ -19,6 +20,21 @@ function doSolo() {
   S.creating = true; S.createPrivate = false; S.createTries = 0;
   connect(name, ""); // create a fresh room, then auto-start with 3 bots
 }
+/* Pure: the recent-form line, or "" when there's nothing honest to say.
+   /stats already scopes recentForm to a single difficulty and drops matches
+   the host switched tiers during (src/worker/stats.js's readRecentForm) — it
+   sends null rather than a number below its own data-sufficiency floor, and
+   this only has to render what it was handed. Never pooled across
+   difficulties: a win rate depends on bot difficulty the same way the report
+   card's headline does (app/js/coach/report.js), so mixing tiers into one
+   figure would read as a trend that isn't one. Exported so this string can be
+   tested without a DOM. */
+function recentFormLine(f) {
+  if (!f) return "";
+  const label = (DIFF_OPTS.find(d => d[0] === f.difficulty) || ["", f.difficulty])[1];
+  return `<br>Recent form (${esc(label)}, last <b>${esc(f.n)}</b>): <b>${esc(f.wins)}</b> won · ` +
+    `bids taken <b>${esc(f.bidsWon)}</b>, made <b>${esc(f.bidsMade)}</b>`;
+}
 /* Optional: the Cloudflare backend reports a lifetime record when a D1 binding
    exists. Any failure (node backend, no DB, offline) just leaves the line off. */
 async function loadStats() {
@@ -32,7 +48,8 @@ async function loadStats() {
     // escaped like every other interpolation here: the counts are JSON off the
     // wire, and this line lands in innerHTML for the <b> emphasis
     $("join-record").innerHTML = `Your record: <b>${esc(j.games)}</b> match${j.games === 1 ? "" : "es"} · ` +
-      `<b>${esc(j.wins)}</b> won · bids taken <b>${esc(j.bidsWon)}</b>, made <b>${esc(j.bidsMade)}</b>`;
+      `<b>${esc(j.wins)}</b> won · bids taken <b>${esc(j.bidsWon)}</b>, made <b>${esc(j.bidsMade)}</b>` +
+      recentFormLine(j.recentForm);
   } catch {}
 }
 /* A notice left by leaveRoom() (e.g. "the host removed you") survives the
@@ -42,4 +59,4 @@ function showNotice() {
   if (notice) $("join-err").textContent = notice;
 }
 
-export { doJoin, doSolo, loadStats, showNotice };
+export { doJoin, doSolo, loadStats, showNotice, recentFormLine };

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS matches (
   deals         INTEGER NOT NULL DEFAULT 0,  -- deals played in that match
   bids_won      INTEGER NOT NULL DEFAULT 0,  -- deals this seat declared
   bids_made     INTEGER NOT NULL DEFAULT 0,  -- of those, contracts made
+  difficulty       TEXT,                       -- room.settings.difficulty at match end; NULL predates this column
+  difficulty_mixed INTEGER NOT NULL DEFAULT 0, -- 1 if the host changed difficulty while this match was in progress
   ts            INTEGER NOT NULL            -- epoch ms
 );
 

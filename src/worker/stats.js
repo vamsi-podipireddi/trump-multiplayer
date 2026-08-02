@@ -1,3 +1,9 @@
+/* Below this many same-tier, non-mixed matches, recentForm says nothing
+   rather than showing a number that's mostly noise. Small enough to reach
+   after a handful of games, large enough that one fluke result can't read
+   as a trend. */
+const MIN_RECENT_FORM = 3;
+
 /* Optional player stats, backed by D1 when a DB binding exists (see schema.sql). */
 async function readStats(env, uid) {
   const json = (o, s) => new Response(JSON.stringify(o), { status: s || 200, headers: { "content-type": "application/json" } });
@@ -12,10 +18,42 @@ async function readStats(env, uid) {
       "SUM(COALESCE(bids_won, 0)) AS bidsWon, SUM(COALESCE(bids_made, 0)) AS bidsMade " +
       "FROM matches WHERE uid = ?"
     ).bind(uid).first();
-    return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0 });
+    const recentForm = await readRecentForm(env, uid);
+    return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0, recentForm });
   } catch {
     return json({ available: false });
   }
+}
+
+/* Recent-form line for the join screen (Task 10) — scoped to ONE difficulty,
+   never pooled. A win rate (and the report card's own headline) is invariant
+   to match length but not to bot difficulty, so a run of easy matches would
+   read as improvement; see app/js/coach/report.js's header comment for the
+   same rule applied to the report card. The tier is whichever difficulty the
+   player's most recent match was recorded under — "recent form" is naturally
+   about whatever they've been playing lately. Matches flagged
+   difficulty_mixed (the host changed tiers mid-match, src/core/room/
+   handlers.js's handleSettings) are dropped entirely: a match played across
+   two tiers has no single difficulty its result can honestly be charged to.
+   Below MIN_RECENT_FORM matches in that tier, returns null — silence beats a
+   number whose meaning depends on which bots the player happened to face. */
+async function readRecentForm(env, uid) {
+  const res = await env.DB.prepare(
+    "SELECT difficulty, difficulty_mixed, won, bids_won, bids_made FROM matches " +
+    "WHERE uid = ? ORDER BY ts DESC LIMIT 20"
+  ).bind(uid).all();
+  const rows = (res && res.results) || [];
+  const tier = rows.length ? rows[0].difficulty : null;
+  if (!tier) return null; // no matches yet, or the newest predates this column
+  const scoped = rows.filter(r => r.difficulty === tier && !r.difficulty_mixed);
+  if (scoped.length < MIN_RECENT_FORM) return null;
+  return {
+    difficulty: tier,
+    n: scoped.length,
+    wins: scoped.reduce((s, r) => s + (r.won ? 1 : 0), 0),
+    bidsWon: scoped.reduce((s, r) => s + (r.bids_won || 0), 0),
+    bidsMade: scoped.reduce((s, r) => s + (r.bids_made || 0), 0),
+  };
 }
 
 /* One row per human seat at matchOver, when a D1 binding exists (M8/D10). */
@@ -37,11 +75,18 @@ async function writeMatchStats(env, room) {
          four then lost the fifth deal recorded bidsWon: 0. */
       const declared = history.filter(d => d.declarer === seat);
       stmts.push(env.DB.prepare(
-        "INSERT INTO matches (uid, name, room, won, match_id, deals, bids_won, bids_made, ts) " +
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO matches (uid, name, room, won, match_id, deals, bids_won, bids_made, difficulty, difficulty_mixed, ts) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
       ).bind(p.uid, p.name, room.code, G.scores[seat] === max ? 1 : 0,
              G.matchId || null, history.length, declared.length,
-             declared.filter(d => d.made).length, Date.now()));
+             declared.filter(d => d.made).length,
+             /* The tier in effect when the match ended — not necessarily the
+                only one it was played at, which is exactly what
+                _difficultyMixed (handlers.js's handleSettings, lives on G the
+                same way _statsRecorded does: a rematch swaps in a fresh G) is
+                for. */
+             room.settings.difficulty, G._difficultyMixed ? 1 : 0,
+             Date.now()));
     }
     if (stmts.length) await env.DB.batch(stmts);
   } catch { /* stats are best-effort */ }

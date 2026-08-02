@@ -239,6 +239,31 @@ test("describeHint: text and card mark for each decision kind, including both si
   assert.equal(call.text, "Ace of spades — the search's pick to call");
 });
 
+/* recentFormLine is pure and produces the join screen's second stats line
+   (Task 10) — /stats' own recentForm field is already scoped to one
+   difficulty and excludes mixed matches server-side (src/worker/stats.js's
+   readRecentForm); this only has to render what it is handed, or nothing. */
+test("recentFormLine: a second line scoped to one difficulty, or nothing when there's too little to say", async () => {
+  const { recentFormLine } = await import("../app/js/screens/join.js");
+  assert.equal(recentFormLine(null), "",
+    "readStats sends null when a tier doesn't have enough matches yet — render nothing, not a stray label");
+  assert.equal(recentFormLine(undefined), "", "an older client talking to a pre-Task-10 worker gets no field at all");
+
+  const line = recentFormLine({ difficulty: "hard", n: 5, wins: 3, bidsWon: 4, bidsMade: 2 });
+  assert.match(line, /^<br>/, "a second line under Your record, not a replacement for it");
+  assert.match(line, /Hard/, "the difficulty is spelled out (DIFF_OPTS' label), not the raw settings key");
+  assert.match(line, /<b>3<\/b>/, "wins");
+  assert.match(line, /<b>5<\/b>/, "n");
+  assert.match(line, /<b>4<\/b>/, "bidsWon");
+  assert.match(line, /<b>2<\/b>/, "bidsMade");
+
+  // escaped like every other interpolation on this line: server-derived
+  // values land in innerHTML (join.js's loadStats), so an unrecognised
+  // difficulty string must not be trusted verbatim.
+  const unsafe = recentFormLine({ difficulty: "<img onerror=alert(1)>", n: 3, wins: 1, bidsWon: 1, bidsMade: 1 });
+  assert.ok(!unsafe.includes("<img"), "an unrecognised difficulty must be escaped, not injected");
+});
+
 test("the table read lives in the left rail and inside the Score sheet tab", () => {
   const html = fs.readFileSync(path.join(root, "app/index.html"), "utf8");
   assert.ok(/id="tableread"/.test(html), "no table-read container");

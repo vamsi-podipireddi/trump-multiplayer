@@ -74,7 +74,16 @@ function message(room, pid, msg, now) {
 function handleSettings(room, pid, msg, now, fx) {
   if (room.host !== pid) return fx;
   const s = room.settings;
-  if (DIFFICULTIES.includes(msg.difficulty)) s.difficulty = msg.difficulty; // allowed anytime
+  if (DIFFICULTIES.includes(msg.difficulty)) {
+    /* A mid-match switch means the finished match was played at more than one
+       tier, so no single difficulty can honestly describe it — flagged here
+       (before s.difficulty is overwritten) rather than recomputed later,
+       because "did it change" cannot be reconstructed after the fact from the
+       final value alone. Lives on G, exactly where _statsRecorded lives and
+       for the same reason: a rematch swaps in a fresh G, clearing it. */
+    if (room.started && msg.difficulty !== s.difficulty) room.G._difficultyMixed = true;
+    s.difficulty = msg.difficulty; // allowed anytime
+  }
   if (typeof msg.coach === "boolean") s.coach = msg.coach;   // a table agreement, not an enforcement boundary
   if (!room.started && TARGET_DEAL_CHOICES.includes(msg.targetDeals)) s.targetDeals = msg.targetDeals;
   if (TURN_TIMER_CHOICES.includes(msg.turnTimerSec) && msg.turnTimerSec !== s.turnTimerSec) {
