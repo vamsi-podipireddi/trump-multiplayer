@@ -809,7 +809,7 @@ test("the finished-deal snapshot is never written while spectating", () => {
   // The whole condition guarding that one call — from the `if` that opens it
   // to the call itself.
   const guard = src.slice(src.lastIndexOf("if (", i), i);
-  assert.match(guard, /you\.spectator/,
+  assert.match(guard, /!\s*S\.view\.you\.spectator/,
     "screens/game.js must not snapshot a finished deal while the viewer is seatless: " +
     "modals.js grades every stored snapshot against view.you.seat, so a deal stored " +
     "while spectating is later charged to whatever seat its taker ends the match in");

@@ -683,5 +683,5 @@ corrected the spec's own numbers and contracts, not just its conclusions.
       recent form rather than the career trend this line originally described: a win rate is
       invariant to match length but not to bot difficulty, so the tier has to be recorded before any
       trend over it means anything, and recording it is what actually landed.
-      `src/worker/stats.js:28-57`, `app/js/screens/join.js:23-38`, `src/core/room/handlers.js:77-85`,
+      `src/worker/stats.js:31-74`, `app/js/screens/join.js:23-38`, `src/core/room/handlers.js:77-85`,
       `migrations/0002-difficulty.sql`, `README.md:100-123`, 5 tests.
