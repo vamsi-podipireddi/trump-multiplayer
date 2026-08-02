@@ -984,25 +984,54 @@ test("evaluateCalls' tie leaves the earliest candidate standing too (bestOf is s
 
 const dec = (kind, delta, grade) => ({ kind, delta, grade, roundNumber: 1 });
 
-test("matchReport's headline is a mean, so match length cannot move it", () => {
-  const three = [1, 2, 3].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine")], skipped: [] }));
-  const seven = [1, 2, 3, 4, 5, 6, 7].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine")], skipped: [] }));
+/* Fix round F1: headline used to be a mean over all four kinds, which
+   averaged a genuine forgone-probability delta (play) together with a
+   distance-from-the-decision-line delta (bid) into a third quantity that is
+   neither. Strengthened from the original (which only ever used "play"
+   decisions, so it would have passed just as happily with the bug still in
+   place): every deal now also carries a large bid delta (0.9 — big enough
+   that including it would obviously move the mean off 0.1), and the
+   assertion pins the headline at exactly the same 0.1 either way. The
+   length-invariance property itself is unchanged and still checked. */
+test("matchReport's headline is a mean over the commensurable kinds only, so match length cannot move it and the bid cannot either", () => {
+  const three = [1, 2, 3].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine"), dec("bid", 0.9, "blunder")], skipped: [] }));
+  const seven = [1, 2, 3, 4, 5, 6, 7].map(n => ({ roundNumber: n, decisions: [dec("play", 0.2, "blunder"), dec("play", 0, "fine"), dec("bid", 0.9, "blunder")], skipped: [] }));
   assert.ok(Math.abs(matchReport(three, 0, 3).headline - matchReport(seven, 0, 7).headline) < 1e-10);
-  assert.ok(Math.abs(matchReport(three, 0, 3).headline - 0.1) < 1e-10);
+  assert.ok(Math.abs(matchReport(three, 0, 3).headline - 0.1) < 1e-10, "the bid's own 0.9 delta must not enter the headline's mean");
 });
 
-test("skipped decisions stay out of the denominator, band decisions stay in", () => {
-  const deals = [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("bid", 0, "fine")],
+/* Fix round F1: strengthened with a discriminating bid delta (0.9, distinct
+   from the play decision's 0) so the headline assertion actually catches a
+   regression back to blending — both deltas being 0 (the original version)
+   would read as 0 whether or not the bid was wrongly included. counts stays
+   the unified ordinal vocabulary across all four kinds (unchanged); only
+   headline's own denominator narrows to the commensurable three. */
+test("skipped decisions stay out of the denominator, band decisions stay in, and the bid stays out of headline's own denominator", () => {
+  const deals = [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("bid", 0.9, "blunder")],
                    skipped: [{ kind: "trump", roundNumber: 1, reason: "not-declarer" }] }];
   const r = matchReport(deals, 0, 1);
-  assert.equal(r.counts.fine, 2, "both graded decisions count");
+  assert.equal(r.counts.fine, 1, "the band (fine) play decision counts");
+  assert.equal(r.counts.blunder, 1, "the bid decision counts too — counts stays unified across all four kinds");
   assert.equal(r.byKind.trump.n, 0, "a skip is not a decision");
+  assert.equal(r.headline, 0, "headline is the mean of only the commensurable (play) decision — the bid's own 0.9 delta must not enter it");
 });
 
 test("headline is null, not zero, when nothing was graded", () => {
   const r = matchReport([{ roundNumber: 1, decisions: [], skipped: [] }], 0, 1);
   assert.equal(r.headline, null);
   assert.equal(r.counts.fine, 0);
+});
+
+/* Fix round F1's own stated acceptance criterion: a match where you only ever
+   bid, and never faced an open card-play, trump or call choice, has no
+   headline — a flawless play/trump/call record (headline 0) is a real,
+   different claim from "nothing commensurable was graded" (headline null),
+   and the second must not print as the first just because the bid alone had
+   something to say. */
+test("headline is null when only the bid was graded — that is not the same as a flawless play/trump/call record", () => {
+  const r = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.9, "blunder")], skipped: [] }], 0, 1);
+  assert.equal(r.headline, null, "no commensurable decision was graded, even though a bid blunder was");
+  assert.equal(r.counts.blunder, 1, "the bid still counts toward the shared ordinal grade vocabulary");
 });
 
 test("coverage reports missing deals rather than hiding them", () => {

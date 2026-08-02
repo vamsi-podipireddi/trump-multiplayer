@@ -458,22 +458,35 @@ const REVIEW_REJECTED_MESSAGE = "The review search failed — try again.";
 
 /* Pure: matchReport's own numbers turned into the words the card prints.
    Coverage is always stated, including when it is complete — a partial mean
-   presented as a whole one is the one thing this panel must never do (D45). */
+   presented as a whole one is the one thing this panel must never do (D45).
+
+   headline's own count is byKind.play/trump/call.n, not the unified
+   counts.fine+mistake+blunder sum used for `counts` below: report.js's
+   headline is now a mean over only those three commensurable kinds (fix
+   round F1 — it originally, wrongly, included the bid), so the sentence
+   naming "how many decisions" that percentage is an average OF must count
+   the same three, or the two numbers in one sentence would describe two
+   different populations. */
 function describeReport(report, v, seat) {
   const c = report.coverage;
-  const graded = report.counts.fine + report.counts.mistake + report.counts.blunder;
+  const headlineN = report.byKind.play.n + report.byKind.trump.n + report.byKind.call.n;
   return {
     coverage: `graded ${c.dealsGraded} of ${c.dealsInMatch} deal${c.dealsInMatch === 1 ? "" : "s"}`,
     headline: report.headline == null
       ? "No decision in this match was open enough to grade."
-      : `${(report.headline * 100).toFixed(1)}% average win probability given away, over ${graded} decision${graded === 1 ? "" : "s"}.`,
+      : `${(report.headline * 100).toFixed(1)}% average win probability given away, over ${headlineN} decision${headlineN === 1 ? "" : "s"}.`,
     counts: `${report.counts.fine} fine · ${report.counts.mistake} mistake${report.counts.mistake === 1 ? "" : "s"} · ${report.counts.blunder} blunder${report.counts.blunder === 1 ? "" : "s"}`,
     /* The bid's number shares the scale but not the meaning: passing hands the
        auction on rather than ending the deal, so it measures distance from the
-       search's own line, not forgone win probability. Worded so nobody adds it
-       to the other three. */
+       search's own line, not forgone win probability — worded "off the
+       search's line", never "probability given away", and never folded into
+       headline above (report.js's HEADLINE_KINDS is what actually enforces
+       that; this line is the reason a reader needs to be told, not the
+       mechanism). byKind.bid.meanDelta is a real, reportable number of its
+       own — printed here, on its own line, rather than left implicit in just
+       a count and a blunder tally. */
     bidNote: report.byKind.bid.n
-      ? `Bidding: ${report.byKind.bid.n} decision${report.byKind.bid.n === 1 ? "" : "s"}, ${report.byKind.bid.blunders} well past the line.`
+      ? `Bidding: ${report.byKind.bid.n} decision${report.byKind.bid.n === 1 ? "" : "s"}, averaging ${(report.byKind.bid.meanDelta * 100).toFixed(1)}% off the search's line, ${report.byKind.bid.blunders} well past it.`
       : null,
     partial: c.dealsGraded < c.dealsInMatch
       ? "Deals played on another device, or before this browser stored them, are not included."
