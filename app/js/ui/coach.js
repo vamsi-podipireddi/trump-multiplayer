@@ -15,6 +15,7 @@
 import { $, esc } from "../util/dom.js";
 import { coachOn, tableRead } from "../coach/read.js";
 import { requestHint } from "../coach/client.js";
+import { HEADLINE_KINDS } from "../coach/report.js";
 import { cardName, SUIT_NAME, SUITS, rankLabel, suitSpan } from "../cards/labels.js";
 import { sideOf } from "../core/engine/index.js";
 import { getPref, setPref } from "../util/prefs.js";
@@ -515,9 +516,19 @@ const worstRow = (d) => ({
   pct: `${(d.delta * 100).toFixed(1)}%`,
 });
 
+/* One label per commensurable kind. The panel's own row list is HEADLINE_KINDS'
+   membership (report.js), never a second spelling of it: the rows sit directly
+   under a headline that is a mean over exactly those kinds, so a kind added
+   there and missed here would print a headline averaging a row the reader
+   cannot see. Iteration is the Set's own insertion order — play, trump, call —
+   which is the order this card has always printed. The `|| k` is the honest
+   fallback if the two ever do drift: the kind's own name, never `undefined`. */
+const HEADLINE_LABEL = { play: "Card play", trump: "Trump", call: "The call" };
+const headlineKinds = () => [...HEADLINE_KINDS];
+
 function describeReport(report, v, seat) {
   const c = report.coverage;
-  const headlineN = report.byKind.play.n + report.byKind.trump.n + report.byKind.call.n;
+  const headlineN = headlineKinds().reduce((n, k) => n + report.byKind[k].n, 0);
   /* Fix round I3, presentation half. The two grades this panel prints side by
      side are not equally precise: an auction delta is noise-floored — it is
      reported as 0 unless it clears its own band, which D44 sizes to stay under
@@ -592,7 +603,7 @@ function renderReport(report, v, seat) {
     `<p class="kicker">${esc(s.coverage)}</p>` +
     `<p>${esc(s.headline)}</p>` +
     `<p class="muted">${esc(s.counts)}</p>` +
-    row("play", "Card play") + row("trump", "Trump") + row("call", "The call") +
+    headlineKinds().map(k => row(k, HEADLINE_LABEL[k] || k)).join("") +
     (s.bidNote ? `<p class="muted">${esc(s.bidNote)}</p>` : "") +
     (worst ? `<div class="note">Costliest decisions</div>${worst}` : "") +
     (worstBid ? `<div class="note">Furthest off the line</div>${worstBid}` : "") +
@@ -601,9 +612,67 @@ function renderReport(report, v, seat) {
     `</div>`;
 }
 
+/* What the card says when the graded half has nothing in it: no deal of this
+   match is stored on this device for this seat, so there is no report to run.
+
+   This is not a failure and must not be painted as one. The panel it replaces
+   asked the worker anyway, got an honest "no finished deal to report on"
+   refusal, and printed it under a "Try again" button — a button that re-reads
+   the same empty storage and so cannot ever succeed, while the one thing that
+   would actually help the reader (why it is empty) lived in describeReport's
+   `partial` line, which only renders on the path that has deals.
+
+   What it prints instead is the half of the card that survives exactly this
+   situation: D38 splits the report card into a graded half (local snapshots,
+   which a second device, a phone takeover, private browsing or a seat change
+   can each leave empty) and a cheap public half — which side won each deal,
+   at what contract, made or set — that rides the view itself and is therefore
+   always present. v.dealHistory IS that half; before this it reached every
+   viewer and only its `.length` was ever read.
+
+   Coverage is still stated first, unchanged and honest at 0 (D45): a reader
+   must never have to infer that nothing was graded. */
+function describeMatchRecord(v, seat) {
+  const history = (v && v.dealHistory) || [];
+  const who = (s) => (v && v.names && v.names[s]) || "Someone";
+  return {
+    coverage: `graded 0 of ${history.length} deal${history.length === 1 ? "" : "s"}`,
+    why: history.length
+      ? "None of this match's deals are stored in this browser for your seat — played on another device, in another seat, or in a browser that cannot keep them. Grading needs those deals; what the match itself recorded is below."
+      : "No deal in this match has finished, so there is nothing to grade yet.",
+    deals: history.map(d => ({
+      where: `Deal ${d.roundNumber}`,
+      verdict: d.made ? "made" : "set",
+      line: d.declarer === seat
+        ? `You bid ${d.bid} and your side captured ${d.dPts}.`
+        : d.partner === seat
+          ? `${who(d.declarer)} bid ${d.bid} with you; your side captured ${d.dPts}.`
+          : `${who(d.declarer)} bid ${d.bid} with ${who(d.partner)}; they captured ${d.dPts}.`,
+    })),
+  };
+}
+
+/* Same markup vocabulary renderReport's own decision rows use (.rv-dec /
+   .rv-row / .dr-line, panels.css) rather than a second set of classes for a
+   list that reads the same way — a label on the left, a short verdict on the
+   right, a sentence under it. Deliberately no button: nothing here is
+   retryable, and offering an action that cannot change the outcome is the
+   defect this panel exists to remove. */
+function renderMatchRecord(v, seat) {
+  const s = describeMatchRecord(v, seat);
+  const rows = s.deals.map(d =>
+    `<div class="rv-dec"><div class="rv-row"><span>${esc(d.where)}</span><span>${esc(d.verdict)}</span></div>` +
+    `<div class="dr-line">${esc(d.line)}</div></div>`).join("");
+  return `<div class="deal-review">` +
+    `<p class="kicker">${esc(s.coverage)}</p>` +
+    `<p class="muted">${esc(s.why)}</p>` +
+    (rows ? `<div class="note">What this match recorded</div>${rows}` : "") +
+    `</div>`;
+}
+
 export {
   hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
   describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
   describeReview, renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE,
-  describeReport, renderReport,
+  describeReport, renderReport, describeMatchRecord, renderMatchRecord,
 };

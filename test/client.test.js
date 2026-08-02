@@ -821,3 +821,54 @@ test("the finished-deal snapshot is never written while spectating", () => {
   assert.match(solo, /spectator:\s*false/, "solo.js's own view is never a spectator's");
   assert.ok(solo.includes("saveDeal("), "solo.js still stores its finished deals");
 });
+
+/* ============================================================
+   M11 follow-ups: the wiring half. The behaviour these guarantee is tested
+   over real values in test/coach.test.js; what can only be checked as text
+   is that the three call sites actually go through the one spelling, and
+   that the zero-coverage path never reaches the request at all.
+   ============================================================ */
+test("every deals-key call site goes through roomKeyOf", () => {
+  const files = ["app/js/screens/game.js", "app/js/solo.js", "app/js/ui/modals.js"];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(root, f), "utf8");
+    assert.match(src, /(saveDeal|loadDeals)\(roomKeyOf\(/,
+      `${f} must derive the storage key with roomKeyOf, not spell it again — a writer and a reader ` +
+      `that disagree about the key lose a report card silently`);
+  }
+  // and the two spellings it replaced are gone from those call sites
+  const solo = fs.readFileSync(path.join(root, "app/js/solo.js"), "utf8");
+  assert.doesNotMatch(solo, /saveDeal\("solo"/, "solo's key is roomKeyOf's answer, not a literal at the call site");
+});
+
+test("the report card grades one seat's deals, never the storage key's whole contents", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  assert.match(reportFn, /loadDeals\(.*,\s*seat\)/,
+    "loadDeals must be asked for this seat's deals: the seat held when the MATCH ends is not necessarily " +
+    "the seat that played each DEAL, and grading the difference charges a bot's decisions to the player");
+});
+
+test("the zero-coverage report card asks for nothing and offers no retry", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  const guard = reportFn.indexOf("renderMatchRecord(");
+  assert.ok(guard > 0, "the empty case must paint the match record ui/coach.js builds for it");
+  assert.ok(guard < reportFn.indexOf("requestReport("),
+    "…and must do so BEFORE the request: the worker would only refuse an empty deal list, and that " +
+    "refusal used to land in the failure branch under a Try again button that re-reads the same empty storage");
+  const retry = reportFn.indexOf("btn-report-retry");
+  assert.ok(retry >= 0 && retry < guard,
+    "the retry button belongs to the failure branch alone — a timeout or a dead worker is genuinely retryable, " +
+    "an empty localStorage is not");
+});
+
+test("the report card's kind rows are not a second spelling of HEADLINE_KINDS", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/coach.js"), "utf8");
+  assert.match(src, /HEADLINE_KINDS/, "ui/coach.js must read the set report.js exports");
+  assert.doesNotMatch(src, /row\("play"|row\("trump"|row\("call"/,
+    "the row list is HEADLINE_KINDS' membership, iterated — a hardcoded row list drifts the moment a kind is " +
+    "added there, printing a headline that averages a row the reader cannot see");
+  assert.doesNotMatch(src, /byKind\.play\.n\s*\+/,
+    "…and so is the headline's own decision count");
+});

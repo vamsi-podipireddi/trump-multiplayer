@@ -115,7 +115,7 @@ async function gradeReportChunked(msg) {
       await yieldToBrowser();
       graded.push(gradeOneDeal(d, msg.seat));
     }
-    return { id: msg.id, ok: true, result: matchReport(graded, msg.seat, msg.dealsInMatch) };
+    return { id: msg.id, ok: true, result: matchReport(graded, msg.dealsInMatch) };
   } catch (e) {
     // Same safety net handleRequest's own try/catch gives every other kind —
     // bypassing handleRequest here must not also bypass it turning a thrown

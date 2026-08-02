@@ -4,8 +4,8 @@ import { cardEl } from "../cards/deck.js";
 import { sfx } from "./sound.js";
 import { requestReview, requestReport } from "../coach/client.js";
 import { bonusTakenBy } from "../coach/read.js";
-import { renderReview, renderReport, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
-import { loadDeals } from "../util/deals.js";
+import { renderReview, renderReport, renderMatchRecord, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
+import { loadDeals, roomKeyOf } from "../util/deals.js";
 
 /* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
    pages hand these functions their own view and their own handlers, and solo
@@ -186,7 +186,12 @@ function paintMatchBody(view) {
    rather than hide it (D45). dealsInMatch rides view.dealHistory — the
    server's own count of deals actually played — rather than deals.length,
    because that count is exactly what a local, possibly-incomplete snapshot
-   list cannot answer for itself.
+   list cannot answer for itself. loadDeals is asked for one seat's deals,
+   never the key's whole contents: a snapshot is stamped with the seat it was
+   played in (util/deals.js), so the seat held when the MATCH ends cannot
+   silently claim deals played from a different one.
+   When that filtered list comes back empty there is nothing to request at
+   all — see renderMatchRecord below.
    Grading a whole match is heavier than one deal's review — client.js's own
    comment on requestReport names this as the one caller that can plausibly
    reach TIMEOUT_MS on a slow phone — so it gets the identical pending/
@@ -212,11 +217,22 @@ function paintMatchReport(view, host) {
     return;
   }
 
+  const seat = view.you.seat;
+  const deals = loadDeals(roomKeyOf(view), view.matchId, seat);
+  /* Zero coverage is answered here, before anything is requested or any
+     state is cached. The worker would refuse this input ("no finished deal to
+     report on" — a guard that stays, since client.js's own chunked fallback
+     shares it), and that refusal used to land in the failure branch above,
+     complete with a retry button that re-reads the same empty storage forever.
+     Nothing is pending, nothing failed, and nothing can change on a second
+     look: this is a settled answer, so it paints one — and paints it from
+     view.dealHistory, which needs no search and is always there. Left
+     uncached deliberately: it costs one localStorage read per repaint and
+     self-heals if a deal ever does land, which a cached "empty" would not. */
+  if (!deals.length) { host.innerHTML = renderMatchRecord(view, seat); return; }
+
   matchReportState = "pending";
   host.innerHTML = REVIEW_WAIT;
-  const seat = view.you.seat;
-  const room = (view.room && view.room.code) || "solo";   // solo.js's own view.room carries no code at all
-  const deals = loadDeals(room, view.matchId);
   const dealsInMatch = (view.dealHistory || []).length;
   const myKey = matchKey;   // a slow response landing after the NEXT match has already opened must not paint over it
   requestReport(deals, seat, dealsInMatch).then(res => {

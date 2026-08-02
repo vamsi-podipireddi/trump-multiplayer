@@ -12,11 +12,29 @@ const PREFIX = "trump_deals:";
 const MAX_MATCHES = 3;
 const key = (room, matchId) => `${PREFIX}${room}:${matchId}`;
 
+/* Which storage key a view's deals live under, in one place. Solo's own view
+   (solo.js) is E.publicView(G) plus a `room` that carries no code at all, so
+   the fallback is not a defensive `||` — it is solo's actual key, and the
+   reason this cannot be spelled `v.room.code` at the three call sites that
+   need it (screens/game.js, solo.js, ui/modals.js). Three spellings of one
+   key is how a writer and a reader start disagreeing about where the deals
+   are, which loses a report card silently. */
+const roomKeyOf = (v) => (v && v.room && v.room.code) || "solo";
+
 /* Exactly the fields reviewDeal (positionBefore) and reviewAuction
-   (auctionPosition) read — nothing else. Notably NOT v.you: a snapshot must
-   never carry a hand, so a stale one can never become a second source of one. */
+   (auctionPosition) read — nothing else — plus the seat they must be graded
+   as. Notably NOT v.you itself: a snapshot must never carry a hand, so a stale
+   one can never become a second source of one. The seat alone is a number, not
+   a hand, and it is what stops a deal from being graded as somebody else's:
+   loadDeals filters on it, because the seat a viewer holds when the MATCH ends
+   is not necessarily the seat they held when this DEAL ended (stand, leave,
+   rejoin into a different free seat), and grading a deal against the wrong
+   seat charges you a bot's decisions. Same class as the spectator bug fix
+   round C1 closed at the write site in screens/game.js — this one closes the
+   narrower seat-hop that the write-site guard cannot see. */
 function snapshotOf(v) {
   return {
+    seat: v.you ? v.you.seat : null,
     roundNumber: v.roundNumber, tricks: v.tricks || [], auction: v.auction || [],
     trump: v.trump, calledCard: v.calledCard, declarer: v.declarer, partner: v.partner,
     bid: v.bid, bonusSuit: v.bonusSuit, dealer: v.dealer,
@@ -78,11 +96,23 @@ function saveDeal(room, matchId, snapshot) {
   write();
 }
 
-function loadDeals(room, matchId) {
+/* `seat` is required, not optional: every deal graded is graded AS a seat
+   (ui/modals.js hands the whole returned list to one requestReport call under
+   one seat), so the filter belongs here, at the single read site, rather than
+   at each caller that could forget it. A caller passing nothing therefore gets
+   nothing — the honest direction to fail in, since the alternative is grading
+   deals as a seat nobody claimed.
+   Strict equality also drops records written before this field existed. That
+   is deliberate: an unstamped snapshot cannot be shown to be this seat's, and
+   the report card states partial coverage honestly (D45) rather than grading
+   a deal that may not be yours. The window is one match — deals are keyed by
+   matchId and evicted with it — not a permanent loss of history. */
+function loadDeals(room, matchId, seat) {
+  if (seat == null) return [];
   const rec = read(key(room, matchId));
   return rec && Array.isArray(rec.deals)
-    ? rec.deals.slice().sort((a, b) => a.roundNumber - b.roundNumber)
+    ? rec.deals.filter(d => d.seat === seat).sort((a, b) => a.roundNumber - b.roundNumber)
     : [];
 }
 
-export { snapshotOf, saveDeal, loadDeals };
+export { snapshotOf, saveDeal, loadDeals, roomKeyOf };

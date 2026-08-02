@@ -76,6 +76,17 @@ function auctionPosition(v, seat, kind, highBid) {
   };
 }
 
+/* The candidate the search actually preferred. evaluateTrumps and
+   evaluateCalls both report `makeProb` per candidate and neither sorts, so
+   both graders need this argmax — once, not once each: two copies is how the
+   trump half and the call half start disagreeing about what "best" means (a
+   tie broken the other way, a `>=` where the other has `>`). Never empty in
+   practice — every caller has already returned on a falsy `ev` — but reduce
+   with no seed would throw rather than return null on an empty candidate
+   list, so it is stated explicitly instead of assumed. */
+const bestOf = (candidates) =>
+  (candidates || []).reduce((a, b) => (a == null || b.makeProb > a.makeProb ? b : a), null);
+
 /* A graded decision — band decisions still return one, graded "fine": they
    were real decisions that were not errors, and dropping them would inflate
    the denominator's quality (D43).
@@ -154,7 +165,7 @@ function gradeTrump(v, seat, seed, tap, decisions, skipped) {
   if (tap) tap(pos, "trump", v.roundNumber);
   const ev = E.evaluateTrumps(pos, seat, { rnd: E.mulberry32(seed + 200), playBudget: auctionBudgetFor(E.SUITS.length) });
   if (!ev) { skipped.push({ kind: "trump", roundNumber: v.roundNumber, reason: "no-world" }); return; }
-  const best = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
+  const best = bestOf(ev.candidates);
   const yours = ev.candidates.find(c => c.suit === v.trump);
   if (!yours) { skipped.push({ kind: "trump", roundNumber: v.roundNumber, reason: "no-world" }); return; }
   decisions.push(decide("trump", v.roundNumber, v.trump, best.suit, yours.makeProb, best.makeProb, ev.worlds));
@@ -174,7 +185,7 @@ function gradeCall(v, seat, seed, tap, decisions, skipped) {
      guarantees. */
   const ev = E.evaluateCalls(pos, seat, { rnd: E.mulberry32(seed + 300), playBudget: auctionBudgetFor(13) });
   if (!ev) { skipped.push({ kind: "call", roundNumber: v.roundNumber, reason: "no-world" }); return; }
-  const best = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
+  const best = bestOf(ev.candidates);
   const yours = ev.candidates.find(c => E.sameCard(c.card, v.calledCard));
   /* The shortlist is the honours plus the heuristic's pick, so a called seven is
      legitimately absent — that is a decision outside the search's candidate set,
@@ -198,4 +209,4 @@ function reviewAuction(v, seat, opts) {
   return { decisions, skipped };
 }
 
-export { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide };
+export { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide, bestOf };

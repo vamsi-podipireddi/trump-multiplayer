@@ -106,6 +106,14 @@ function publicView(G) {
     auction: (G.auction || []).map(a => a.forced
       ? { seat: a.seat, value: a.value, forced: true }
       : { seat: a.seat, value: a.value }),
+    /* Published whole, not as a count, even though the report card's coverage
+       line reads only its length: this IS D38's cheap public half — which side
+       won each deal, at what contract, made or set — and the reason it rides
+       the view at all is that it survives what the graded half cannot (a
+       refresh, a reconnect, a phone takeover, spectating, a browser that
+       cannot store snapshots). ui/coach.js's renderMatchRecord prints it in
+       exactly that case. Trimming it to a number would save a few hundred
+       bytes and delete the only half of the card that always works. */
     dealHistory: (G.dealHistory || []).map(d => ({
       roundNumber: d.roundNumber, declarer: d.declarer, partner: d.partner,
       bid: d.bid, made: d.made, dPts: d.dPts, winners: d.winners.slice(),
