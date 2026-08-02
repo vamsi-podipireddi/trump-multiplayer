@@ -1683,3 +1683,113 @@ test("no decision from a real match reports a cost its own sampler could not mea
   assert.ok(checked > 20, `expected a real match's worth of auction decisions, got ${checked}`);
   assert.ok(fineAtZero > 0, "a match with no band decision at all would leave this property unexercised");
 });
+
+/* Fix round I4: the panel prints what was actually decided, not only how
+   much it cost. Every graded decision has carried `played` and `best` since
+   Task 4 — whose own best-gating fix was ruled must-fix specifically on the
+   premise that this would render them — and renderReport printed neither, so
+   a reader got "Deal 4 — 30.0% off the search's line" with no way to know
+   what they bid or what the search wanted, while the single-deal review one
+   toggle away says "You played ♠J … The search preferred ♥3." */
+const playDec = (trickNo, delta, grade, played, best) => ({
+  trickNo, played, best, playedWinProb: 0.5, bestWinProb: 0.5 + delta, delta, grade, samples: 24,
+});
+const S10 = { suit: "♠", rank: 10 }, SQ = { suit: "♠", rank: 12 }, HA = { suit: "♥", rank: 14 };
+
+test("renderReport names the card play the reader made and the one the search preferred", () => {
+  const report = matchReport([{ roundNumber: 4, samples: 24, skipped: [],
+    decisions: [playDec(3, 0.22, "mistake", S10, SQ)] }], 0, 1);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.doesNotMatch(html, /undefined/);
+  assert.match(html, /You played 10 of spades; the search preferred queen of spades\./);
+  assert.match(html, /play · deal 4 · trick 3/, "the trick has to be named — a deal number alone cannot tell two card plays apart");
+});
+
+test("renderReport tells two card plays from one deal apart", () => {
+  const report = matchReport([{ roundNumber: 5, samples: 24, skipped: [],
+    decisions: [playDec(2, 0.30, "blunder", S10, SQ), playDec(9, 0.25, "mistake", HA, SQ)] }], 0, 1);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(html, /play · deal 5 · trick 2/);
+  assert.match(html, /play · deal 5 · trick 9/);
+  assert.equal((html.match(/rv-row/g) || []).length, 2);
+  assert.notEqual(html.match(/play · deal 5[^<]*/g)[0], html.match(/play · deal 5[^<]*/g)[1],
+    "two card plays from one deal must not render as identical rows");
+});
+
+test("renderReport names the trump and the call in each kind's own vocabulary", () => {
+  const trumpR = matchReport([{ roundNumber: 2, skipped: [], decisions: [
+    { kind: "trump", roundNumber: 2, played: "♠", best: "♥", playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 0, 1);
+  assert.match(renderReport(trumpR, { names: ["A", "B", "C", "D"] }, 0),
+    /You chose spades; the search preferred hearts\./);
+
+  const callR = matchReport([{ roundNumber: 2, skipped: [], decisions: [
+    { kind: "call", roundNumber: 2, played: S10, best: HA, playedProb: 0.4, bestProb: 0.7, delta: 0.3, band: 0.07, grade: "blunder", worlds: 205 }] }], 0, 1);
+  const html = renderReport(callR, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(html, /You called 10 of spades; the search preferred ace of hearts\./);
+  assert.doesNotMatch(html, /You played/, "a call is called, not played — the review's own vocabulary");
+});
+
+test("renderReport says what was bid and what the search's line was, in the bid's own unit", () => {
+  const bid = (roundNumber, played, best, delta) => ({
+    kind: "bid", roundNumber, played, best, playedProb: 0.5 + delta, bestProb: 0.5,
+    delta, band: 0.07, grade: "blunder", worlds: 205,
+  });
+  // passed on a hand the search would have bid, and bid on one it would have passed
+  const report = matchReport([{ roundNumber: 3, skipped: [], decisions: [bid(3, null, 180, 0.30)] },
+                              { roundNumber: 6, skipped: [], decisions: [bid(6, 200, null, 0.25)] }], 0, 2);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.doesNotMatch(html, /undefined/);
+  assert.match(html, /You passed; the search&#39;s line was to bid 180\./);
+  assert.match(html, /You bid 200; the search&#39;s line was to pass\./);
+  assert.doesNotMatch(html, /Costliest decisions/, "a bid is never a commensurable 'costliest' decision (fix round I2)");
+});
+
+/* Fix round I3, presentation half only — card play is deliberately NOT
+   re-banded, that exemption stands. What was wrong is that describeReport
+   pooled auction deltas (noise-floored by construction, D44) with card-play
+   deltas that have no floor and are sampled at whatever evaluateMoves
+   affords — measurably as few as 11 determinizations on a wide-open early
+   lead, a band of ~0.30 — and said nothing, while describeReview says
+   exactly this about the same numbers one toggle away. Same THIN_SAMPLES
+   boundary, checked from both sides the way renderReview's own caveat test
+   in test/client.test.js is. */
+test("describeReport caveats a thinly-sampled card play and doesn't caveat a full one, right at the boundary", () => {
+  const at = (samples) => describeReport(
+    matchReport([{ roundNumber: 1, samples, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 0, 1),
+    { names: ["A", "B", "C", "D"] }, 0);
+
+  const thin = at(19);
+  assert.equal(thin.thin, true);
+  assert.match(thin.note, /Rough read/);
+  assert.match(thin.note, /as few as 19 sampled deals/);
+  assert.match(thin.note, /auction/i, "…and says which half of the panel is the better-sampled one");
+
+  const full = at(20);
+  assert.equal(full.thin, false, "20 is THIN_SAMPLES itself — inside the full read, not the rough one");
+  assert.doesNotMatch(full.note, /Rough read/);
+  assert.match(full.note, /at least 20 sampled deals/);
+
+  // and a report with no card play graded at all says nothing about sampling
+  const none = describeReport(
+    matchReport([{ roundNumber: 1, skipped: [], decisions: [dec("bid", 0.3, "blunder")] }], 0, 1),
+    { names: ["A", "B", "C", "D"] }, 0);
+  assert.strictEqual(none.note, null, "a caveat about card-play sample size means nothing next to a report with no card play in it");
+
+  /* …and it has to actually reach the panel. A caveat computed and then not
+     painted is exactly the state this fix round found describeReport in. */
+  const thinReport = matchReport([{ roundNumber: 1, samples: 19, skipped: [], decisions: [dec("play", 0.1, "mistake")] }], 0, 1);
+  assert.match(renderReport(thinReport, { names: ["A", "B", "C", "D"] }, 0), /Rough read/,
+    "the caveat must be rendered, not merely described");
+});
+
+test("a real match's report carries the thinnest card-play sample all the way to the panel", () => {
+  const { v, seat } = finishedDealViews()[0];
+  const res = handleRequest({ id: 3, kind: "report", deals: [snapshotOf(v)], seat, dealsInMatch: 1 });
+  assert.ok(res.ok, `report failed: ${res.error}`);
+  const play = reviewDeal(snapshotOf(v), seat, {});
+  assert.ok(play.samples > 0, "the fixture must contain real card-play decisions");
+  assert.equal(res.result.samples, play.samples,
+    "reviewDeal's own deal-level minimum must survive gradeOneDeal's merge — describeReport has nowhere else to get it");
+  const s = describeReport(res.result, v, seat);
+  assert.ok(s.note, "a report over real card play must always state what its card-play numbers are worth");
+});

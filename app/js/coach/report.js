@@ -92,6 +92,19 @@ function matchReport(deals, seat, dealsInMatch) {
        alone, in their own unit, never interleaved with the first list. */
     worst: commensurable.filter(d => d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2),
     worstBid: all.filter(d => !HEADLINE_KINDS.has(d.kind) && d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2),
+    /* The thinnest card-play search behind any number above (fix round I3).
+       reviewDeal reports its own per-deal minimum and worker.js's
+       gradeOneDeal threads it up; this is the minimum across the deals that
+       actually had a card play to grade. 0 means "no card play was graded
+       at all" — a deal of nothing but forced cards, or a synthetic report —
+       and is deliberately not the same as "sampled zero times": describeReport
+       says nothing rather than caveat a number that isn't there. Only card
+       play needs this. The auction's own band is its sample statement, and
+       it is floored by construction (D44). */
+    samples: (() => {
+      const n = (deals || []).map(d => d.samples).filter(s => typeof s === "number" && s > 0);
+      return n.length ? Math.min(...n) : 0;
+    })(),
     coverage: {
       dealsGraded: (deals || []).length,
       dealsInMatch: dealsInMatch != null ? dealsInMatch : (deals || []).length,

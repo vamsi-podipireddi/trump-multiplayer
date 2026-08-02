@@ -467,11 +467,83 @@ const REVIEW_REJECTED_MESSAGE = "The review search failed — try again.";
    naming "how many decisions" that percentage is an average OF must count
    the same three, or the two numbers in one sentence would describe two
    different populations. */
+const isCard = (c) => !!c && typeof c === "object" && c.suit != null && c.rank != null;
+
+/* What a costliest-decision row actually says happened (fix round I4). Every
+   graded decision has carried `played` and `best` all along — auction.js's
+   decide() and gradeBids() build both, review.js's card plays carry cards —
+   and the panel printed neither, so a reader got "Deal 4 — 30.0% off the
+   search's line" with no way to know what they bid or what the search wanted,
+   while the single-deal review one toggle away says "You played ♠J … The
+   search preferred ♥3." Task 4's own best-gating fix was ruled must-fix on
+   the premise that this would render it.
+   Returns null rather than a half-sentence when either side is missing —
+   nothing may reach the panel as the literal string "undefined", the exact
+   failure C1 shipped. */
+function choiceOf(d) {
+  if (d.kind === "trump")
+    return (d.played && d.best && SUIT_NAME[d.played] && SUIT_NAME[d.best])
+      ? `You chose ${SUIT_NAME[d.played]}; the search preferred ${SUIT_NAME[d.best]}.` : null;
+  if (!isCard(d.played) || !isCard(d.best)) return null;
+  const verb = d.kind === "call" ? "You called" : "You played";
+  return `${verb} ${cardName(d.played)}; the search preferred ${cardName(d.best)}.`;
+}
+
+/* The bid's own row, in the bid's own vocabulary. `best` is null exactly when
+   the search's line was to pass and a number when it was to bid that level
+   (auction.js gates it on makeProb >= 0.5), and `played` is null for a pass —
+   so this is the one kind where "what you did" is a level or a pass, never a
+   card. worstBid only ever holds decisions graded worse than fine, i.e. ones
+   on the wrong side of the line, so the two never read as agreeing. */
+function bidChoiceOf(d) {
+  const num = (x) => typeof x === "number" && Number.isFinite(x);
+  if (d.played != null && !num(d.played)) return null;
+  if (d.best != null && !num(d.best)) return null;
+  return `You ${d.played == null ? "passed" : `bid ${d.played}`}; ` +
+         `the search's line was to ${d.best == null ? "pass" : `bid ${d.best}`}.`;
+}
+
+/* `where` names the decision precisely enough to find it again: a deal number
+   alone made two card plays from one deal render as identical rows (fix round
+   I4), which review.js's own decisions have always carried a trickNo to
+   prevent. */
+const worstRow = (d) => ({
+  where: d.kind === "play" && d.trickNo != null
+    ? `play · deal ${d.roundNumber} · trick ${d.trickNo}`
+    : `${d.kind} · deal ${d.roundNumber}`,
+  choice: choiceOf(d),
+  pct: `${(d.delta * 100).toFixed(1)}%`,
+});
+
 function describeReport(report, v, seat) {
   const c = report.coverage;
   const headlineN = report.byKind.play.n + report.byKind.trump.n + report.byKind.call.n;
+  /* Fix round I3, presentation half. The two grades this panel prints side by
+     side are not equally precise: an auction delta is noise-floored — it is
+     reported as 0 unless it clears its own band, which D44 sizes to stay under
+     MISTAKE_WIN_DELTA — while a card-play delta has no floor at all and is
+     sampled at whatever evaluateMoves affords, measurably as few as ~11
+     determinizations on a wide-open early lead, a band of ~0.30. Pooled into
+     one headline and one ranked list with no caveat, a card play well inside
+     its own sampling noise can print as a "blunder". describeReview already
+     says exactly this about the same numbers one toggle away; saying it here
+     too is the minimum honesty, and is NOT a re-banding of card play — that
+     exemption is deliberate and stands. */
+  const thin = report.samples > 0 && report.samples < THIN_SAMPLES;
   return {
     coverage: `graded ${c.dealsGraded} of ${c.dealsInMatch} deal${c.dealsInMatch === 1 ? "" : "s"}`,
+    samples: report.samples,
+    thin,
+    /* Null when no card play was graded at all — a caveat about card-play
+       sample size means nothing next to a report that contains none. */
+    note: !report.samples ? null
+      : thin
+        ? `Rough read — some card plays here drew as few as ${report.samples} sampled deals, so a small cost among them may be sampling noise. The auction's own numbers are sampled far more heavily.`
+        : `Card play is based on at least ${report.samples} sampled deals per decision.`,
+    worst: report.worst.map(worstRow),
+    worstBid: report.worstBid.map(d => ({
+      where: `Deal ${d.roundNumber}`, choice: bidChoiceOf(d), pct: `${(d.delta * 100).toFixed(1)}%`,
+    })),
     headline: report.headline == null
       ? "No decision in this match was open enough to grade."
       : `${(report.headline * 100).toFixed(1)}% average win probability given away, over ${headlineN} decision${headlineN === 1 ? "" : "s"}.`,
@@ -507,10 +579,15 @@ function renderReport(report, v, seat) {
   const row = (k, label) => report.byKind[k].n
     ? `<div class="tr-row"><span>${label}</span><span>${report.byKind[k].meanDelta == null ? "—" : (report.byKind[k].meanDelta * 100).toFixed(1) + "%"}</span></div>`
     : "";
-  const worst = report.worst.map(d =>
-    `<div class="rv-row"><span>${esc(String(d.kind))} · deal ${d.roundNumber}</span><span>${(d.delta * 100).toFixed(1)}%</span></div>`).join("");
-  const worstBid = report.worstBid.map(d =>
-    `<div class="rv-row"><span>Deal ${d.roundNumber}</span><span>${(d.delta * 100).toFixed(1)}%</span></div>`).join("");
+  /* One .rv-dec per decision — the .rv-row label/percentage line it always
+     had, plus the line naming what was actually done. Wrapped rather than
+     appended flat so .deal-review's own 14px gap keeps separating DECISIONS
+     while a row stays tight against its own detail (see panels.css). */
+  const decs = (rows) => rows.map(d =>
+    `<div class="rv-dec"><div class="rv-row"><span>${esc(d.where)}</span><span>${esc(d.pct)}</span></div>` +
+    (d.choice ? `<div class="dr-line">${esc(d.choice)}</div>` : "") + `</div>`).join("");
+  const worst = decs(s.worst);
+  const worstBid = decs(s.worstBid);
   return `<div class="deal-review">` +
     `<p class="kicker">${esc(s.coverage)}</p>` +
     `<p>${esc(s.headline)}</p>` +
@@ -519,6 +596,7 @@ function renderReport(report, v, seat) {
     (s.bidNote ? `<p class="muted">${esc(s.bidNote)}</p>` : "") +
     (worst ? `<div class="note">Costliest decisions</div>${worst}` : "") +
     (worstBid ? `<div class="note">Furthest off the line</div>${worstBid}` : "") +
+    (s.note ? `<div class="note">${esc(s.note)}</div>` : "") +
     (s.partial ? `<div class="note">${esc(s.partial)}</div>` : "") +
     `</div>`;
 }

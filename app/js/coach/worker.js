@@ -55,6 +55,17 @@ function gradeOneDeal(d, seat) {
     roundNumber: d.roundNumber,
     decisions: play.decisions.concat(auction.decisions),
     skipped: auction.skipped,
+    /* reviewDeal's own deal-level minimum, carried up rather than dropped
+       (fix round I3): the report pools card-play deltas — which have no
+       noise floor and are sampled at whatever evaluateMoves' formula
+       affords, as few as ~11 worlds on a wide-open early lead — with
+       auction deltas that are floored at MIN_REVIEW_WORLDS by construction.
+       describeReport needs this to caveat the first half the way
+       describeReview already caveats the same numbers one toggle away; it
+       has nowhere else to get it, since matchReport's own `worst` holds at
+       most the top two decisions. reviewAuction has no equivalent to
+       thread: its band IS its sample statement. */
+    samples: play.samples,
   };
 }
 

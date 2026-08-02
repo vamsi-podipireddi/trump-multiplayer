@@ -370,3 +370,11 @@
      the list needs. */
   .rv-row { display:flex; justify-content:space-between; align-items:baseline; gap:10px; font-size:var(--t-sm); color:var(--txt2); }
   .rv-row > span:last-child { flex:none; font-family:var(--fm); color:var(--txt); }
+  /* …and the line under it naming what was actually played/called/bid (fix
+     round I4). It is .deal-review's own child gap that separates DECISIONS,
+     so each row and its own detail line are wrapped together here and held
+     tight — 14px between the two halves of one decision would read as two
+     unrelated entries. Reuses .dr-line, the same prose line renderReview
+     already uses for the identical sentence in the single-deal review. */
+  .rv-dec { display:flex; flex-direction:column; gap:4px; }
+  .rv-dec .dr-line { color:var(--txt3); }
