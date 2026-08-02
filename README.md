@@ -32,7 +32,7 @@ Open **http://localhost:3000**.
 | **Hints** | A button suggests the strongest bid, trump, call or card, with one line of reasoning from a search. For the bid and the card that's the identical search `hard` bots run; trump and the call stay on the hand-count for bots at every tier (see AI skill, above) — the hint searches those two anyway, in the browser, at zero server cost. Host-controlled from the lobby or mid-match settings, defaults on, and shown to every seat as a settings chip. This is a table agreement, not an enforcement boundary: the engine ships to every browser, so nothing stops a determined player from running the identical search in a console regardless of what the setting says. |
 | **Table read** | A rail panel (folded into the mobile Score tab) showing points still live, what your side still needs, the bonus three's status, known voids, and outstanding cards per suit. Public information the whole table already watched happen, so — unlike hints — it is never gated by a setting. |
 | **Deal review** | A `Review this deal ▸` toggle on the round-result modal, and on the match summary for the deal that clinches it, replays your own decision points against the same search and grades what you played against what it preferred. Card play only, one deal at a time — the bid, trump and call, and the whole match at once, are **Report card**, below. Computed on click; never blocks the ready gate or the rematch button. |
-| **Report card** | A `Report card ▸` toggle on the match-over modal grades your whole match in one pass — card play, the bid, the trump pick and the partner call, each re-searched from only what you knew at the time. Computed on click, at match end. Grades only the deals this device stored (`localStorage`) and says so on the card itself — *"graded 4 of 5 deals"* — never averaging a partial match as though it were whole. The optional D1 record (below) now counts every deal you bid on across the match, not just its last one. |
+| **Report card** | A `Report card ▸` toggle on the match-over modal grades your whole match in one pass — card play, the bid, the trump pick and the partner call, each re-searched from only what you knew at the time. Computed on click, at match end. Grades only the deals this device stored (`localStorage`) and says so on the card itself — *"graded 4 of 5 deals"* — never averaging a partial match as though it were whole. The optional D1 record (below) now counts every deal you won the bid on across the match, not just its last one. |
 | **Match length** | First to **3, 5 or 7** deals. |
 | **Turn timer** | Off / 15 / 30 / 45 / 60 / 90s. When it expires the AI plays your turn and marks you *away*; the next thing you do (or the **I'm back** button) takes you off autopilot. |
 | **Between deals** | The next deal starts when every present player clicks **ready**, or after 30s — whichever comes first. |
@@ -99,18 +99,28 @@ npx wrangler d1 execute trump-stats --remote --file=./schema.sql
 
 At match end the DO writes one row per human seat (`schema.sql`), keyed by a random `uid` the browser
 mints into `localStorage` — no accounts and no personal data. `GET /stats?uid=…` returns
-`{games, wins, bidsWon, bidsMade}`, which the join screen shows as *"Your record"*. The node backend has
-no stats endpoint; the line just stays hidden.
+`{games, wins, bidsWon, bidsMade, recentForm}`, which the join screen shows as *"Your record"* plus,
+when present, a second *recent form* line. `recentForm` is `null` or
+`{difficulty, n, wins, bidsWon, bidsMade}` — the player's last 20 matches, scoped to whichever
+difficulty tier the most recent one was played at (never pooled across tiers: win rate isn't
+difficulty-independent, so a run of `easy` matches would read as improvement) and excluding any match
+that switched tiers mid-way; `null` below 3 matches in that tier, so the join screen shows nothing
+rather than a number that's mostly noise. The node backend has no stats endpoint; the line just stays
+hidden.
 
-**Upgrading an existing database** (one created before the report card landed): the stats fix needs
-four new columns.
+**Upgrading an existing database** (one created before the report card and recent-form landed): two
+migrations, in order.
 
 ```bash
 npx wrangler d1 execute trump-stats --remote --file=./migrations/0001-report-card.sql
+npx wrangler d1 execute trump-stats --remote --file=./migrations/0002-difficulty.sql
 ```
 
 `was_declarer`/`bid_made` stay in the table, deprecated and untouched — their pre-migration rows were
 derived from a match's final deal only and cannot be honestly recomputed as the new per-match counters.
+Rows written before `0002` have no `difficulty` on record (`NULL`, not a guessed tier) and read as
+`difficulty_mixed: 0` by default — a documented gap, not a claim: whether an old match actually
+switched tiers mid-way was never recorded, so it can't be reconstructed after the fact either.
 
 ## How it works
 

@@ -331,16 +331,18 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   own `byKind.bid.meanDelta` — but is excluded from the mean itself, and from `worst` (its own worst
   is `worstBid`, ranked separately). Ordinal comparability (a shared pass/fail line) does not imply
   cardinal commensurability (a shared quantity worth averaging). Caught before review, not after:
-  Task 7's implementer found `headline` shipped blended on its own first pass and disclosed it rather
-  than silently shipping the spec's own text.
+  Task 7's implementer found `headline` shipped blended across all four kinds on its own first pass —
+  the design spec's own interface contract said "mean delta per graded decision" with no qualifier,
+  contradicting the same document's Grading-rules text — and disclosed it rather than silently
+  shipping that reading. The spec's interface contract is corrected to match what shipped.
 - **D42. Trump and call are re-ranked by make-probability, inside `ai/bid-search.js`.** They rank by
   mean captured points today, which is precisely the objective D35 retired: *"a deal is scored made
   or set — a binary — so points captured beyond the contract line buy nothing… points per deal was
   the wrong objective to have designed against; deals won is the scoring unit."*
   This is safe to change in one place because these two functions have exactly one caller. D35 cut
   them from the server; `ai/index.js` routes only the bid, and `app/js/coach/worker.js` is their sole
-  consumer (stated at `ai/bid-search.js:69`). So the hint and the review inherit one implementation
-  and cannot disagree — the "two spellings of one rule" failure `coach/review.js:203` warns about
+  consumer (stated at `ai/bid-search.js:142`). So the hint and the review inherit one implementation
+  and cannot disagree — the "two spellings of one rule" failure `coach/worker.js:90` warns about
   never arises.
   Bots are unaffected: they call `aiPickTrump`/`aiPickPartner`, not these.
   **Obligation, not a footnote:** every tuned number attached to these two functions was measured
@@ -368,28 +370,39 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D44. The review sizes its budget from the precision it needs, inverting the bots' rule.**
   `worldsFor(candidates, budget) = max(4, floor(budget / (candidates·52)))` runs budget → worlds,
   which is right for a bot deciding under a per-invocation CPU bill. A grader has the opposite
-  constraint, and inheriting the bots' budgets breaks it: ~~at `CALL_PLAY_BUDGET = 24000` with
-  ~10 candidates, `worldsFor` yields 46 worlds and a band of `1/√46` = **0.147** — wider than
+  constraint, and inheriting the bots' budgets ~~breaks it outright: at `CALL_PLAY_BUDGET = 24000`
+  with ~10 candidates, `worldsFor` yields 46 worlds and a band of `1/√46` = **0.147** — wider than
   `MISTAKE_WIN_DELTA` (0.07) by more than double, and effectively at `BLUNDER_WIN_DELTA` (0.15). The
   mistake grade for calls would be unreachable: any delta large enough to escape the band is already
-  a blunder.~~ — **CORRECTED, re-derived from `worldsFor`'s own formula
-  (`app/js/core/engine/ai/bid-search.js`) after Task 3 raised `CALL_PLAY_BUDGET` 24000 → 96000 (D36
-  above):** at 96000 with ~10 candidates, `worldsFor(10, 96000) = floor(96000/520)` = **184** worlds,
-  band `1/√184` = **0.0737** — still wider than `MISTAKE_WIN_DELTA` (0.07), so the conclusion is
-  unchanged, but the margin the retracted arithmetic claimed ("more than double", "effectively at
-  `BLUNDER_WIN_DELTA`") has collapsed to about **5%**. The practical consequence shrank with it: a
-  delta just past 0.0737 already reads "mistake" (it is well under 0.15), so an inherited budget no
-  longer makes the mistake grade *unreachable* the way it did at 0.147 — only *less precise* than the
-  review's own floor.
-  That floor beats every one of the bots' three budgets, not just the call's: inheriting
-  `BID_PLAY_BUDGET` (3000, 1 candidate) gives `worldsFor(1, 3000)` = 57 worlds, band **0.1325**;
-  inheriting `TRUMP_PLAY_BUDGET` (24000, 4 candidates) gives `worldsFor(4, 24000)` = 115 worlds, band
-  **0.0933**; inheriting `CALL_PLAY_BUDGET` (96000, ~10 candidates) gives the 184 worlds and **0.0737**
-  band above. (At the call's 13-candidate maximum: `worldsFor(13, 96000)` = 142, band **0.0839**.) All
-  three exceed `MISTAKE_WIN_DELTA`; none beats the 205-world floor derived below (band **0.0698**, by
-  construction, for any candidate count). The design conclusion — derive the budget from the precision
-  needed, rather than inherit any of the bots' three — holds. Only the call example's illustrative
-  margin was ever this thin, and it is thin again, not gone.
+  a blunder.~~ **CORRECTED — re-derived from `worldsFor`'s own formula
+  (`app/js/core/engine/ai/bid-search.js`), after Task 3 raised `CALL_PLAY_BUDGET` 24000 → 96000 (D36
+  above), and from the same file's own *measured* candidate counts rather than an unverified "~10"
+  this correction first used (wrong, and material — it changes which side of the line a typical call
+  lands on): inheriting breaks it for two of the three questions unconditionally, and for the third,
+  conditionally.**
+  Bid and trump are unconditional — their candidate counts are fixed by the question's own shape,
+  never the hand: `bidValue` always samples `worldsFor(1, ·)`; `evaluateTrumps` always
+  `worldsFor(SUITS.length, ·)` = `worldsFor(4, ·)`. Inheriting `BID_PLAY_BUDGET` (3000) gives
+  `worldsFor(1, 3000)` = **57** worlds, band **0.1325**; inheriting `TRUMP_PLAY_BUDGET` (24000) gives
+  `worldsFor(4, 24000)` = **115** worlds, band **0.0933**. Both exceed `MISTAKE_WIN_DELTA` (0.07) on
+  every hand, no exceptions.
+  The call is not unconditional, and that is exactly what "~10 candidates" hid: `ai/bid-search.js`'s
+  own regret table (`:86`) documents the measured shortlist average as **~8** candidates, not 10. At
+  8, inheriting `CALL_PLAY_BUDGET` (96000) is actually *adequate*: `worldsFor(8, 96000) =
+  floor(96000/416)` = **230** worlds, band `1/√230` = **0.0659** — *below* `MISTAKE_WIN_DELTA`
+  (matches `ai/bid-search.js`'s own printed "~229 worlds" at this budget, to within the rounding of
+  an average over many hands' exact counts). But the shortlist is capped at **13** (12 honours plus
+  the heuristic), and at that ceiling `worldsFor(13, 96000) = floor(96000/676)` = **142** worlds,
+  band `1/√142` = **0.0839** — *above* `MISTAKE_WIN_DELTA` again.
+  So "inheriting the bots' budgets breaks it outright" was never quite the right claim for the call,
+  and correcting only the arithmetic would still have left it wrong: the call's inherited budget is
+  adequate on a typical hand and inadequate on the widest one. That is still a real and sufficient
+  reason to derive the budget rather than inherit it — not because inheriting always fails, but
+  because only a derived budget *guarantees* the same precision on every position the review might
+  grade, including the 13-candidate hand a constant tuned to the average case would silently
+  under-serve. Bid and trump's unconditional failure makes the same point without the
+  hand-dependence: neither question's candidate count ever moves, so neither ever crosses back over
+  the line the way the call does.
   So the review inverts it. The band must clear the finest grade it has to express:
 
       1/√worlds ≤ MISTAKE_WIN_DELTA   →   worlds ≥ 1 / MISTAKE_WIN_DELTA²
@@ -398,8 +411,9 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
       auctionBudgetFor(candidates) = MIN_REVIEW_WORLDS * candidates * 52
 
   Derived, not chosen: change `MISTAKE_WIN_DELTA` and the world count follows — and this formula was
-  never actually a function of any `*_PLAY_BUDGET` constant, so `CALL_PLAY_BUDGET`'s raise (which
-  shrank the illustration above) left `MIN_REVIEW_WORLDS`/`auctionBudgetFor` themselves untouched.
+  never actually a function of any `*_PLAY_BUDGET` constant, so nothing about `CALL_PLAY_BUDGET`'s
+  own value changes what `MIN_REVIEW_WORLDS`/`auctionBudgetFor` compute, only what inheriting it
+  instead would have delivered — which is exactly the comparison above.
   Bounded by construction — the call's candidate list is at most 13 (12 honours plus the heuristic),
   so the widest question costs `205 · 13 · 52` = 138,580 simulated plays.
   Rejected: a fixed `REVIEW_AUCTION_BUDGET` split across a deal's auction decisions, mirroring
@@ -408,8 +422,8 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
 - **D45. The card prints its own coverage and never presents a partial mean as a whole one.**
   Snapshots are device-local (D46), so a second device, private browsing, a storage quota or joining
   mid-match all yield an incomplete graded half. The card reads *"graded 4 of 5 deals"* in every
-  case, including the complete one. Same discipline as `coach/worker.js:115`'s honest refusal rather
-  than a review of a partial deal.
+  case, including the complete one. Same discipline as `coach/worker.js:132-136`'s honest refusal
+  rather than a review of a partial deal.
 - **D46. Deal snapshots are client-side, in `localStorage`, keyed by room and `matchId`.**
   Zero server cost and no protocol change; survives a refresh or a reconnect on the same device.
   Accepted cost: a different device cannot grade deals it did not play, which D45 makes visible

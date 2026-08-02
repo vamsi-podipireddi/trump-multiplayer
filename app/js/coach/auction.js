@@ -18,20 +18,21 @@ import { startingHand, preRoundScores, seedFromDeal, gradeOf, MISTAKE_WIN_DELTA 
 const bandFor = (worlds) => 1 / Math.sqrt(worlds);
 
 /* The bots run budget -> worlds, which is right for a decision billed per
-   invocation. A grader has the inverse constraint, and inheriting the bots'
-   budgets breaks it — though by less than this comment used to claim.
-   CALL_PLAY_BUDGET is now 96000 (raised from 24000, D36), and
-   worldsFor(10, 96000) = 184 worlds over ~10 candidates gives a band of
-   1/sqrt(184) = ~0.0737 — still wider than MISTAKE_WIN_DELTA (0.07), but by
-   about 5% now, not the >2x margin this comment argued at the old
-   24000/46-worlds/0.147. A delta just past today's band already clears
-   "mistake" outright, where it used to have to clear almost the whole way to
-   "blunder" first — so an inherited budget no longer makes "mistake"
-   unreachable, only less precise than the review's own floor below (205
-   worlds by construction, band ~0.0698, for any candidate count). The case
-   for deriving a budget instead of inheriting one is thinner than it was, not
-   gone. So the review runs precision -> worlds -> budget, and the floor is
-   derived from the finest grade it has to express rather than chosen: change
+   invocation. A grader has the opposite constraint. Bid (always 1
+   candidate) and trump (always 4) fail it on every hand: worldsFor(1, 3000)
+   = 57 worlds (band 0.1325), worldsFor(4, 24000) = 115 (band 0.0933) — both
+   above MISTAKE_WIN_DELTA (0.07). The call is not unconditional: its
+   shortlist averages ~8 candidates (bid-search.js's own measured figure),
+   where CALL_PLAY_BUDGET's 96000 is actually enough — worldsFor(8, 96000) =
+   230 worlds, band ~0.0659, under the line — but the shortlist runs up to
+   13 (12 honours plus the heuristic), where the same budget gives only 142
+   worlds, band ~0.0839, over it again. So inheriting doesn't fail every
+   call, only the widest hands — exactly where a fixed budget is weakest.
+   Deriving the budget from the precision needed instead guarantees the
+   same band (205 worlds, ~0.0698) on every position the review might
+   grade, typical or not, which no inherited constant can promise. So the
+   review runs precision -> worlds -> budget, and the floor is derived from
+   the finest grade it has to express rather than chosen: change
    MISTAKE_WIN_DELTA and this follows (D44). */
 const MIN_REVIEW_WORLDS = Math.ceil(1 / MISTAKE_WIN_DELTA ** 2);   // 205
 const auctionBudgetFor = (candidates) => MIN_REVIEW_WORLDS * candidates * 52;
