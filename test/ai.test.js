@@ -13,7 +13,7 @@ import { chooseAICard as legacyChooseAICard, aiPickTrump, aiPickPartner, aiBidDe
 /* Same exception, same reason: the auction budgets are internal tuning constants
    deliberately kept off the barrel (as PIMC_PLAY_BUDGET is), but they encode a
    measured result and a silent reset of them would undo this task's content. */
-import { BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET } from "../app/js/core/engine/ai/bid-search.js";
+import { BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET, worldsFor } from "../app/js/core/engine/ai/bid-search.js";
 
 const key = c => c.suit + c.rank;
 
@@ -397,17 +397,20 @@ test("the searched trump and call are not weaker than the hand-count (paired dea
    silent reset of either constant would quietly invalidate every number in
    bid-search.js's comment block and in ROADMAP D36. */
 test("the auction budgets still buy enough worlds per candidate to beat the hand-count", () => {
-  const worldsPer = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
-  assert.ok(worldsPer(1, BID_PLAY_BUDGET) >= 50,
-    `the bid threshold test needs ~57 worlds, got ${worldsPer(1, BID_PLAY_BUDGET)}`);
-  assert.ok(worldsPer(4, TRUMP_PLAY_BUDGET) >= 100,
-    `the trump argmax needs ~115 worlds a suit, got ${worldsPer(4, TRUMP_PLAY_BUDGET)}`);
-  assert.ok(worldsPer(10, CALL_PLAY_BUDGET) >= 150,
-    `the call argmax needs ~184 worlds a card, got ${worldsPer(10, CALL_PLAY_BUDGET)}`);
+  /* worldsFor itself, imported above, never a local copy of its arithmetic
+     (fix round I6): a guard that re-types the formula it is guarding keeps
+     passing against its own stale copy after the real one changes, which is
+     the entire reason bid-search.js exports it. */
+  assert.ok(worldsFor(1, BID_PLAY_BUDGET) >= 50,
+    `the bid threshold test needs ~57 worlds, got ${worldsFor(1, BID_PLAY_BUDGET)}`);
+  assert.ok(worldsFor(4, TRUMP_PLAY_BUDGET) >= 100,
+    `the trump argmax needs ~115 worlds a suit, got ${worldsFor(4, TRUMP_PLAY_BUDGET)}`);
+  assert.ok(worldsFor(10, CALL_PLAY_BUDGET) >= 150,
+    `the call argmax needs ~184 worlds a card, got ${worldsFor(10, CALL_PLAY_BUDGET)}`);
   // and the budget really is what sizes the sample, not a coincidence of defaults
   const G = E.createMatch(); E.startMatch(G);
   assert.equal(E.bidValue(G, E.findBidActor(G), { rnd: E.mulberry32(5) }).samples.length,
-               worldsPer(1, BID_PLAY_BUDGET));
+               worldsFor(1, BID_PLAY_BUDGET));
 });
 
 /* ---- the difficulty tiers (ai/index.js) ---- */

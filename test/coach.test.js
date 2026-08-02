@@ -14,6 +14,13 @@ import { handleRequest, gradeOneDeal } from "../app/js/coach/worker.js";
 import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coach/review.js";
 import { matchReport } from "../app/js/coach/report.js";
 import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide } from "../app/js/coach/auction.js";
+/* Deliberate exception to "consumers import the barrel" (docs/STRUCTURE.md
+   rule 1), the same one test/ai.test.js:16 already takes and for the same
+   reason: worldsFor is a tuning-internal deliberately kept off the barrel,
+   and it is exported from its own module precisely so nothing forks the
+   formula — which the review's band guard did, until fix round I6. Importing
+   the real one is the whole point. */
+import { worldsFor } from "../app/js/core/engine/ai/bid-search.js";
 import { snapshotOf } from "../app/js/util/deals.js";
 import { describeReport, renderReport } from "../app/js/ui/coach.js";
 
@@ -1175,16 +1182,65 @@ test("renderReport prints the bid's own worst separately from the commensurable 
 // world floor's own arithmetic (D43/D44) and the forced-bid/non-declarer
 // skip paths.
 
+/* The call's shortlist ceiling, derived rather than measured: evaluateCalls
+   (ai/bid-search.js) offers the heuristic's own pick plus every rank>=12 card
+   the seat does not hold, with the heuristic deduped out of that list. There
+   are exactly 12 such cards in a deck (Q/K/A x 4 suits), and aiPickPartner
+   (ai/heuristic.js) returns an un-held ace, else an un-held king, else
+   callableCards[0] — so it is itself one of those 12 on every hand except one
+   holding all twelve honours, where it is a jack and the honour list is empty
+   (1 candidate). Either way |candidates| <= 12; a 13-candidate shortlist
+   describes an undealable hand. Pinned against real positions below, because
+   this is the invariant D44's whole band guarantee rests on. */
+const CALL_SHORTLIST_MAX = 12;
+
 /* D43/D44 as arithmetic, not as a comment: the band must be able to express the
    finest grade there is, for the widest candidate list the call can offer. */
 test("the review's world floor keeps the dead band under the mistake threshold", () => {
   assert.equal(MIN_REVIEW_WORLDS, Math.ceil(1 / MISTAKE_WIN_DELTA ** 2));
-  for (const candidates of [1, 4, 13]) {
+  for (const candidates of [1, 4, CALL_SHORTLIST_MAX]) {
     const budget = auctionBudgetFor(candidates);
-    const worlds = Math.max(4, Math.floor(budget / (candidates * 52)));   // worldsFor's own formula
+    /* The engine's own worldsFor, never a second copy of it (fix round I6).
+       ai/bid-search.js exports this precisely so nothing forks the formula,
+       and docs/STRUCTURE.md advertises that protection — but this guard, of
+       all places, re-typed it: change the 52 or the floor and the grader's
+       real band would exceed MISTAKE_WIN_DELTA while its own guard went on
+       passing against the old arithmetic. */
+    const worlds = worldsFor(candidates, budget);
     assert.ok(bandFor(worlds) <= MISTAKE_WIN_DELTA,
       `band ${bandFor(worlds)} must not swallow the mistake grade at ${candidates} candidates`);
   }
+});
+
+/* …and the ceiling that guard is quantified over. Nothing asserted it before
+   (fix round I6), so the band guarantee above held only for as wide a
+   shortlist as someone had remembered to type into it. */
+test("the call's shortlist never exceeds the ceiling the band guarantee is quantified over", () => {
+  let widest = 0, checked = 0;
+  for (let d = 0; d < 60; d++) {
+    const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 5 });
+    E.startMatch(G);
+    for (let guard = 0; G.phase === "bidding" && guard < 60; guard++) {
+      const seat = E.findBidActor(G);
+      if (seat === null) break;
+      const act = E.aiActionFor(G, seat, "normal");
+      E.applyBid(G, seat, act && act.type === "bid" ? act.value : null);
+    }
+    if (G.phase !== "trumpSelect") continue;
+    E.applyTrump(G, E.aiActionFor(G, G.declarer, "normal").suit);
+    for (const seat of [0, 1, 2, 3]) {
+      // playBudget 1 floors worldsFor at 4 worlds: the shortlist is what is
+      // being measured here, not the quality of the search over it
+      const ev = E.evaluateCalls(G, seat, { playBudget: 1, rnd: E.mulberry32(d * 10 + seat) });
+      if (!ev) continue;
+      checked++;
+      widest = Math.max(widest, ev.candidates.length);
+      assert.ok(ev.candidates.length <= CALL_SHORTLIST_MAX,
+        `a ${ev.candidates.length}-candidate shortlist exceeds the ${CALL_SHORTLIST_MAX} the review's own band is derived for`);
+    }
+  }
+  assert.ok(checked > 100, `expected many real partnerSelect positions, got ${checked}`);
+  assert.ok(widest >= 10, `the sample must approach the ceiling to be worth anything, widest seen was ${widest}`);
 });
 
 /* D32, executable. Every auction position must be built from what the player
