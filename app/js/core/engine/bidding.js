@@ -25,6 +25,13 @@ function applyBid(G, p, value) {
      "passed" from "hasn't acted yet" without a sentinel value. */
   else { G.highBid = value; G.highBidder = p; G.bids[p] = value; logG(G, `${name(G, p)} bids ${value}`, "bid"); }
   G.bidTurn = (p + 1) % NUM_PLAYERS;
+  if (!G.auction) G.auction = [];
+  /* Pushed before advanceBidding, not after: advanceBidding can fold straight
+     through redeal() -> deal(), which resets G.auction for the next hand. Push
+     after that call instead, and this very bid — the one that just triggered
+     the redeal — would land in the new hand's empty log rather than the old,
+     now-decided one's. */
+  G.auction.push({ seat: p, value });
   advanceBidding(G);
 }
 function advanceBidding(G) {
@@ -36,6 +43,9 @@ function advanceBidding(G) {
 function forceBid(G) {
   const eldest = (G.dealer + 1) % NUM_PLAYERS;
   G.highBidder = eldest; G.highBid = MIN_BID;
+  if (!G.auction) G.auction = [];
+  // `forced` marks a bid nobody decided on — the review skips it rather than grading it
+  G.auction.push({ seat: eldest, value: MIN_BID, forced: true });
   logG(G, `${name(G, eldest)} is forced to take the minimum bid of ${MIN_BID}.`, "bid");
   finalizeDeclarer(G);
 }

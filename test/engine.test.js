@@ -186,6 +186,22 @@ test("all-pass redeals end in a forced 130 bid for eldest", () => {
   assert.equal(G.bid, E.MIN_BID);
   assert.equal(G.declarer, (dealer + 1) % 4, "eldest hand forced");
   assert.ok(guard < 100, "auction terminated");
+
+  // the forced bid is the log's last entry, marked forced; nothing earlier in
+  // the same (post-redeal) log is — deal()'s reset on every failed redeal
+  // means this log holds only the final attempt's 4 passes plus this one entry
+  const last = G.auction[G.auction.length - 1];
+  assert.equal(G.auction.length, 5, "4 passes from the final attempt, then the forced bid");
+  assert.equal(last.seat, G.declarer);
+  assert.equal(last.value, E.MIN_BID);
+  assert.equal(last.forced, true, "forceBid's own entry carries forced: true");
+  for (const a of G.auction.slice(0, -1)) assert.ok(!a.forced, "no chosen (here: passed) bid is marked forced");
+
+  // and it survives the publicView copy — this is the shape Task 4's grading reads
+  const pvAuction = E.publicView(G).auction;
+  const pvLast = pvAuction[pvAuction.length - 1];
+  assert.equal(pvLast.forced, true, "forced survives the publicView copy");
+  for (const a of pvAuction.slice(0, -1)) assert.ok(!a.forced);
 });
 
 test("bidIsLegal edges", () => {
@@ -316,4 +332,85 @@ test("randomInt is uniform over [0,n)", () => {
       const v = E.randomInt(n);
       assert.ok(Number.isInteger(v) && v >= 0 && v < n, `randomInt(${n}) returned ${v}`);
     }
+});
+
+test("auction log replays to the declarer the engine chose", () => {
+  for (let m = 0; m < 20; m++) {
+    const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+    E.startMatch(G);
+    while (G.phase !== "matchOver") {
+      if (G.phase === "bidding") {
+        // fold the log so far and check it predicts the engine's own state
+        let high = null, highSeat = null;
+        for (const a of G.auction) if (a.value != null) { high = a.value; highSeat = a.seat; }
+        assert.equal(G.highBid, high, "auction fold must equal G.highBid");
+        assert.equal(G.highBidder, highSeat, "auction fold must equal G.highBidder");
+      }
+      if (G.phase === "trumpSelect") {
+        const last = G.auction.filter(a => a.value != null).pop();
+        assert.ok(last, "a finalized auction has at least one bid");
+        assert.equal(G.bid, last.value, "contract must be the last bid in the log");
+        assert.equal(G.declarer, last.seat, "declarer must be the last bidder in the log");
+      }
+      const ra = E.requiredActor(G);
+      if (!ra) { if (G.phase === "trickEnd") E.advanceTrick(G); else if (G.phase === "roundEnd") E.nextDeal(G); else break; continue; }
+      applyChecked(G, ra.seat, randomAction(G));
+    }
+  }
+});
+
+test("dealHistory records every completed deal, and only real ones", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  let completed = 0;
+  while (G.phase !== "matchOver") {
+    const ra = E.requiredActor(G);
+    if (!ra) {
+      if (G.phase === "trickEnd") E.advanceTrick(G);
+      else if (G.phase === "roundEnd") { completed++; assert.equal(G.dealHistory.length, completed); E.nextDeal(G); }
+      else break;
+      continue;
+    }
+    applyChecked(G, ra.seat, randomAction(G));
+  }
+  completed++;
+  assert.equal(G.dealHistory.length, completed, "the clinching deal is recorded too");
+  for (const d of G.dealHistory) {
+    assert.equal(d.made, d.dPts >= d.bid, "made must follow from dPts and bid");
+    assert.equal(d.winners.length, 2, "exactly two seats take a deal");
+  }
+});
+
+test("a redeal discards the passed-out auction", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  const first = E.findBidActor(G);
+  E.applyBid(G, first, null);
+  assert.equal(G.auction.length, 1, "a pass is recorded");
+  for (let i = 0; i < 3; i++) E.applyBid(G, E.findBidActor(G), null);
+  // all four passed -> redeal() -> deal() resets the log
+  assert.equal(G.auction.length, 0, "deal() clears the auction log");
+});
+
+test("matchId is stable within a match and changes across matches", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  const id = G.matchId;
+  assert.match(id, /^[0-9a-f]{8}$/);
+  E.nextDeal(G);
+  assert.equal(G.matchId, id, "a new deal does not change the match id");
+  E.startMatch(G);
+  assert.notEqual(G.matchId, id, "startMatch mints a fresh match id");
+});
+
+test("publicView copies the new history rather than aliasing G", () => {
+  const G = E.createMatch(["A", "B", "C", "D"], { targetDeals: 3 });
+  E.startMatch(G);
+  E.applyBid(G, E.findBidActor(G), E.MIN_BID);
+  const v = E.publicView(G);
+  v.auction[0].value = 9999;
+  v.auction.push({ seat: 0, value: 1 });
+  assert.equal(G.auction[0].value, E.MIN_BID, "mutating the view must not reach G");
+  assert.equal(G.auction.length, 1);
+  assert.equal(v.matchId, G.matchId);
 });

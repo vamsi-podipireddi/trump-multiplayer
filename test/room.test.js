@@ -406,6 +406,31 @@ test("settings: host-only, validated, difficulty switchable any time", () => {
   assert.equal(room.G.targetGames, 3, "match uses the lobby-time target");
 });
 
+test("switching difficulty mid-match marks G as mixed; before start or a no-op change does not", () => {
+  let now = 1_000_000;
+  const room = mkRoom();
+  const [host] = joinN(room, 1, now);
+  R.message(room, host, { type: "settings", difficulty: "hard" }, now); // lobby-time: not mixed, no G yet
+  R.message(room, host, { type: "start" }, now);
+  assert.equal(room.G._difficultyMixed, undefined, "a fresh match must not start out mixed");
+
+  R.message(room, host, { type: "settings", difficulty: "hard" }, now); // re-selecting the same tier
+  assert.equal(room.G._difficultyMixed, undefined, "no actual change must not mark the match mixed");
+
+  R.message(room, host, { type: "settings", difficulty: "easy" }, now); // a genuine mid-match switch
+  assert.equal(room.settings.difficulty, "easy");
+  assert.equal(room.G._difficultyMixed, true, "switching tiers while started must mark the match mixed");
+
+  R.message(room, host, { type: "settings", difficulty: "hard" }, now); // switching again stays mixed
+  assert.equal(room.G._difficultyMixed, true);
+
+  // a rematch swaps in a fresh G — same lifetime rule _statsRecorded already relies on
+  now = driveToMatchOver(room, [host], now, () => {});
+  R.message(room, host, { type: "newMatch" }, now);
+  assert.equal(room.started, true);
+  assert.equal(room.G._difficultyMixed, undefined, "a fresh match after a rematch starts clean");
+});
+
 test("coach defaults on, is host-only, and rejects non-booleans", () => {
   const room = R.createRoom("TEST");
   const [host, other] = joinN(room, 2, 0);

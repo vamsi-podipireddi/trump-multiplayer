@@ -13,7 +13,7 @@ import { chooseAICard as legacyChooseAICard, aiPickTrump, aiPickPartner, aiBidDe
 /* Same exception, same reason: the auction budgets are internal tuning constants
    deliberately kept off the barrel (as PIMC_PLAY_BUDGET is), but they encode a
    measured result and a silent reset of them would undo this task's content. */
-import { BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET } from "../app/js/core/engine/ai/bid-search.js";
+import { BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET, worldsFor } from "../app/js/core/engine/ai/bid-search.js";
 
 const key = c => c.suit + c.rank;
 
@@ -370,10 +370,14 @@ test("the searched trump and call are not weaker than the hand-count (paired dea
    worlds per candidate, the thing worldsFor computes — so that either a budget
    reset or a change to the formula fails loudly and lands the reader here.
 
-   Measured basis (scripts/bench-auction-search.js): at 11 worlds the call search
-   buys nothing measurable over the hand-count it replaces (-0.27 +/- 0.96 pts a
-   deal); at ~46 it is worth +2.60 +/- 0.87. Lower these and the search stops
-   being an improvement — that is a real result, not a stylistic preference.
+   Measured basis (scripts/bench-auction-search.js `regret`, make-probability —
+   D42 moved the auction search's own ranking onto that statistic, so this is
+   what the bench now measures; ROADMAP D36 has the correction and the pre-D42
+   points figures this replaced): at 14 worlds the call search cannot beat the
+   hand-count it replaces (gain -0.001 +/- 0.013 make-prob, -0.28 +/- 1.18 pts a
+   deal); at ~237 it is worth +0.040 +/- 0.010 (+3.28 +/- 0.91 pts). Lower these
+   and the search stops being an improvement — that is a real result, not a
+   stylistic preference.
 
    What each row now guards is NOT the same, and saying so is the point.
    BID_PLAY_BUDGET is live server-side: ai/index.js calls aiBidDecisionSearch
@@ -382,22 +386,31 @@ test("the searched trump and call are not weaker than the hand-count (paired dea
    ai/index.js stopped routing to them (ROADMAP D35) and coach/worker.js passes
    its own, wider playBudget — so those two rows pin the module's own calibrated
    defaults, which the bench and the strength test above consume, rather than a
-   production cost or a bot's strength. Kept at exact strength anyway: the
-   defaults are the documented result of the 150-deal hold-out, and a silent
-   reset of them would quietly invalidate every number in bid-search.js's
-   comment block and in ROADMAP D36. */
+   production cost or a bot's strength. TRUMP_PLAY_BUDGET is kept at exact
+   strength (24000, re-measured under D42 and unchanged: the regret curve was
+   already flat there). CALL_PLAY_BUDGET is raised from 24000 to 96000 (D36's
+   correction): re-measured, 24000 was still leaving real, reproducible regret
+   on the table that trump's equivalent budget was not. The 150-world floor
+   below sits well under 96000's own ~184 worlds/candidate but well over the
+   pre-raise value's ~46, so a reset back toward the old budget — or toward the
+   ranking silently reverting to mean points — still fails loudly here. A
+   silent reset of either constant would quietly invalidate every number in
+   bid-search.js's comment block and in ROADMAP D36. */
 test("the auction budgets still buy enough worlds per candidate to beat the hand-count", () => {
-  const worldsPer = (candidates, budget) => Math.max(4, Math.floor(budget / (candidates * 52)));
-  assert.ok(worldsPer(1, BID_PLAY_BUDGET) >= 50,
-    `the bid threshold test needs ~57 worlds, got ${worldsPer(1, BID_PLAY_BUDGET)}`);
-  assert.ok(worldsPer(4, TRUMP_PLAY_BUDGET) >= 100,
-    `the trump argmax needs ~115 worlds a suit, got ${worldsPer(4, TRUMP_PLAY_BUDGET)}`);
-  assert.ok(worldsPer(10, CALL_PLAY_BUDGET) >= 40,
-    `the call argmax needs ~46 worlds a card, got ${worldsPer(10, CALL_PLAY_BUDGET)}`);
+  /* worldsFor itself, imported above, never a local copy of its arithmetic
+     (fix round I6): a guard that re-types the formula it is guarding keeps
+     passing against its own stale copy after the real one changes, which is
+     the entire reason bid-search.js exports it. */
+  assert.ok(worldsFor(1, BID_PLAY_BUDGET) >= 50,
+    `the bid threshold test needs ~57 worlds, got ${worldsFor(1, BID_PLAY_BUDGET)}`);
+  assert.ok(worldsFor(4, TRUMP_PLAY_BUDGET) >= 100,
+    `the trump argmax needs ~115 worlds a suit, got ${worldsFor(4, TRUMP_PLAY_BUDGET)}`);
+  assert.ok(worldsFor(10, CALL_PLAY_BUDGET) >= 150,
+    `the call argmax needs ~184 worlds a card, got ${worldsFor(10, CALL_PLAY_BUDGET)}`);
   // and the budget really is what sizes the sample, not a coincidence of defaults
   const G = E.createMatch(); E.startMatch(G);
   assert.equal(E.bidValue(G, E.findBidActor(G), { rnd: E.mulberry32(5) }).samples.length,
-               worldsPer(1, BID_PLAY_BUDGET));
+               worldsFor(1, BID_PLAY_BUDGET));
 });
 
 /* ---- the difficulty tiers (ai/index.js) ---- */

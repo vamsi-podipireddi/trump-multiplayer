@@ -2,9 +2,10 @@ import { $, esc, avatarHtml } from "../util/dom.js";
 import { SUIT_NAME } from "../cards/labels.js";
 import { cardEl } from "../cards/deck.js";
 import { sfx } from "./sound.js";
-import { requestReview } from "../coach/client.js";
+import { requestReview, requestReport } from "../coach/client.js";
 import { bonusTakenBy } from "../coach/read.js";
-import { renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
+import { renderReview, renderReport, reviewErrorMessage, REVIEW_REJECTED_MESSAGE } from "./coach.js";
+import { loadDeals } from "../util/deals.js";
 
 /* Nothing here imports session.js or net.js (docs/STRUCTURE.md rule 6): both
    pages hand these functions their own view and their own handlers, and solo
@@ -86,12 +87,20 @@ let matchKey = null;
    decided match never bleeds into the next one. */
 let matchReviewOpen = false;
 let matchReviewState = null;
+/* The whole-match report card's own state — same shape and the same reset
+   discipline as matchReviewOpen/matchReviewState above. Kept mutually
+   exclusive with them at the toggle (see matchAction): #match-body shows one
+   pane at a time, so opening this one closes the deal review rather than
+   leaving that button reading "open" over a pane it no longer owns. */
+let matchReportOpen = false;
+let matchReportState = null;
 
 function showMatchOver(view, onRematch) {
   const key = view.scores.join(",");
   if (matchKey === key && $("overlay").dataset.kind === "match") return;
   matchKey = key;
   matchReviewOpen = false; matchReviewState = null;   // a new match — any open or in-flight review belonged to the last one
+  matchReportOpen = false; matchReportState = null;   // same — a new match's report card starts closed and unfetched
 
   const mySeat = view.you ? view.you.seat : null;
   const best = Math.max(...view.scores);
@@ -128,16 +137,18 @@ function matchStandingsHtml(view) {
     `<div class="${mySeat != null && p === mySeat ? "me" : ""}"><span>${esc(view.names[p])}${mySeat != null && p === mySeat ? " (you)" : ""}</span>` +
     `<span>${view.scores[p]} deal${view.scores[p] === 1 ? "" : "s"}</span></div>`).join("") + `</div>`;
 }
-/* #match-body's own paint: the standings above when the toggle is off, else
-   the review — computed lazily, on this first open, never ahead of a click
-   (same "on demand, not automatic" contract paintRoundBody documents below).
-   requestReview's own 10s timeout (client.js) is what stops a permanent
-   "Analysing…" if the worker wedges. Never touches #match-action, which is
-   what keeps the primary control reachable through every state this
-   function paints. */
+/* #match-body's own paint: the standings above when both toggles are off,
+   else whichever of the deal review or the match report card is open — at
+   most one at a time (see matchAction) — computed lazily, on this first open,
+   never ahead of a click (same "on demand, not automatic" contract
+   paintRoundBody documents below). requestReview's/requestReport's own 10s
+   timeout (client.js) is what stops a permanent "Analysing…" if the worker
+   wedges. Never touches #match-action, which is what keeps the primary
+   control reachable through every state this function paints. */
 function paintMatchBody(view) {
   const host = $("match-body");
   if (!host) return;
+  if (matchReportOpen) { paintMatchReport(view, host); return; }
   if (!matchReviewOpen) { host.innerHTML = matchStandingsHtml(view); return; }
 
   if (matchReviewState === "pending") { host.innerHTML = REVIEW_WAIT; return; }
@@ -167,14 +178,69 @@ function paintMatchBody(view) {
     paintMatchBody(view);
   });
 }
+/* #match-body's report pane: the whole match, via loadDeals + requestReport
+   rather than requestReview — deals come off this device's own storage
+   (util/deals.js), never the wire, so a second device, private browsing, a
+   storage quota or joining mid-match all yield a genuinely partial set;
+   describeReport's own coverage/partial lines (ui/coach.js) state that
+   rather than hide it (D45). dealsInMatch rides view.dealHistory — the
+   server's own count of deals actually played — rather than deals.length,
+   because that count is exactly what a local, possibly-incomplete snapshot
+   list cannot answer for itself.
+   Grading a whole match is heavier than one deal's review — client.js's own
+   comment on requestReport names this as the one caller that can plausibly
+   reach TIMEOUT_MS on a slow phone — so it gets the identical pending/
+   settled state machine paintMatchBody's review branch above already uses,
+   including the same REVIEW_REJECTED_MESSAGE on outright rejection. Unlike
+   that review branch, a failure here is not a dead end: the failure message
+   carries its own retry button (fix round M10 — a rejection can land while
+   the panel is closed just as easily as while it's open, so a working retry
+   cannot depend on a close/open transition at all; it has to live inside
+   the failure state itself, reachable in the one click from wherever that
+   state is actually shown). */
+function paintMatchReport(view, host) {
+  if (matchReportState === "pending") { host.innerHTML = REVIEW_WAIT; return; }
+  if (matchReportState) {
+    if (matchReportState.ok) { host.innerHTML = renderReport(matchReportState.result, view, view.you.seat); return; }
+    host.innerHTML = `<div class="deal-review"><p class="muted">${esc(matchReportState.message)}</p>` +
+      `<button class="btn ghost" id="btn-report-retry">Try again</button></div>`;
+    // Resets the cached failure and repaints in place — matchReportOpen
+    // itself never changes, so this can never reach the rematch button's own
+    // action row (same guarantee the toggle buttons themselves carry, see
+    // matchAction below).
+    $("btn-report-retry").onclick = () => { matchReportState = null; paintMatchBody(view); };
+    return;
+  }
+
+  matchReportState = "pending";
+  host.innerHTML = REVIEW_WAIT;
+  const seat = view.you.seat;
+  const room = (view.room && view.room.code) || "solo";   // solo.js's own view.room carries no code at all
+  const deals = loadDeals(room, view.matchId);
+  const dealsInMatch = (view.dealHistory || []).length;
+  const myKey = matchKey;   // a slow response landing after the NEXT match has already opened must not paint over it
+  requestReport(deals, seat, dealsInMatch).then(res => {
+    if (matchKey !== myKey) return;
+    matchReportState = (res && res.ok) ? { ok: true, result: res.result } : { ok: false, message: reviewErrorMessage(res) };
+    paintMatchBody(view);
+  }, () => {
+    // A rejection is a real path, not a hypothetical one — see paintMatchBody's
+    // identical comment on the review branch above: client.js rejects every
+    // pending request when the worker dies and again after its own 10s timeout.
+    if (matchKey !== myKey) return;
+    matchReportState = { ok: false, message: REVIEW_REJECTED_MESSAGE };
+    paintMatchBody(view);
+  });
+}
 /* #match-action's own paint: the rematch button (host) or the "waiting for
    host" message — exactly what showMatchOver used to build inline — plus,
-   second and always additive, the review toggle. Adding it here rather than
-   replacing the primary control is the whole point (same reasoning
-   roundAction's own comment gives below): the host may be about to start
-   another match regardless of what the toggle does, so it only ever gets a
-   neighbour, never a replacement. A spectator (no seat of their own) never
-   sees the toggle — there is nothing of theirs to review. */
+   second and third and always additive, the deal-review toggle and the
+   report-card toggle. Adding them here rather than replacing the primary
+   control is the whole point (same reasoning roundAction's own comment gives
+   below): the host may be about to start another match regardless of what
+   either toggle does, so they only ever get a neighbour, never a
+   replacement. A spectator (no seat of their own) never sees either toggle —
+   there is nothing of theirs to review or report on. */
 function matchAction(view, onRematch) {
   const host = $("match-action");
   if (!host) return;
@@ -184,15 +250,53 @@ function matchAction(view, onRematch) {
   if (view.room.isHost) $("btn-rematch").onclick = onRematch;
 
   if (view.you && view.you.seat != null) {
+    /* Both buttons are created before either's onclick is wired (fix round
+       M9): rb's own handler closes over rpb, and — while that was already
+       safe today, since neither handler can run before this function itself
+       returns — a later refactor that invoked one during setup, before the
+       `const rpb` below had run, would hit a real TDZ ReferenceError.
+       Declaring both first removes the ordering dependency entirely rather
+       than relying on "the handler never runs early" staying true. */
     const rb = document.createElement("button");
     rb.className = "btn ghost";
+    const rpb = document.createElement("button");
+    rpb.className = "btn ghost";
     paintReviewToggle(rb, matchReviewOpen);
+    paintReviewToggle(rpb, matchReportOpen, "Report card");
+
     /* Mutates this same node rather than rebuilding #match-action: see
        roundAction's identical comment below — a keyboard/screen-reader user
        tabbed here must not lose focus the instant they activate the control
-       that fired this very handler. */
-    rb.onclick = () => { matchReviewOpen = !matchReviewOpen; paintReviewToggle(rb, matchReviewOpen); paintMatchBody(view); };
+       that fired this very handler. Closes the report card (see rpb below)
+       rather than leaving it open behind this one — the body panel these two
+       toggles share shows a single pane, and a toggle reading "open" over a
+       pane it does not own is worse than no mark at all (same discipline
+       ui/coach.js's own positionKey comment states for a stale hint mark). */
+    rb.onclick = () => {
+      matchReviewOpen = !matchReviewOpen;
+      if (matchReviewOpen) matchReportOpen = false;
+      paintReviewToggle(rb, matchReviewOpen);
+      paintReviewToggle(rpb, matchReportOpen, "Report card");
+      paintMatchBody(view);
+    };
     host.appendChild(rb);
+
+    /* Third sibling, next to — never replacing — the rematch button above,
+       per D37/D45: the whole-match report card gets its own toggle,
+       additive exactly the way the deal-review toggle already is. Plain flip
+       + mutual exclusion, same shape as rb's own handler — fix round M10
+       moved the failure-specific retry into the failure state's own render
+       (paintMatchReport's #btn-report-retry) rather than tying it to this
+       click, since a rejection landing while the panel is closed would
+       otherwise need a further close/open to actually retry. */
+    rpb.onclick = () => {
+      matchReportOpen = !matchReportOpen;
+      if (matchReportOpen) matchReviewOpen = false;   // one pane at a time — see rb's own comment above
+      paintReviewToggle(rpb, matchReportOpen, "Report card");
+      paintReviewToggle(rb, matchReviewOpen);
+      paintMatchBody(view);
+    };
+    host.appendChild(rpb);
   }
 }
 
@@ -377,13 +481,15 @@ function roundAction(v, o, h) {
     host.appendChild(rb);
   }
 }
-/* `open` is passed in rather than read off a module-level flag: this is now
-   shared with the match-over modal's own toggle (matchAction above), which
-   tracks matchReviewOpen instead of reviewOpen — the label/aria-expanded
-   pairing is identical in both places, so the one thing that differs between
-   the two callers is the one thing this function takes as a parameter. */
-function paintReviewToggle(btn, open) {
-  btn.textContent = open ? "‹ Back" : "Review this deal ▸";
+/* `open` is passed in rather than read off a module-level flag: this is
+   shared across three toggles now — roundAction's own reviewOpen, and
+   matchAction's matchReviewOpen and matchReportOpen — each tracking its own
+   flag, which is the one thing that always differs between callers. `label`
+   defaults to the original "Review this deal" text, so both pre-existing
+   callers are unaffected; matchAction's report-card toggle is the only one
+   that passes its own. */
+function paintReviewToggle(btn, open, label = "Review this deal") {
+  btn.textContent = open ? "‹ Back" : `${label} ▸`;
   btn.setAttribute("aria-expanded", String(open));
 }
 

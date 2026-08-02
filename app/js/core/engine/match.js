@@ -7,10 +7,19 @@ import { defenders } from "./scoring.js";
 // ============================================================
 //  Lifecycle
 // ============================================================
+/* 8 hex chars off the same CSPRNG the deal uses. There is nothing here to
+   protect — a match id is public — but there is also no reason to introduce a
+   second source of randomness for it. */
+function mintMatchId() {
+  let s = "";
+  for (let i = 0; i < 8; i++) s += randomInt(16).toString(16);
+  return s;
+}
 function createMatch(names, opts) {
   return {
     targetGames: opts && [3, 5, 7].includes(opts.targetDeals) ? opts.targetDeals : TARGET_GAMES,
     phase: "lobby", dealer: 0, roundNumber: 0, scores: [0,0,0,0],
+    matchId: mintMatchId(), dealHistory: [], auction: [],
     names: names ? names.slice() : ["South","West","North","East"],
     hands: [[],[],[],[]],
     bidActive: [], bidTurn: 0, highBid: null, highBidder: null, bids: [null,null,null,null], redealCount: 0,
@@ -23,6 +32,7 @@ function createMatch(names, opts) {
 }
 function startMatch(G) {
   G.scores = [0,0,0,0]; G.dealer = randomInt(NUM_PLAYERS);
+  G.matchId = mintMatchId(); G.dealHistory = [];
   G.roundNumber = 0; G.redealCount = 0; G.log = []; G.lastResult = null;
   nextDeal(G);
 }
@@ -41,6 +51,7 @@ function deal(G) {
   G.trick = []; G.leadSuit = null; G.trickNumber = 0; G.tricks = []; G.tricksWon = [0,0,0,0]; G.capturedPoints = [0,0,0,0];
   G.lastWinner = -1; G.lastWinnerSlot = -1;
   G.playedCards = []; G.voids = [{}, {}, {}, {}]; // public inference facts (for the PIMC AI)
+  G.auction = [];   // a redealt auction correctly vanishes with the hand it was bid on
   G.hands.forEach(h => sortHand(h, null));
   G.bidActive = [0,1,2,3]; G.highBid = null; G.highBidder = null; G.bids = [null,null,null,null];
   G.bidTurn = (G.dealer + 1) % NUM_PLAYERS; G.phase = "bidding";
@@ -53,6 +64,16 @@ function endRound(G) {
   const made = dPts >= G.bid;
   const winners = made ? [G.declarer, G.partner] : defenders(G);
   winners.forEach(p => G.scores[p]++);
+  /* Guarded exactly as resolveTrick's own history push is: a PIMC search runs
+     endRound thousands of times on rollout clones, and none of those deals is
+     one anybody will read. */
+  if (!G._silent) {
+    if (!G.dealHistory) G.dealHistory = [];   // a room restored from storage predating this field
+    G.dealHistory.push({
+      roundNumber: G.roundNumber, declarer: G.declarer, partner: G.partner,
+      bid: G.bid, made, dPts, winners: winners.slice(),
+    });
+  }
   if (!G._silent) logG(G, `${name(G, G.declarer)} & ${name(G, G.partner)} captured ${dPts}/${G.bid} pts → ${made ? "CONTRACT MADE" : "SET"}. ${winners.map(p => name(G, p)).join(" & ")} win the deal.`, "round");
   G.lastResult = { made, dPts, bid: G.bid, winners: winners.slice(), declarer: G.declarer, partner: G.partner };
   G.phase = G.scores.some(s => s >= (G.targetGames || TARGET_GAMES)) ? "matchOver" : "roundEnd";
@@ -77,6 +98,17 @@ function publicView(G) {
       no: t.no, winner: t.winner, pts: t.pts,
       cards: t.cards.map(c => ({ player: c.player, card: { suit: c.card.suit, rank: c.card.rank } })),
       winCard: { suit: t.winCard.suit, rank: t.winCard.rank },
+    })),
+    matchId: G.matchId || null,
+    /* Copied, not aliased, for the same reason tricks is: a viewer must never
+       hold a reference into G. `|| []` covers a room restored from storage
+       written before these fields existed. */
+    auction: (G.auction || []).map(a => a.forced
+      ? { seat: a.seat, value: a.value, forced: true }
+      : { seat: a.seat, value: a.value }),
+    dealHistory: (G.dealHistory || []).map(d => ({
+      roundNumber: d.roundNumber, declarer: d.declarer, partner: d.partner,
+      bid: d.bid, made: d.made, dPts: d.dPts, winners: d.winners.slice(),
     })),
     lastWinner: G.lastWinner, lastWinnerSlot: G.lastWinnerSlot,
     handCounts: G.hands.map(h => h.length), names: G.names.slice(),

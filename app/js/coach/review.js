@@ -224,4 +224,5 @@ function reviewDeal(v, seat, opts) {
   return { decisions, worst, samples };
 }
 
-export { reviewDeal, REVIEW_PLAY_BUDGET, BLUNDER_WIN_DELTA, MISTAKE_WIN_DELTA };
+export { reviewDeal, REVIEW_PLAY_BUDGET, BLUNDER_WIN_DELTA, MISTAKE_WIN_DELTA,
+         startingHand, preRoundScores, seedFromDeal, gradeOf };

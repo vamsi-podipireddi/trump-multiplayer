@@ -7,6 +7,8 @@
 import * as E from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
 import { reviewDeal } from "./review.js";
+import { reviewAuction } from "./auction.js";
+import { matchReport } from "./report.js";
 
 /* Background-thread budget: generous, because nothing here blocks a frame.
    client.js's synchronous fallback (no worker available) passes
@@ -36,6 +38,36 @@ const FALLBACK_HINT_BUDGET = { determinizations: 8, playBudget: 6000, timeMs: 30
    whatever G.phase says and hand back a quiet, wrong verdict) is refused
    instead of guessed at. Mirrors flow.js's own requiredActor() switch. */
 const PHASE_FOR_ACT = { play: "playing", bid: "bidding", trump: "trumpSelect", call: "partnerSelect" };
+
+/* One deal's worth of the "report" kind's own grading (handleRequest below):
+   reviewDeal's card-play decisions plus reviewAuction's bid/trump/call ones,
+   folded into the one per-deal shape matchReport expects. Factored out
+   rather than inlined in the branch below so client.js's synchronous
+   fallback (no worker available) can grade a multi-deal report one deal at a
+   time, yielding back to the browser between each, without a second,
+   possibly-drifting copy of this merge (fix round I5 — see client.js's own
+   gradeReportChunked for why a whole match's worth of this in one
+   synchronous burst is a real problem the hint branch never has). */
+function gradeOneDeal(d, seat) {
+  const play = reviewDeal(d, seat, {});
+  const auction = reviewAuction(d, seat, {});
+  return {
+    roundNumber: d.roundNumber,
+    decisions: play.decisions.concat(auction.decisions),
+    skipped: auction.skipped,
+    /* reviewDeal's own deal-level minimum, carried up rather than dropped
+       (fix round I3): the report pools card-play deltas — which have no
+       noise floor and are sampled at whatever evaluateMoves' formula
+       affords, as few as ~11 worlds on a wide-open early lead — with
+       auction deltas that are floored at MIN_REVIEW_WORLDS by construction.
+       describeReport needs this to caveat the first half the way
+       describeReview already caveats the same numbers one toggle away; it
+       has nowhere else to get it, since matchReport's own `worst` holds at
+       most the top two decisions. reviewAuction has no equivalent to
+       thread: its band IS its sample statement. */
+    samples: play.samples,
+  };
+}
 
 /* Pure: takes a request, returns a response. Exported separately from the
    worker's own message wiring so the tests can execute the real thing in Node,
@@ -121,6 +153,14 @@ function handleRequest(msg) {
       const result = reviewDeal(view, msg.seat, {});
       return { id: msg.id, ok: true, result };
     }
+    if (msg.kind === "report") {
+      /* Same honesty as the review branch: a report over nothing is a refusal,
+         not a perfect score. A zero here would read as flawless play. */
+      const deals = Array.isArray(msg.deals) ? msg.deals : [];
+      if (!deals.length) return { id: msg.id, ok: false, error: "no finished deal to report on" };
+      const graded = deals.map(d => gradeOneDeal(d, msg.seat));
+      return { id: msg.id, ok: true, result: matchReport(graded, msg.seat, msg.dealsInMatch) };
+    }
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
   } catch (e) {
     return { id: msg && msg.id, ok: false, error: String((e && e.message) || e) };
@@ -133,4 +173,4 @@ function handleRequest(msg) {
 if (typeof self !== "undefined" && typeof window === "undefined" && typeof self.postMessage === "function")
   self.onmessage = (e) => self.postMessage(handleRequest(e.data));
 
-export { handleRequest, HINT_BUDGET, FALLBACK_HINT_BUDGET };
+export { handleRequest, HINT_BUDGET, FALLBACK_HINT_BUDGET, gradeOneDeal };

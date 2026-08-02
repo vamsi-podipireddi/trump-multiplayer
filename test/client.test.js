@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as R from "../src/core/room/index.js";
+import * as E from "../app/js/core/engine/index.js";
 import { syncWindow } from "../app/js/ui/log.js";
 import { esc } from "../app/js/util/dom.js";
 import { EMOTES } from "../app/js/cards/icons.js";
@@ -237,6 +238,31 @@ test("describeHint: text and card mark for each decision kind, including both si
   const call = describeHint({}, { kind: "call", card: { suit: "♠", rank: 14 } });
   assert.equal(call.cardKey, null);
   assert.equal(call.text, "Ace of spades — the search's pick to call");
+});
+
+/* recentFormLine is pure and produces the join screen's second stats line
+   (Task 10) — /stats' own recentForm field is already scoped to one
+   difficulty and excludes mixed matches server-side (src/worker/stats.js's
+   readRecentForm); this only has to render what it is handed, or nothing. */
+test("recentFormLine: a second line scoped to one difficulty, or nothing when there's too little to say", async () => {
+  const { recentFormLine } = await import("../app/js/screens/join.js");
+  assert.equal(recentFormLine(null), "",
+    "readStats sends null when a tier doesn't have enough matches yet — render nothing, not a stray label");
+  assert.equal(recentFormLine(undefined), "", "an older client talking to a pre-Task-10 worker gets no field at all");
+
+  const line = recentFormLine({ difficulty: "hard", n: 5, wins: 3, bidsWon: 4, bidsMade: 2 });
+  assert.match(line, /^<br>/, "a second line under Your record, not a replacement for it");
+  assert.match(line, /Hard/, "the difficulty is spelled out (DIFF_OPTS' label), not the raw settings key");
+  assert.match(line, /<b>3<\/b>/, "wins");
+  assert.match(line, /<b>5<\/b>/, "n");
+  assert.match(line, /<b>4<\/b>/, "bidsWon");
+  assert.match(line, /<b>2<\/b>/, "bidsMade");
+
+  // escaped like every other interpolation on this line: server-derived
+  // values land in innerHTML (join.js's loadStats), so an unrecognised
+  // difficulty string must not be trusted verbatim.
+  const unsafe = recentFormLine({ difficulty: "<img onerror=alert(1)>", n: 3, wins: 1, bidsWon: 1, bidsMade: 1 });
+  assert.ok(!unsafe.includes("<img"), "an unrecognised difficulty must be escaped, not injected");
 });
 
 test("the table read lives in the left rail and inside the Score sheet tab", () => {
@@ -659,4 +685,139 @@ test("the match review is requested lazily from the body painter alone", () => {
   // showRoundResult's own paintRoundBody comment states).
   const showFn = sliceFn(src, "showMatchOver");
   assert.doesNotMatch(showFn, /requestReview\(/);
+});
+
+/* Fix round I4: the review's own two guards above ("...offers a review
+   without displacing rematch" and "...is requested lazily...") were never
+   ported to the report card's own pane when it was added — paintMatchReport
+   is a separate top-level function neither guard's sliceFn call ever
+   touched, so the same D37/D45 structural guarantee held for it only by
+   discipline, not by construction. Same two properties, same technique,
+   this time against paintMatchReport/matchAction. */
+test("the match-over modal offers a report card without displacing rematch", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  assert.match(reportFn, /renderReport\(/);
+  assert.doesNotMatch(reportFn, /btn-rematch|match-action/,
+    "the report body painter must never reach the rematch control's id or host");
+
+  const actionFn = sliceFn(src, "matchAction");
+  assert.match(actionFn, /btn-rematch/);
+  assert.doesNotMatch(actionFn, /renderReport\(/, "the action painter must never touch the report body directly");
+});
+
+test("the match report is requested lazily from the body painter alone", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  assert.match(reportFn, /requestReport\(/);
+  assert.match(reportFn, /REVIEW_WAIT/, "a working state must show while the search runs");
+  // showMatchOver's own body must never call requestReport directly, for the
+  // same reason it must never call requestReview directly (see the review's
+  // own identical test above) — every render would otherwise re-fire the
+  // search instead of waiting for the toggle's first click.
+  const showFn = sliceFn(src, "showMatchOver");
+  assert.doesNotMatch(showFn, /requestReport\(/);
+});
+
+/* ============================================================
+   Fix round C1: a mid-match joiner's report card graded a bot's decisions.
+
+   screens/game.js snapshots the finished deal into util/deals.js on every
+   roundEnd/matchOver render — and that render runs for EVERY viewer, seated
+   or not. modals.js then grades every stored snapshot against view.you.seat.
+   A viewer who is seatless when a deal ends but seated when the match ends
+   therefore had that deal charged to a seat someone else (a bot) played, and
+   the card reported full coverage over it.
+
+   That is the default mid-match join path, not an exotic one: membership.js
+   parks a joiner in a free seat via `wantSeat` and seats.js's
+   applyPendingSeats only hands it over at the NEXT deal (drive.js's
+   dealNext), so the deal they joined during ends with them still a
+   spectator. The two halves below pin both ends of that: the room core
+   really does report spectator:true at exactly the render game.js would
+   snapshot on, and game.js really does read that flag before writing.
+   ============================================================ */
+function joinN(room, n, now) {
+  const pids = [];
+  for (let i = 0; i < n; i++) {
+    const { pid } = R.join(room, { name: "P" + i }, now);
+    assert.ok(pid, "join produced a pid");
+    pids.push(pid);
+  }
+  return pids;
+}
+
+function settleTimers(room, now, stopAt) {
+  for (let i = 0; i < 4000; i++) {
+    if (stopAt(room)) return now;
+    for (const [pid, p] of Object.entries(room.players)) {
+      if (p.seat == null) continue;
+      const v = R.buildView(room, pid, now);
+      if (v.you && v.you.toAct) { R.message(room, pid, E.aiActionFor(room.G, v.you.seat, "normal"), now); break; }
+    }
+    if (stopAt(room)) return now;
+    const due = R.nextTimerDue(room);
+    if (due == null) break;
+    now = due;
+    R.fireTimers(room, now);
+  }
+  assert.ok(stopAt(room), "the room never reached the state this test needs");
+  return now;
+}
+
+test("a mid-match joiner is still a spectator when the deal they joined during ends", () => {
+  let now = 1_000_000;
+  const room = R.createRoom("C1TEST");
+  const [host, p2] = joinN(room, 2, now);      // seats 0 and 1; seats 2 and 3 are bots
+  R.message(room, host, { type: "start" }, now);
+  now = settleTimers(room, now, r => r.G.phase === "playing");
+
+  // The default path: a third human simply joins. No "sit" message is sent —
+  // membership.js parks them itself.
+  const { pid: late } = R.join(room, { name: "Late" }, now);
+  assert.equal(room.players[late].seat, null, "a mid-match joiner takes no seat immediately");
+  assert.notEqual(room.players[late].wantSeat, null, "…but is parked in a free (bot) seat for the next deal");
+  const parked = room.players[late].wantSeat;
+  const dealJoinedDuring = room.G.roundNumber;
+
+  now = settleTimers(room, now, r => r.G.phase === "roundEnd" || r.G.phase === "matchOver");
+  const atRoundEnd = R.buildView(room, late, now);
+  assert.equal(atRoundEnd.roundNumber, dealJoinedDuring, "still the deal they joined during");
+  // The other two halves of game.js's snapshot condition are both satisfied
+  // here — so `spectator` is the only thing standing between this render and
+  // a stored snapshot of a deal this viewer did not play.
+  assert.ok(atRoundEnd.phase === "roundEnd" || atRoundEnd.phase === "matchOver");
+  assert.ok(atRoundEnd.lastResult, "the deal really did finish");
+  assert.equal(atRoundEnd.you.seat, null);
+  assert.equal(atRoundEnd.you.spectator, true,
+    "the joiner must still read as a spectator at the roundEnd of the deal they joined during — " +
+    "the bot in their seat played it, not them");
+
+  // …and only from the next deal on are the decisions in that seat theirs.
+  now = settleTimers(room, now, r => r.G.roundNumber > dealJoinedDuring || r.G.phase === "matchOver");
+  if (room.G.phase !== "matchOver") {
+    const next = R.buildView(room, late, now);
+    assert.equal(next.you.seat, parked, "dealt into the parked seat at the next deal");
+    assert.equal(next.you.spectator, false);
+  }
+});
+
+test("the finished-deal snapshot is never written while spectating", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/screens/game.js"), "utf8");
+  const i = src.indexOf("saveDeal(");
+  assert.ok(i > 0, "screens/game.js no longer stores finished deals at all");
+  // The whole condition guarding that one call — from the `if` that opens it
+  // to the call itself.
+  const guard = src.slice(src.lastIndexOf("if (", i), i);
+  assert.match(guard, /!\s*S\.view\.you\.spectator/,
+    "screens/game.js must not snapshot a finished deal while the viewer is seatless: " +
+    "modals.js grades every stored snapshot against view.you.seat, so a deal stored " +
+    "while spectating is later charged to whatever seat its taker ends the match in");
+
+  // solo.js's own identical call site is genuinely unaffected — it builds
+  // view.you itself, with a seat and spectator:false, so there is no
+  // spectating render there to guard against. Pinned rather than assumed.
+  const solo = fs.readFileSync(path.join(root, "app/js/solo.js"), "utf8");
+  assert.match(solo, /spectator:\s*false/, "solo.js's own view is never a spectator's");
+  assert.ok(solo.includes("saveDeal("), "solo.js still stores its finished deals");
 });

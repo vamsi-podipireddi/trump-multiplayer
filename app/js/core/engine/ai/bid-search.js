@@ -26,9 +26,16 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    one splits them exactly backwards: worldsFor divides by the candidate count,
    so the more candidates a question has the fewer worlds each is judged on — yet
    an argmax over C near-equal candidates needs MORE samples as C grows, not
-   fewer. Scored against a 300-world oracle as mean regret in captured points
-   against the best available candidate (lower is better; the hand-count these
-   replace is the bar to beat):
+   fewer. bid's row is unaffected by anything below: bidValue was already a
+   make-probability threshold, never a points argmax, so it is scored as
+   decisions that differ from a near-ground-truth oracle call, not as a regret.
+   trump and call are scored against a wide oracle (scripts/bench-auction-search.js
+   `regret`) as mean regret in make-probability — the unit aiPickTrumpSearch/
+   aiPickPartnerSearch have ranked candidates by since D42, evaluateTrumps/
+   evaluateCalls's own scoreCandidates — against the best available candidate
+   (lower is better; the hand-count these replace is the bar to beat). meanPoints
+   rides alongside each regret in parens so this run can still be read against
+   the mean-points rows it replaces:
 
      bid    1 candidate     3000 ->  57 worlds  6 of 250 decisions differ from a
                                                 2000-world oracle (6000 gives 4),
@@ -45,23 +52,89 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
                                                 does, and this is the one that
                                                 runs on every bidding turn
                                                 (~10.7 an auction, all seats).
-     trump  4 candidates    6000 ->  28 worlds  regret 1.02 vs heuristic 2.28
-                           24000 -> 115 worlds  regret 0.48 vs heuristic 2.96
-     call  ~10 candidates   6000 ->  11 worlds  regret 3.60 vs heuristic 3.33 —
-                                                at this width the call search
-                                                buys nothing measurable (-0.27
-                                                +/- 0.96 pts a deal, pooled).
-                                                Eleven worlds cannot rank ten
-                                                cards whose true spread is ~20
-                                                points, so the argmax is largely
-                                                ranking its own sampling noise.
-                           24000 ->  46 worlds  regret 1.06 vs heuristic 3.65
+     trump  4 candidates    hand-count regret 0.010 (1.00 pts)
+                            6000 -> ~28 worlds  regret 0.010 (0.91 pts)  gain
+                                                +0.000 +/- 0.008 (+0.09 +/- 0.78
+                                                pts)
+                           24000 -> ~115 worlds regret 0.002 (0.20 pts)  gain
+                                                +0.008 +/- 0.006 (+0.80 +/- 0.58
+                                                pts)  <- shipped
+                           96000 -> ~461 worlds regret 0.001 (0.06 pts)  gain
+                                                +0.010 +/- 0.006 (+0.94 +/- 0.55
+                                                pts). What 96000 adds over
+                                                24000 is small enough not to
+                                                buy, not flat throughout: the
+                                                real movement is 6000 -> 24000
+                                                (regret 0.010 -> 0.002); paired
+                                                24000->96000, same deals, is
+                                                +0.001 +/- 0.002 make-prob
+                                                (+0.14 +/- 0.18 pts, n=150) —
+                                                tighter than the marginal CIs
+                                                above because 96000's worlds
+                                                are a superset of 24000's (same
+                                                seed), not an independent
+                                                sample — ranged +0.001 to
+                                                +0.004 paired across four
+                                                independent 150-deal runs. A
+                                                one-off 384000 (16x) check
+                                                landed at the same regret 0.001
+                                                and gain +0.013 as that run's
+                                                own 96000: the curve does
+                                                flatten, just starting around
+                                                24000, not from 6000. 24000
+                                                stands.
+     call  ~8 candidates    hand-count regret 0.039 (3.19 pts)
+                            6000 -> ~14 worlds  regret 0.044 (3.83 pts)  gain
+                                                -0.005 +/- 0.012 (-0.64 +/- 1.09
+                                                pts) — at this width the call
+                                                search cannot beat the
+                                                hand-count it replaces.
+                           24000 -> ~57 worlds  regret 0.014 (1.18 pts)  gain
+                                                +0.025 +/- 0.011 (+2.01 +/- 0.99
+                                                pts)
+                           96000 -> ~229 worlds regret 0.006 (0.40 pts)  gain
+                                                +0.034 +/- 0.009 (+2.79 +/- 0.84
+                                                pts)  <- NOW shipped. Unlike
+                                                trump this is a real further
+                                                gain, not noise: paired
+                                                24000->96000, same deals, is
+                                                +0.008 +/- 0.005 make-prob
+                                                (+0.78 +/- 0.52 pts, n=150) —
+                                                never crossed zero in any of
+                                                four independent 150-deal runs
+                                                (+0.008 to +0.013 paired each
+                                                time — an order of magnitude
+                                                tighter than the marginal CIs,
+                                                which DO overlap run to run;
+                                                the paired difference is what
+                                                this decision actually rests
+                                                on, not the marginal ranges). A
+                                                one-off 384000 check (regret
+                                                0.002, gain +0.043) shows that
+                                                curve flattening from 96000 on,
+                                                which is why the constant stops
+                                                there rather than higher.
 
-   The 24000 rows are a 150-deal hold-out on seeds disjoint from the tuning runs:
-   +2.47 +/- 0.95 pts a deal for trump, +2.60 +/- 0.87 for the call, and the
-   raise rests on those, not on the 6000 result. Confirmed out of model on 9991
-   played deals: +2.08 +/- 1.25 pts to the declaring side, +0.56 +/- 0.42 pp of
-   deals won. Both are asked once a deal and only of the seat that won it.
+   The trump and call rows above are each a 150-deal run
+   (`node scripts/bench-auction-search.js regret`; deals come off the platform
+   CSPRNG unseeded, so a rerun is an independent replication, not a replay —
+   see the four-run ranges above). Both are evaluated at trumpSelect, from the
+   real declarer against the real winning contract — toTrumpSelect drives to
+   the hand-count-bid auction, not the search's own heavier bidding, so this
+   is the same contract distribution the hand-count table plays at (ROADMAP
+   Task 8: mean 150.3); checked directly on 300 fresh deals here: mean 149.8,
+   observed range 130-195. trump used to be evaluated from an arbitrary
+   pre-auction seat, targeting a fresh deal's 130-point minimum bid rather
+   than the contract it would actually be asked about. That barely mattered
+   under mean points; under make-probability the target IS the statistic, so
+   it was a bench bug, not a stylistic choice, and every trump figure above is
+   measured post-fix.
+   Confirmed out of model on 9991 played deals: +2.08 +/- 1.25 pts to the
+   declaring side, +0.56 +/- 0.42 pp of deals won. Both are asked once a deal
+   and only of the seat that won it. That 9991-deal figure is ROADMAP D35's,
+   not D36's: it predates both D42's re-ranking and CALL_PLAY_BUDGET's raise
+   to 96000 and was not re-measured by this task — read it as the history
+   behind D35's own cut, not as current evidence for these two constants.
 
    WHERE EACH OF THESE ACTUALLY RUNS, which the rows above do not say. Only
    aiBidDecisionSearch is routed server-side (ai/index.js, "hard" only). Trump
@@ -71,12 +144,16 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    defaults and the bench's and tests' basis, not a figure any shipped call
    spends. ROADMAP D35 has the reasoning: a Durable Object bills per invocation,
    trump and call are one alarm each at ~8 ms where the alternative is ~0.01 ms,
-   and +0.56 +/- 0.42 pp is not distinguishable from zero. The bid buys
-   +2.77 +/- 0.91 pp for ~1.3 ms on a turn that is otherwise near-free.
+   and +0.56 +/- 0.42 pp (D35's figure, not re-measured by this task — see
+   above) is not distinguishable from zero. The bid buys +2.77 +/- 0.91 pp for
+   ~1.3 ms on a turn that is otherwise near-free.
 
    The bid alone costs the DO ~32000 plays a deal against PIMC's measured
-   ~124500 for the same deal's card play (+25%); all three together came to
-   ~79500 (+64%). PIMC's figure is measured, not 8000 x 13: 8000 is a per-
+   ~124500 for the same deal's card play (+25%); all three together now come
+   to ~151000 (+120%, `DEALS=60 node scripts/bench-auction-search.js cost`) —
+   was ~79500 (+64%) at the pre-raise CALL_PLAY_BUDGET=24000 this comment
+   quoted before CALL_PLAY_BUDGET became 96000. PIMC's figure is measured, not
+   8000 x 13: 8000 is a per-
    decision CAP, not a per-decision spend — evaluateMoves divides it by
    legal.length x cardsLeft, so maxDet GROWS toward its 24 ceiling as the deal
    empties while the per-decision cost falls, and a forced play short-circuits
@@ -84,7 +161,10 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    scripts/bench-auction-search.js re-derives every number in this comment. */
 const BID_PLAY_BUDGET = 3000;
 const TRUMP_PLAY_BUDGET = 24000;
-const CALL_PLAY_BUDGET = 24000;
+// Raised from 24000 (D36 correction, node scripts/bench-auction-search.js
+// regret): re-measured in make-probability, 24000 still left real regret on
+// the table that trump's equivalent budget did not — see the comment above.
+const CALL_PLAY_BUDGET = 96000;
 /* Exported for scripts/bench-auction-search.js, which prints the world counts
    this comment block quotes: a bench carrying its own copy of the formula would
    keep printing numbers after a change here, and those numbers are pasted into
@@ -134,29 +214,32 @@ function playOutWith(G, seat, world, trump, call, rnd) {
                           : sim.capturedPoints[seat] + sim.capturedPoints[partner];
 }
 
-/* Common random numbers: every candidate is scored on the SAME sampled worlds.
-   Which 39 cards the other seats hold swamps the difference between two
-   candidates, and sharing the worlds cancels it exactly — the rollout policy
-   consumes no randomness of its own (chooseAICard only draws for `easy`), so a
-   world plus a candidate is a deterministic number and the comparison is a true
-   paired one. Fresh worlds per candidate would cost the same and be strictly
-   noisier. */
-const meanOver = (G, seat, worlds, trump, call, rnd) =>
-  worlds.reduce((s, w) => s + playOutWith(G, seat, w, trump, call, rnd), 0) / worlds.length;
-
-/* Pick the argmax of mean captured points, with the heuristic's own answer
-   evaluated first so that a tie — these are means of integer point totals over
-   a few dozen worlds, so exact ties do happen — leaves the heuristic's choice
-   standing. Only a strictly better *estimate* displaces it; that is a tie-break
-   rule, not a guarantee about true value (see aiPickPartnerSearch). */
-function argmaxCandidate(cands, score) {
-  let best = cands[0], bestMean = score(cands[0]);
-  for (let i = 1; i < cands.length; i++) {
-    const mean = score(cands[i]);
-    if (mean > bestMean) { bestMean = mean; best = cands[i]; }
-  }
-  return best;
+/* Common random numbers, unchanged (D36): every candidate is scored on the SAME
+   sampled worlds, so the comparison is a true paired one.
+   What changed is the statistic. Candidates used to be ranked on mean captured
+   points; D35 retired that objective — a deal is scored made or set, so points
+   past the contract line buy nothing — and D42 is this function's own switch
+   to ranking by it. makeProb is the fraction of shared worlds
+   in which the declaring side reaches the contract, i.e. the same unit
+   evaluateMoves already reports card play in. meanPoints is retained because
+   scripts/bench-auction-search.js reports in it and D36's history is written
+   in it. */
+function scoreCandidates(G, seat, cands, worlds, toPlay, rnd) {
+  const target = G.bid == null ? minNextBid(G) : G.bid;
+  return cands.map(cand => {
+    const { trump, call } = toPlay(cand);
+    const pts = worlds.map(w => playOutWith(G, seat, w, trump, call, rnd));
+    return {
+      cand,
+      makeProb: pts.filter(p => p >= target).length / pts.length,
+      meanPoints: pts.reduce((s, p) => s + p, 0) / pts.length,
+    };
+  });
 }
+
+/* Strict `>`, and the heuristic's own answer sits at index 0 — so a tie leaves
+   the heuristic's choice standing, exactly as argmaxCandidate did. */
+const bestOf = (scored) => scored.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
 
 /* What this hand is worth if it wins the auction, as a distribution rather than
    a number: `samples` is the captured-points total from each sampled deal
@@ -189,21 +272,26 @@ function aiBidDecisionSearch(G, seat, opts) {
   return bidValue(G, seat, opts).makeProb(need) >= 0.5 ? need : null;
 }
 
-/* Four candidates on ~115 shared worlds each. aiPickTrump ranks suits on length
-   and then the raw sum of ranks — card points never enter it, so the 30-point
-   bonus 3 is worth 3 to it and a 10 is worth 10. Length is a better proxy than
-   that sounds (it beats the search's own choice often enough that this only
-   moves ~30% of deals), so the search scores the suit by what the side actually
-   captures with it, including the ace it would then call. */
-function aiPickTrumpSearch(G, seat, opts) {
+/* One evaluator, two consumers — D29's move applied to the auction. The coach's
+   review needs every candidate's score to size a grade, not just the winner. */
+function evaluateTrumps(G, seat, opts) {
   const rnd = (opts && opts.rnd) || Math.random;
   const budget = (opts && opts.playBudget) || TRUMP_PLAY_BUDGET;
   const heuristic = aiPickTrump(G, seat);
   const worlds = sampleWorlds(G, seat, worldsFor(SUITS.length, budget), rnd);
-  if (!worlds.length) return heuristic;
+  if (!worlds.length) return null;
   const cands = [heuristic, ...SUITS.filter(s => s !== heuristic)];
-  return argmaxCandidate(cands, suit =>
-    meanOver(G, seat, worlds, suit, aiPickPartner(withTrump(G, suit), seat), rnd));
+  const scored = scoreCandidates(G, seat, cands, worlds,
+    suit => ({ trump: suit, call: aiPickPartner(withTrump(G, suit), seat) }), rnd);
+  return {
+    candidates: scored.map(s => ({ suit: s.cand, makeProb: s.makeProb, meanPoints: s.meanPoints })),
+    worlds: worlds.length,
+  };
+}
+
+function aiPickTrumpSearch(G, seat, opts) {
+  const ev = evaluateTrumps(G, seat, opts);
+  return ev ? bestOf(ev.candidates).suit : aiPickTrump(G, seat);
 }
 
 /* callableCards offers up to 39 cards and nobody calls a seven, so the shortlist
@@ -217,18 +305,30 @@ function aiPickTrumpSearch(G, seat, opts) {
    100 deals the best call was an ace 70% of the time but a king 23% and a queen
    7%, and an aces-only shortlist forfeits 2.09 of the 3.33 points the full one
    wins back. The kings and queens are where the heuristic is wrong. */
-function aiPickPartnerSearch(G, seat, opts) {
+function evaluateCalls(G, seat, opts) {
   const rnd = (opts && opts.rnd) || Math.random;
   const budget = (opts && opts.playBudget) || CALL_PLAY_BUDGET;
-  const trump = G.trump || aiPickTrump(G, seat); // the call is only asked after trump is named
+  const trump = G.trump || aiPickTrump(G, seat);
   const heuristic = aiPickPartner(withTrump(G, trump), seat);
   const honours = callableCards(G, seat).filter(c => c.rank >= 12 && !sameCard(c, heuristic));
   const cands = heuristic ? [heuristic, ...honours] : honours;
-  if (!cands.length) return heuristic;
+  if (!cands.length) return null;
   const worlds = sampleWorlds(G, seat, worldsFor(cands.length, budget), rnd);
-  if (!worlds.length) return heuristic;
-  return argmaxCandidate(cands, card => meanOver(G, seat, worlds, trump, card, rnd));
+  if (!worlds.length) return null;
+  const scored = scoreCandidates(G, seat, cands, worlds, card => ({ trump, call: card }), rnd);
+  return {
+    candidates: scored.map(s => ({ card: s.cand, makeProb: s.makeProb, meanPoints: s.meanPoints })),
+    worlds: worlds.length,
+  };
+}
+
+function aiPickPartnerSearch(G, seat, opts) {
+  const ev = evaluateCalls(G, seat, opts);
+  if (ev) return bestOf(ev.candidates).card;
+  const trump = G.trump || aiPickTrump(G, seat);
+  return aiPickPartner(withTrump(G, trump), seat);
 }
 
 export { bidValue, aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch,
+         evaluateTrumps, evaluateCalls,
          BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET, worldsFor, withTrump };

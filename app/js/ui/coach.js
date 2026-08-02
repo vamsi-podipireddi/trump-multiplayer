@@ -445,8 +445,165 @@ function reviewErrorMessage(res) {
    promise a stable reading of. */
 const REVIEW_REJECTED_MESSAGE = "The review search failed — try again.";
 
+// ---------- match report ----------
+/* coach/report.js's matchReport() aggregates every graded deal the worker's
+   "report" branch (worker.js) hands it — reviewDeal's card-play decisions plus
+   reviewAuction's bid/trump/call ones — into one match-wide mean; this section
+   is only the wording, the same split describeReview/renderReview above keep
+   for the single-deal case. Painted into the match-over modal (ui/modals.js)
+   as a third sibling next to the rematch button, computed on click like every
+   other coach affordance in this file (D37) — never automatically, and never
+   in the way of the button three other players, or the host's own next
+   match, may be waiting on. */
+
+/* Pure: matchReport's own numbers turned into the words the card prints.
+   Coverage is always stated, including when it is complete — a partial mean
+   presented as a whole one is the one thing this panel must never do (D45).
+
+   headline's own count is byKind.play/trump/call.n, not the unified
+   counts.fine+mistake+blunder sum used for `counts` below: report.js's
+   headline is now a mean over only those three commensurable kinds (fix
+   round F1 — it originally, wrongly, included the bid), so the sentence
+   naming "how many decisions" that percentage is an average OF must count
+   the same three, or the two numbers in one sentence would describe two
+   different populations. */
+const isCard = (c) => !!c && typeof c === "object" && c.suit != null && c.rank != null;
+
+/* What a costliest-decision row actually says happened (fix round I4). Every
+   graded decision has carried `played` and `best` all along — auction.js's
+   decide() and gradeBids() build both, review.js's card plays carry cards —
+   and the panel printed neither, so a reader got "Deal 4 — 30.0% off the
+   search's line" with no way to know what they bid or what the search wanted,
+   while the single-deal review one toggle away says "You played ♠J … The
+   search preferred ♥3." Task 4's own best-gating fix was ruled must-fix on
+   the premise that this would render it.
+   Returns null rather than a half-sentence when either side is missing —
+   nothing may reach the panel as the literal string "undefined", the exact
+   failure C1 shipped. */
+function choiceOf(d) {
+  if (d.kind === "trump")
+    return (d.played && d.best && SUIT_NAME[d.played] && SUIT_NAME[d.best])
+      ? `You chose ${SUIT_NAME[d.played]}; the search preferred ${SUIT_NAME[d.best]}.` : null;
+  if (!isCard(d.played) || !isCard(d.best)) return null;
+  const verb = d.kind === "call" ? "You called" : "You played";
+  return `${verb} ${cardName(d.played)}; the search preferred ${cardName(d.best)}.`;
+}
+
+/* The bid's own row, in the bid's own vocabulary. `best` is null exactly when
+   the search's line was to pass and a number when it was to bid that level
+   (auction.js gates it on makeProb >= 0.5), and `played` is null for a pass —
+   so this is the one kind where "what you did" is a level or a pass, never a
+   card. worstBid only ever holds decisions graded worse than fine, i.e. ones
+   on the wrong side of the line, so the two never read as agreeing. */
+function bidChoiceOf(d) {
+  const num = (x) => typeof x === "number" && Number.isFinite(x);
+  if (d.played != null && !num(d.played)) return null;
+  if (d.best != null && !num(d.best)) return null;
+  return `You ${d.played == null ? "passed" : `bid ${d.played}`}; ` +
+         `the search's line was to ${d.best == null ? "pass" : `bid ${d.best}`}.`;
+}
+
+/* `where` names the decision precisely enough to find it again: a deal number
+   alone made two card plays from one deal render as identical rows (fix round
+   I4), which review.js's own decisions have always carried a trickNo to
+   prevent. */
+const worstRow = (d) => ({
+  where: d.kind === "play" && d.trickNo != null
+    ? `play · deal ${d.roundNumber} · trick ${d.trickNo}`
+    : `${d.kind} · deal ${d.roundNumber}`,
+  choice: choiceOf(d),
+  pct: `${(d.delta * 100).toFixed(1)}%`,
+});
+
+function describeReport(report, v, seat) {
+  const c = report.coverage;
+  const headlineN = report.byKind.play.n + report.byKind.trump.n + report.byKind.call.n;
+  /* Fix round I3, presentation half. The two grades this panel prints side by
+     side are not equally precise: an auction delta is noise-floored — it is
+     reported as 0 unless it clears its own band, which D44 sizes to stay under
+     MISTAKE_WIN_DELTA — while a card-play delta has no floor at all and is
+     sampled at whatever evaluateMoves affords, measurably as few as ~11
+     determinizations on a wide-open early lead, a band of ~0.30. Pooled into
+     one headline and one ranked list with no caveat, a card play well inside
+     its own sampling noise can print as a "blunder". describeReview already
+     says exactly this about the same numbers one toggle away; saying it here
+     too is the minimum honesty, and is NOT a re-banding of card play — that
+     exemption is deliberate and stands. */
+  const thin = report.samples > 0 && report.samples < THIN_SAMPLES;
+  return {
+    coverage: `graded ${c.dealsGraded} of ${c.dealsInMatch} deal${c.dealsInMatch === 1 ? "" : "s"}`,
+    samples: report.samples,
+    thin,
+    /* Null when no card play was graded at all — a caveat about card-play
+       sample size means nothing next to a report that contains none. */
+    note: !report.samples ? null
+      : thin
+        ? `Rough read — some card plays here drew as few as ${report.samples} sampled deals, so a small cost among them may be sampling noise. The auction's own numbers are sampled far more heavily.`
+        : `Card play is based on at least ${report.samples} sampled deals per decision.`,
+    worst: report.worst.map(worstRow),
+    worstBid: report.worstBid.map(d => ({
+      where: `Deal ${d.roundNumber}`, choice: bidChoiceOf(d), pct: `${(d.delta * 100).toFixed(1)}%`,
+    })),
+    headline: report.headline == null
+      ? "No decision in this match was open enough to grade."
+      : `${(report.headline * 100).toFixed(1)}% average win probability given away, over ${headlineN} decision${headlineN === 1 ? "" : "s"}.`,
+    counts: `${report.counts.fine} fine · ${report.counts.mistake} mistake${report.counts.mistake === 1 ? "" : "s"} · ${report.counts.blunder} blunder${report.counts.blunder === 1 ? "" : "s"}`,
+    /* The bid's number shares the scale but not the meaning: passing hands the
+       auction on rather than ending the deal, so it measures distance from the
+       search's own line, not forgone win probability — worded "off the
+       search's line", never "probability given away", and never folded into
+       headline above (report.js's HEADLINE_KINDS is what actually enforces
+       that; this line is the reason a reader needs to be told, not the
+       mechanism). byKind.bid.meanDelta is a real, reportable number of its
+       own — printed here, on its own line, rather than left implicit in just
+       a count and a blunder tally. */
+    bidNote: report.byKind.bid.n
+      ? `Bidding: ${report.byKind.bid.n} decision${report.byKind.bid.n === 1 ? "" : "s"}, averaging ${(report.byKind.bid.meanDelta * 100).toFixed(1)}% off the search's line, ${report.byKind.bid.blunders} well past it.`
+      : null,
+    partial: c.dealsGraded < c.dealsInMatch
+      ? "Deals played on another device, or before this browser stored them, are not included."
+      : null,
+  };
+}
+
+/* worst/worstBid (report.js) are already normalised — every entry carries a
+   real kind and roundNumber (fix round C1) — and already split on
+   HEADLINE_KINDS (fix round I2), so this only has to word the two lists
+   differently, never rank or merge them itself. worst prints its own kind
+   per row (play/trump/call all land in the one list); worstBid does not —
+   its own section header already says these are bids, so repeating that on
+   every row would be the one thing that list does NOT need, unlike worst's
+   mixed one. */
+function renderReport(report, v, seat) {
+  const s = describeReport(report, v, seat);
+  const row = (k, label) => report.byKind[k].n
+    ? `<div class="tr-row"><span>${label}</span><span>${report.byKind[k].meanDelta == null ? "—" : (report.byKind[k].meanDelta * 100).toFixed(1) + "%"}</span></div>`
+    : "";
+  /* One .rv-dec per decision — the .rv-row label/percentage line it always
+     had, plus the line naming what was actually done. Wrapped rather than
+     appended flat so .deal-review's own 14px gap keeps separating DECISIONS
+     while a row stays tight against its own detail (see panels.css). */
+  const decs = (rows) => rows.map(d =>
+    `<div class="rv-dec"><div class="rv-row"><span>${esc(d.where)}</span><span>${esc(d.pct)}</span></div>` +
+    (d.choice ? `<div class="dr-line">${esc(d.choice)}</div>` : "") + `</div>`).join("");
+  const worst = decs(s.worst);
+  const worstBid = decs(s.worstBid);
+  return `<div class="deal-review">` +
+    `<p class="kicker">${esc(s.coverage)}</p>` +
+    `<p>${esc(s.headline)}</p>` +
+    `<p class="muted">${esc(s.counts)}</p>` +
+    row("play", "Card play") + row("trump", "Trump") + row("call", "The call") +
+    (s.bidNote ? `<p class="muted">${esc(s.bidNote)}</p>` : "") +
+    (worst ? `<div class="note">Costliest decisions</div>${worst}` : "") +
+    (worstBid ? `<div class="note">Furthest off the line</div>${worstBid}` : "") +
+    (s.note ? `<div class="note">${esc(s.note)}</div>` : "") +
+    (s.partial ? `<div class="note">${esc(s.partial)}</div>` : "") +
+    `</div>`;
+}
+
 export {
   hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
   describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
   describeReview, renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE,
+  describeReport, renderReport,
 };

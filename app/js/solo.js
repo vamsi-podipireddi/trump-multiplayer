@@ -37,6 +37,7 @@ import { openSheet, closeSheet } from "./ui/chat.js";
 import { setFourColor, initPrefs } from "./util/prefs.js";
 import { initSound, toggleSound } from "./ui/sound.js";
 import { initCoach, renderCoach, resetCoach } from "./ui/coach.js";
+import { snapshotOf, saveDeal } from "./util/deals.js";
 
 const ME = 0;
 
@@ -208,6 +209,9 @@ function render(v) {
      what the tray left over. */
   fitTable();
   renderLog(v);
+
+  if ((v.phase === "roundEnd" || v.phase === "matchOver") && v.lastResult)
+    saveDeal("solo", v.matchId, snapshotOf(v));
 
   const ok = $("overlay").dataset.kind;
   if (ok === "help") { /* the reader closes it */ }

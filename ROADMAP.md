@@ -244,14 +244,46 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   single budget splits the three questions exactly backwards. `worldsFor` divides the budget by the
   candidate count, so precision *falls* as the candidate list grows — but an argmax over more near-equal
   candidates needs *more* samples, not fewer, to tell them apart. At a uniform 6000, the bid (1
-  candidate, ~115 worlds) was already over-provisioned, while the call (~10 candidates, ~11 worlds) was
-  measurably no better than the hand-count it was meant to replace (regret 3.60 vs. the heuristic's own
-  3.33). Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
-  measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), `TRUMP_PLAY_BUDGET =
+  candidate, ~115 worlds) was already over-provisioned, while the call ~~(~10 candidates, ~11
+  worlds)~~ — **CORRECTED, derived:** (~8 candidates, `worldsFor(8, 6000)` = **14** worlds; the 10
+  came from counting the call shortlist without `evaluateCalls`' own dedupe of the heuristic out of
+  the honour list, the same error D44 corrects at the ceiling, and `ai/bid-search.js:86-91` already
+  publishes the right pair. D36's conclusion is untouched: it rests on the measured regret below, not
+  on the world count) — was measurably no better than the hand-count it was meant to replace (regret
+  3.60 vs. the heuristic's own 3.33).
+  Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
+  measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), ~~`TRUMP_PLAY_BUDGET =
   CALL_PLAY_BUDGET = 24000` (a 150-deal hold-out on seeds disjoint from tuning: +2.47 ± 0.95 and
-  +2.60 ± 0.87 points/deal respectively). Rejected, once measured: a single shared budget for all three
-  questions. Common random numbers itself is unaffected — worlds are still shared within each question's
-  own candidate set — only their count stopped being one constant across all three.
+  +2.60 ± 0.87 points/deal respectively)~~ — **CORRECTED, measured** (`node scripts/bench-auction-search.js
+  regret`): the struck pair was a *mean-points* hold-out, and the auction search stopped ranking trump/call
+  candidates by mean points shortly after (make-probability instead, the coach report card's D42). A
+  budget tuned against one statistic is not guaranteed right for the other — a binomial outcome's variance
+  is p(1−p), not a points mean's — so both were re-measured rather than assumed. Both re-measured at
+  trumpSelect, from the real declarer against the real winning contract — an earlier pass of this
+  re-measurement evaluated trump from an arbitrary pre-auction seat targeting a fresh deal's 130-point
+  minimum bid instead, which barely mattered under mean points but not under make-probability, where the
+  target *is* the statistic; fixed before these numbers were written down. `TRUMP_PLAY_BUDGET`
+  **stays 24000**: regret against a wide oracle is 0.002 make-prob (0.20 pts) there against 0.001
+  (0.06 pts) at 4x the budget (96000) — the real movement is between 6000 and 24000 (regret 0.010 → 0.002);
+  what's left at 96000 is small enough not to buy, not simply flat throughout. The paired within-deal
+  24000→96000 difference (96000's worlds are a superset of 24000's, same seed, so this is tighter than a
+  marginal comparison) is +0.001 ± 0.002 make-prob (+0.14 ± 0.18 pts, n=150), ranging +0.001 to +0.004
+  paired across four independent 150-deal runs — never enough to argue for raising it. A one-off 16x check
+  (384000, not a swept point) landed at the same regret (0.001) and gain (+0.013) as that run's own 96000,
+  confirming the curve does flatten, just starting around 24000, not from 6000.
+  `CALL_PLAY_BUDGET` **raised 24000 → 96000**: at 24000 it still gave up 0.014 make-prob (1.18 pts) of
+  regret against the wide oracle and beat the hand-count by only +0.025 ± 0.011 make-prob
+  (+2.01 ± 0.99 pts); at 96000 regret fell to 0.006 (0.40 pts) and the gain rose to +0.034 ± 0.009
+  (+2.79 ± 0.84 pts). Unlike trump this is a real further gain: the paired within-deal 24000→96000
+  difference is +0.008 ± 0.005 make-prob (+0.78 ± 0.52 pts, n=150) and never crossed zero across four
+  independent 150-deal runs (+0.008 to +0.013 paired each time — deals are unseeded CSPRNG hands, so each
+  rerun is a fresh sample, not a replay) — an order of magnitude tighter than the marginal per-run CIs,
+  which *do* overlap (the canonical run above: 24000's make-prob-gain CI is [0.014, 0.036], 96000's is
+  [0.025, 0.043]), so the paired difference, not the marginal ranges, is what this decision rests on. A one-off 384000 check (regret 0.002, gain +0.043 ± 0.009 / +3.93 ± 0.91 pts) shows the curve
+  itself flattening from 96000 on — unlike trump, call had not reached that point at 24000. Rejected, once
+  measured: a single shared budget for all three questions. Common random numbers itself is unaffected —
+  worlds are still shared within each question's own candidate set — only their count stopped being one
+  constant across all three.
 - **D37. The review opens on demand from the round-result modal, never automatically.** Rejected:
   auto-opening — it would sit on top of the ready gate that three other players are waiting on.
   **Extended by Task 14:** a deal that wins the match never reaches `roundEnd` (`match.js`'s `endRound`
@@ -260,6 +292,169 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   automatic, computed lazily, never displacing the modal's primary action — rematch, here, rather than
   ready) now also lives on the match-over modal, via the same body/action sibling split Task 12 proved on
   the round-result modal.
+- **D38. The report card is a client-side aggregate over a server-side deal record.** The cheap,
+  public half — which side won each deal, at what contract, made or set — lives in the engine and
+  arrives in the view, so it survives refresh, reconnect, a phone takeover and spectating. The
+  expensive half — graded decisions — is computed in the browser from locally retained deal
+  snapshots, per D28 (the coach costs the Durable Object nothing).
+  Rejected: computing the report in the DO — it breaks D28 and would add ~170 ms of CPU per player
+  per match to an object whose entire cost model (D35) rests on the worst *single* invocation being
+  3.3–8.1 ms.
+  Rejected: keeping the deal record only in `src/core/room/` — solo would get nothing, the contract
+  half would die with the browser tab alongside the graded half, and the room would re-derive at
+  `endRound` what the engine already knows there.
+- **D39. Two new public engine fields, `G.auction` and `G.dealHistory`.** Both follow D27's rule that
+  history belongs in the engine: a client that reconstructs the auction by parsing `G.log` is a
+  client that breaks the next time the wording changes.
+  `applyBid` deliberately does not write a pass to `G.bids` (it filters `bidActive` instead), and
+  `advanceBidding` loops until only the high bidder remains — so `bids[]` holds each seat's *latest*
+  bid and the auction sequence is genuinely unrecoverable from the view. `G.auction` is not
+  convenience; it is the only way to know which target a bidder faced at their turn.
+  Neither field adds redaction surface: every bid is announced aloud, and `dealHistory` carries only
+  what the round-result modal already shows.
+- **D40. `G.matchId`.** Minted in `createMatch` from `randomInt` (the CSPRNG — same stream the deal
+  uses; there is nothing here to protect, but there is also no reason to introduce a second source).
+  It earns its place twice: it keys the client's deal snapshots, so a rematch in the same room cannot
+  read the previous match's deals, and it closes a second gap in the stats table, which today has no
+  way to tell that four rows came from one match.
+- **D41. One unit for all four decision types: probability the declaring side makes the contract.**
+  `evaluateMoves` already reports card play in exactly this unit (`winProb`), and
+  `bidValue().makeProb(t)` is the same quantity for a bid. Trump and call are re-ranked onto it
+  (D42). The payoff: `BLUNDER_WIN_DELTA` (0.15) and `MISTAKE_WIN_DELTA` (0.07) apply table-wide, one
+  fine/mistake/blunder vocabulary covers the whole card, and the headline number is coherent instead
+  of being a mean over three incommensurable scales.
+  Rejected: grading trump/call in their own unit (mean captured points) on a separate advisory line —
+  honest, but it leaves the card with a section users must convert in their heads, and it preserves
+  the objective D35 concluded was the wrong one.
+  **Narrower in practice than "one unit" implies, found during implementation:** a shared unit makes
+  the four kinds *comparable* against the fine/mistake/blunder thresholds; comparable turned out not
+  to mean *poolable*. The bid's probability is the search's own distance from its 0.5 decision line,
+  not a forgone win probability — passing does not end the deal the way playing a worse card does, so
+  there is no shared-world candidate to subtract it from. `headline` (`app/js/coach/report.js`)
+  therefore averages only `play`/`trump`/`call` (its `HEADLINE_KINDS`); the bid keeps the shared
+  thresholds — it still grades fine/mistake/blunder, still counts toward `counts`, and still gets its
+  own `byKind.bid.meanDelta` — but is excluded from the mean itself, and from `worst` (its own worst
+  is `worstBid`, ranked separately). Ordinal comparability (a shared pass/fail line) does not imply
+  cardinal commensurability (a shared quantity worth averaging). Caught before review, not after:
+  Task 7's implementer found `headline` shipped blended across all four kinds on its own first pass —
+  the design spec's own interface contract said "mean delta per graded decision" with no qualifier,
+  contradicting the same document's Grading-rules text — and disclosed it rather than silently
+  shipping that reading. The spec's interface contract is corrected to match what shipped.
+- **D42. Trump and call are re-ranked by make-probability, inside `ai/bid-search.js`.** They rank by
+  mean captured points today, which is precisely the objective D35 retired: *"a deal is scored made
+  or set — a binary — so points captured beyond the contract line buy nothing… points per deal was
+  the wrong objective to have designed against; deals won is the scoring unit."*
+  This is safe to change in one place because these two functions have exactly one caller. D35 cut
+  them from the server; `ai/index.js` routes only the bid, and `app/js/coach/worker.js` is their sole
+  consumer (stated at `ai/bid-search.js:142`). So the hint and the review inherit one implementation
+  and cannot disagree — the "two spellings of one rule" failure `coach/worker.js:90` warns about
+  never arises.
+  Bots are unaffected: they call `aiPickTrump`/`aiPickPartner`, not these.
+  **Obligation, not a footnote:** every tuned number attached to these two functions was measured
+  under the points objective — D36's regret figures (trump 0.48 vs the heuristic's 2.96; call 1.06 vs
+  3.65) and its hold-out (+2.47 ± 0.95 and +2.60 ± 0.87 points/deal), and the
+  `TRUMP_PLAY_BUDGET`/`CALL_PLAY_BUDGET` of 24,000 those rest on. Re-ranking made them stale.
+  `scripts/bench-auction-search.js` exists to re-derive exactly these, and Milestone 3 (Task 3) did:
+  `node scripts/bench-auction-search.js regret` reswept both budgets under make-probability, and D36
+  above now carries the measured replacements, in the ROADMAP's own "CORRECTED, measured" style —
+  `TRUMP_PLAY_BUDGET` held at 24000, `CALL_PLAY_BUDGET` raised 24000 → 96000; see D36 itself for the
+  regret figures and the paired-difference evidence behind each. This project has a standing rule
+  against re-arguing a number that can be re-measured — discharged here, not merely stated.
+- **D43. A decision is graded only outside a dead band derived from its own sampling error.**
+  A make-probability is a binomial proportion over `worlds` sampled deals, so its standard error is
+  `√(0.25/worlds)` and a two-SE band is `2·√(0.25/worlds)` = **`1/√worlds`**. Inside that band the
+  search cannot tell the candidates apart, and grading anyway would assert precision the sampler does
+  not have. For the bid there is a second reason: D35's own counterfactual measured the marginal bid
+  at **−0.35 ± 1.40 pp**, leaving the 0.50 and 0.55 thresholds statistically indistinguishable — the
+  line itself is not known sharply enough to call a near-miss a blunder.
+  Common random numbers (D36) make the trump/call comparisons paired, so the variance of the
+  *difference* is below the unpaired binomial SE and the band is conservative there. Conservative is
+  the right direction for a grader.
+  Band decisions grade **`fine`**, they are not skipped. They were real decisions that were not
+  errors; dropping them from the denominator would silently inflate the score.
+- **D44. The review sizes its budget from the precision it needs, inverting the bots' rule.**
+  `worldsFor(candidates, budget) = max(4, floor(budget / (candidates·52)))` runs budget → worlds,
+  which is right for a bot deciding under a per-invocation CPU bill. A grader has the opposite
+  constraint, and inheriting the bots' budgets ~~breaks it outright: at `CALL_PLAY_BUDGET = 24000`
+  with ~10 candidates, `worldsFor` yields 46 worlds and a band of `1/√46` = **0.147** — wider than
+  `MISTAKE_WIN_DELTA` (0.07) by more than double, and effectively at `BLUNDER_WIN_DELTA` (0.15). The
+  mistake grade for calls would be unreachable: any delta large enough to escape the band is already
+  a blunder.~~ **CORRECTED — re-derived from `worldsFor`'s own formula
+  (`app/js/core/engine/ai/bid-search.js`), after Task 3 raised `CALL_PLAY_BUDGET` 24000 → 96000 (D36
+  above), and from the same file's own *measured* candidate counts rather than an unverified "~10"
+  this correction first used (wrong, and material — it changes which side of the line a typical call
+  lands on): inheriting breaks it for two of the three questions unconditionally, and for the third,
+  conditionally.**
+  Bid and trump are unconditional — their candidate counts are fixed by the question's own shape,
+  never the hand: `bidValue` always samples `worldsFor(1, ·)`; `evaluateTrumps` always
+  `worldsFor(SUITS.length, ·)` = `worldsFor(4, ·)`. Inheriting `BID_PLAY_BUDGET` (3000) gives
+  `worldsFor(1, 3000)` = **57** worlds, band **0.1325**; inheriting `TRUMP_PLAY_BUDGET` (24000) gives
+  `worldsFor(4, 24000)` = **115** worlds, band **0.0933**. Both exceed `MISTAKE_WIN_DELTA` (0.07) on
+  every hand, no exceptions.
+  The call is not unconditional, and that is exactly what "~10 candidates" hid: `ai/bid-search.js`'s
+  own regret table (`:86`) documents the measured shortlist average as **~8** candidates, not 10. At
+  8, inheriting `CALL_PLAY_BUDGET` (96000) is actually *adequate*: `worldsFor(8, 96000) =
+  floor(96000/416)` = **230** worlds, band `1/√230` = **0.0659** — *below* `MISTAKE_WIN_DELTA`
+  (matches `ai/bid-search.js`'s own printed "~229 worlds" at this budget, to within the rounding of
+  an average over many hands' exact counts). ~~But the shortlist is capped at **13** (12 honours plus
+  the heuristic), and at that ceiling `worldsFor(13, 96000) = floor(96000/676)` = **142** worlds,
+  band `1/√142` = **0.0839**~~ — **CORRECTED, derived:** the ceiling is **12**, not 13, and 13
+  describes a hand that cannot be dealt. `evaluateCalls` (`ai/bid-search.js:313`) dedupes the
+  heuristic *out of* the honour list rather than adding it alongside: the candidates are the rank≥12
+  cards the seat does not hold — at most all 12 of them — and `aiPickPartner` returns an un-held ace,
+  else an un-held king, else `callableCards[0]`, so it is itself one of those 12 on every hand but one
+  holding all twelve honours, where the honour list is empty and the shortlist is 1. Measured over
+  8,000 hand-count auctions driven to `trumpSelect`, at the declaring seat the search actually grades:
+  mean **8.05**, max **12** (at an arbitrary seat, mean 9.00, max 12 — a declarer holds more honours,
+  so fewer remain callable, which is why the population matters). At the real ceiling
+  `worldsFor(12, 96000) = floor(96000/624)` = **153** worlds, band `1/√153` = **0.0808** — still
+  *above* `MISTAKE_WIN_DELTA`, so the conclusion below is unchanged; only the figures were wrong. This
+  is the same undeduped-candidate-count error the head commit exists to fix, corrected in the average
+  and left standing in the ceiling. Pinned as an executable invariant in `test/coach.test.js`
+  (`CALL_SHORTLIST_MAX`), not restated.
+  So "inheriting the bots' budgets breaks it outright" was never quite the right claim for the call,
+  and correcting only the arithmetic would still have left it wrong: the call's inherited budget is
+  adequate on a typical hand and inadequate on the widest one. That is still a real and sufficient
+  reason to derive the budget rather than inherit it — not because inheriting always fails, but
+  because only a derived budget *guarantees* the same precision on every position the review might
+  grade, including the 12-candidate hand a constant tuned to the average case would silently
+  under-serve. Bid and trump's unconditional failure makes the same point without the
+  hand-dependence: neither question's candidate count ever moves, so neither ever crosses back over
+  the line the way the call does.
+  So the review inverts it. The band must clear the finest grade it has to express:
+
+      1/√worlds ≤ MISTAKE_WIN_DELTA   →   worlds ≥ 1 / MISTAKE_WIN_DELTA²
+
+      MIN_REVIEW_WORLDS = Math.ceil(1 / MISTAKE_WIN_DELTA ** 2)     // 205
+      auctionBudgetFor(candidates) = MIN_REVIEW_WORLDS * candidates * 52
+
+  Derived, not chosen: change `MISTAKE_WIN_DELTA` and the world count follows — and this formula was
+  never actually a function of any `*_PLAY_BUDGET` constant, so nothing about `CALL_PLAY_BUDGET`'s
+  own value changes what `MIN_REVIEW_WORLDS`/`auctionBudgetFor` compute, only what inheriting it
+  instead would have delivered — which is exactly the comparison above.
+  Bounded by construction — the call's candidate list is at most **12** (the honours the seat does
+  not hold, heuristic deduped into them), so the widest question the review can face costs
+  `205 · 12 · 52` = 127,920 simulated plays. `coach/auction.js` asks for `auctionBudgetFor(13)`
+  = 138,580 anyway, which errs safe by exactly one candidate's worth: `evaluateCalls` divides the
+  budget by the shortlist it actually built, so a larger budget only ever buys more worlds than the
+  floor requires, never fewer.
+  Rejected: a fixed `REVIEW_AUCTION_BUDGET` split across a deal's auction decisions, mirroring
+  `REVIEW_PLAY_BUDGET` — it reintroduces exactly the fault D36 found in the single shared budget,
+  where precision falls as the candidate list grows and the argmax ends up ranking its own noise.
+- **D45. The card prints its own coverage and never presents a partial mean as a whole one.**
+  Snapshots are device-local (D46), so a second device, private browsing, a storage quota or joining
+  mid-match all yield an incomplete graded half. The card reads *"graded 4 of 5 deals"* in every
+  case, including the complete one. Same discipline as `coach/worker.js:132-136`'s honest refusal
+  rather than a review of a partial deal.
+- **D46. Deal snapshots are client-side, in `localStorage`, keyed by room and `matchId`.**
+  Zero server cost and no protocol change; survives a refresh or a reconnect on the same device.
+  Accepted cost: a different device cannot grade deals it did not play, which D45 makes visible
+  rather than silent.
+  Rejected: shipping every finished deal back in the view — complete and device-independent, but it
+  puts the whole match's tricks on the wire and into DO storage for a feature only the owning player
+  reads.
+  Rejected: in-memory only — a refresh mid-match is common enough (and a PWA tab eviction likelier
+  still) that the graded half would be missing more often than present.
 
 ## Milestones
 
@@ -438,3 +633,55 @@ passing): the marginal bid measured at **−0.35 ± 1.40 pp**, no detectable eff
 statistically indistinguishable and 0.50 kept as the measured incumbent, not as a winner. Task 13 deleted
 the retracted computation from the script rather than merely annotating it, so nobody re-derives a
 withdrawn argument from the tool.
+
+### M11 — The report card: a match graded, not just a deal
+
+Aggregates M10's per-deal review across an entire match — card play, the bid, the trump pick and the
+partner call — into one graded report on the match-over modal, and fixes the D1 stats table's per-deal
+bid counters, which had silently measured only the match's final deal. Design:
+`docs/superpowers/specs/2026-08-01-coach-report-card-design.md`. Plan:
+`docs/superpowers/plans/2026-08-01-coach-report-card.md`. Decisions D38–D46 above are this milestone's
+design log (continuing M10's D28–D37); D41, D42 and D44 record where implementation and measurement
+corrected the spec's own numbers and contracts, not just its conclusions.
+
+- [x] Task 1: engine history — `G.auction`, `G.dealHistory`, `G.matchId` (D39, D40). `auction` resets
+      every `deal()` so a redeal's passed-out auction correctly vanishes; `publicView` publishes
+      `auction`/`dealHistory` as copies, never aliases, so a viewer can never hold a reference into `G`.
+- [x] Task 2: `ai/bid-search.js`'s `evaluateTrumps`/`evaluateCalls` factored out of
+      `aiPickTrumpSearch`/`aiPickPartnerSearch`, which become argmax wrappers over them, re-ranked
+      onto make-probability (D42) — mirrors D29's evaluator/wrapper split exactly. Bots unaffected:
+      `ai/index.js` still calls the plain heuristics.
+- [x] Task 3: re-measured what the re-ranking invalidated (D42's own obligation) —
+      `TRUMP_PLAY_BUDGET` held at 24000, `CALL_PLAY_BUDGET` raised 24000 → 96000 (D36 above, corrected
+      in place rather than left to go stale).
+- [x] Task 4: `coach/auction.js` — grades the bid, the trump pick and the call from the auction log;
+      review.js's sibling for the half of a deal that happens before a card is played. Dead-band
+      grading (D43) sized from the precision the review itself needs (D44), not inherited from the
+      bots' budgets.
+- [x] Task 5: `coach/report.js` — the pure match-wide aggregate (D41). `headline` means only
+      play/trump/call; the bid keeps the shared thresholds without entering the mean.
+- [x] Task 6: finished-deal snapshots kept client-side, `app/js/util/deals.js` (D46), keyed by room
+      and `matchId`, capped at 3 retained matches, degrading to a no-op rather than throwing under a
+      storage quota or private browsing.
+- [x] Task 7: the report card itself — worker/`client.js` wiring for a multi-deal request, and the
+      match-over modal's `Report card ▸` toggle, a third sibling next to rematch and
+      `Review this deal ▸` (D37) — always states its own coverage and never presents a partial mean as
+      a whole one (D45).
+- [x] Task 8: fixed what "Your record" measures (③) — `writeMatchStats` now folds every deal in
+      `G.dealHistory` instead of reading only `G.lastResult`, so a player who won four bids and made
+      all four then lost the fifth deal no longer records zero; migration for existing D1 databases at
+      `migrations/0001-report-card.sql` (Task 10 adds a second, `migrations/0002-difficulty.sql` —
+      both are needed, and `/stats` degrades one line at a time if only the first has been applied).
+- [x] Task 9: this documentation and decision log — plus three corrections to shipped text the
+      earlier tasks' own measurements had already outrun: `coach/auction.js`'s dead-band comment
+      (D44, re-derived above), the design spec's headline/costliest-decisions contract (D41), and
+      this log itself, which shipped source had been citing since Task 4 while it still stopped at
+      D37.
+- [x] Task 10: **recent form** on the join screen, sliced by difficulty and never pooled — the last
+      up-to-20 matches at whichever tier the player's most recent match was recorded under, dropping
+      any flagged `difficulty_mixed`, and saying nothing at all below 3 same-tier matches. Shipped as
+      recent form rather than the career trend this line originally described: a win rate is
+      invariant to match length but not to bot difficulty, so the tier has to be recorded before any
+      trend over it means anything, and recording it is what actually landed.
+      `src/worker/stats.js:31-74`, `app/js/screens/join.js:23-38`, `src/core/room/handlers.js:77-85`,
+      `migrations/0002-difficulty.sql`, `README.md:100-123`, 5 tests.
