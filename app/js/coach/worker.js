@@ -7,6 +7,8 @@
 import * as E from "../core/engine/index.js";
 import { shadowFromView } from "./shadow.js";
 import { reviewDeal } from "./review.js";
+import { reviewAuction } from "./auction.js";
+import { matchReport } from "./report.js";
 
 /* Background-thread budget: generous, because nothing here blocks a frame.
    client.js's synchronous fallback (no worker available) passes
@@ -120,6 +122,22 @@ function handleRequest(msg) {
          the same numbers regardless of how many times it's been asked for. */
       const result = reviewDeal(view, msg.seat, {});
       return { id: msg.id, ok: true, result };
+    }
+    if (msg.kind === "report") {
+      /* Same honesty as the review branch: a report over nothing is a refusal,
+         not a perfect score. A zero here would read as flawless play. */
+      const deals = Array.isArray(msg.deals) ? msg.deals : [];
+      if (!deals.length) return { id: msg.id, ok: false, error: "no finished deal to report on" };
+      const graded = deals.map(d => {
+        const play = reviewDeal(d, msg.seat, {});
+        const auction = reviewAuction(d, msg.seat, {});
+        return {
+          roundNumber: d.roundNumber,
+          decisions: play.decisions.concat(auction.decisions),
+          skipped: auction.skipped,
+        };
+      });
+      return { id: msg.id, ok: true, result: matchReport(graded, msg.seat, msg.dealsInMatch) };
     }
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
   } catch (e) {

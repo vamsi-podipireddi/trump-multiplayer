@@ -15,6 +15,7 @@ import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coa
 import { matchReport } from "../app/js/coach/report.js";
 import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor } from "../app/js/coach/auction.js";
 import { snapshotOf } from "../app/js/util/deals.js";
+import { describeReport } from "../app/js/ui/coach.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -1226,4 +1227,30 @@ test("a snapshot carries exactly what the graders read, and no hand", () => {
   assert.ok(r.decisions.length || r.skipped.length);
   const rd = reviewDeal(s, s.declarer, {});
   assert.ok(Array.isArray(rd.decisions));
+});
+
+// ---------------------------------------------------------------------------
+// Task 7 — the worker's "report" branch (worker.js), wiring reviewDeal and
+// reviewAuction's per-deal grades into report.js's matchReport, plus the
+// pure wording half of the match-over panel (ui/coach.js's describeReport).
+
+test("the worker's report branch grades every deal it is given", () => {
+  const { v, seat } = finishedDealView();
+  const res = handleRequest({ id: 1, kind: "report", deals: [snapshotOf(v)], seat, dealsInMatch: 3 });
+  assert.equal(res.ok, true);
+  assert.equal(res.result.coverage.dealsGraded, 1);
+  assert.equal(res.result.coverage.dealsInMatch, 3);
+  assert.ok(res.result.counts.fine + res.result.counts.mistake + res.result.counts.blunder >= 0);
+});
+
+test("the worker refuses a report with no deals rather than reporting zero", () => {
+  const res = handleRequest({ id: 2, kind: "report", deals: [], seat: 0, dealsInMatch: 3 });
+  assert.equal(res.ok, false);
+  assert.match(res.error, /no finished deal/i);
+});
+
+test("describeReport states coverage even when it is complete", () => {
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0, "fine")], skipped: [] }], 0, 1);
+  const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(s.coverage, /1 of 1/);
 });

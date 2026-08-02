@@ -445,8 +445,63 @@ function reviewErrorMessage(res) {
    promise a stable reading of. */
 const REVIEW_REJECTED_MESSAGE = "The review search failed — try again.";
 
+// ---------- match report ----------
+/* coach/report.js's matchReport() aggregates every graded deal the worker's
+   "report" branch (worker.js) hands it — reviewDeal's card-play decisions plus
+   reviewAuction's bid/trump/call ones — into one match-wide mean; this section
+   is only the wording, the same split describeReview/renderReview above keep
+   for the single-deal case. Painted into the match-over modal (ui/modals.js)
+   as a third sibling next to the rematch button, computed on click like every
+   other coach affordance in this file (D37) — never automatically, and never
+   in the way of the button three other players, or the host's own next
+   match, may be waiting on. */
+
+/* Pure: matchReport's own numbers turned into the words the card prints.
+   Coverage is always stated, including when it is complete — a partial mean
+   presented as a whole one is the one thing this panel must never do (D45). */
+function describeReport(report, v, seat) {
+  const c = report.coverage;
+  const graded = report.counts.fine + report.counts.mistake + report.counts.blunder;
+  return {
+    coverage: `graded ${c.dealsGraded} of ${c.dealsInMatch} deal${c.dealsInMatch === 1 ? "" : "s"}`,
+    headline: report.headline == null
+      ? "No decision in this match was open enough to grade."
+      : `${(report.headline * 100).toFixed(1)}% average win probability given away, over ${graded} decision${graded === 1 ? "" : "s"}.`,
+    counts: `${report.counts.fine} fine · ${report.counts.mistake} mistake${report.counts.mistake === 1 ? "" : "s"} · ${report.counts.blunder} blunder${report.counts.blunder === 1 ? "" : "s"}`,
+    /* The bid's number shares the scale but not the meaning: passing hands the
+       auction on rather than ending the deal, so it measures distance from the
+       search's own line, not forgone win probability. Worded so nobody adds it
+       to the other three. */
+    bidNote: report.byKind.bid.n
+      ? `Bidding: ${report.byKind.bid.n} decision${report.byKind.bid.n === 1 ? "" : "s"}, ${report.byKind.bid.blunders} well past the line.`
+      : null,
+    partial: c.dealsGraded < c.dealsInMatch
+      ? "Deals played on another device, or before this browser stored them, are not included."
+      : null,
+  };
+}
+
+function renderReport(report, v, seat) {
+  const s = describeReport(report, v, seat);
+  const row = (k, label) => report.byKind[k].n
+    ? `<div class="tr-row"><span>${label}</span><span>${report.byKind[k].meanDelta == null ? "—" : (report.byKind[k].meanDelta * 100).toFixed(1) + "%"}</span></div>`
+    : "";
+  const worst = report.worst.map(d =>
+    `<div class="rv-row"><span>${esc(String(d.kind))} · deal ${d.roundNumber}</span><span>${(d.delta * 100).toFixed(1)}%</span></div>`).join("");
+  return `<div class="deal-review">` +
+    `<p class="kicker">${esc(s.coverage)}</p>` +
+    `<p>${esc(s.headline)}</p>` +
+    `<p class="muted">${esc(s.counts)}</p>` +
+    row("play", "Card play") + row("trump", "Trump") + row("call", "The call") +
+    (s.bidNote ? `<p class="muted">${esc(s.bidNote)}</p>` : "") +
+    (worst ? `<div class="note">Costliest decisions</div>${worst}` : "") +
+    (s.partial ? `<div class="note">${esc(s.partial)}</div>` : "") +
+    `</div>`;
+}
+
 export {
   hintEnabled, initCoach, renderCoach, resetCoach, describeHint,
   describeTableRead, tableReadRows, voidsHtml, suitsHtml, renderTableRead,
   describeReview, renderReview, reviewErrorMessage, REVIEW_REJECTED_MESSAGE,
+  describeReport, renderReport,
 };

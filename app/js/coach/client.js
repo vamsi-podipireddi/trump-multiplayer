@@ -89,9 +89,18 @@ function requestHint(view) { return request("hint", { view }); }
    adding the review needed no change in this file at all. */
 function requestReview(view, seat) { return request("review", { view, seat }); }
 
+/* Rides the same request() as the hint and the review — one correlation path,
+   one timeout, one synchronous fallback. A whole match's grading is heavier
+   than a single review, so this is the one caller that can plausibly reach
+   TIMEOUT_MS on a slow phone; modals.js surfaces that as a retry rather than a
+   permanent spinner. */
+function requestReport(deals, seat, dealsInMatch) {
+  return request("report", { deals, seat, dealsInMatch });
+}
+
 /* True when a live worker backs the facade, false when every request is about
    to run synchronously on this thread. Attempts construction if nothing has
    asked yet, so a caller can check before ever making a request. */
 function coachAvailable() { return !!getWorker(); }
 
-export { requestHint, requestReview, coachAvailable };
+export { requestHint, requestReview, requestReport, coachAvailable };
