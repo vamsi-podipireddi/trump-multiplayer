@@ -1138,6 +1138,49 @@ test("a correct pass on a weak hand is not an error", () => {
   assert.ok(onRightSide > 0, "expected at least one bid decision on the correct side of the line to actually exercise the clamp");
 });
 
+/* Review-round finding B4: best used to be the unconditional opposite of what
+   was played (null whenever you bid, target whenever you passed) — correct
+   only when the play itself was wrong, so it named the WRONG suggestion
+   whenever you were right (told to pass when you correctly bid, or to bid
+   when you correctly passed). Fixed to mirror aiBidDecisionSearch's own
+   threshold: best = p >= 0.5 ? target : null, unconditional on what was
+   played. `target` is reconstructed independently here — E.minNextBid on the
+   tapped position for a pass (need), or the played value itself for a real
+   bid — rather than by re-deriving p, which would mean re-running the search
+   and risking a second, possibly-drifting copy of its own seeding. Pooled
+   across all four seats for enough decisions to see more than one of the
+   four (action x side-of-line) combinations in a single run:
+     played=bid,  p>=0.5 (right): target=played,  best=target  -> best===played
+     played=bid,  p<0.5  (wrong): target=played,  best=null    -> best!==played
+     played=pass, p>=0.5 (wrong): target=need,    best=target  -> best!==played
+     played=pass, p<0.5  (right): target=need,    best=null    -> best===played */
+test("a bid decision's best mirrors the search's own threshold, not the opposite of what was played", () => {
+  const { v } = finishedDealView();
+  let checked = 0;
+  for (const seat of [0, 1, 2, 3]) {
+    const positions = [];
+    const r = reviewAuction(v, seat, { _tap: (pos, kind) => { if (kind === "bid") positions.push(pos); } });
+    const bidDecisions = r.decisions.filter(d => d.kind === "bid");
+    assert.equal(bidDecisions.length, positions.length,
+      "every graded bid decision must have exactly one tapped position, in the same order");
+    bidDecisions.forEach((d, i) => {
+      const need = E.minNextBid(positions[i]);
+      const target = d.played == null ? need : d.played;
+      const expectedBest = d.playedProb >= d.bestProb ? target : null;
+      assert.equal(d.best, expectedBest,
+        `seat ${seat}: best does not match aiBidDecisionSearch's own p >= 0.5 threshold`);
+      // best equals played exactly on the side where that specific action (bid
+      // needs p>=0.5, pass needs p<0.5) was the right call — never merely the
+      // unconditional opposite of what was played.
+      const correctForThisAction = d.played == null ? d.playedProb < d.bestProb : d.playedProb >= d.bestProb;
+      assert.equal(d.best === d.played, correctForThisAction,
+        `seat ${seat}: best must equal played exactly when that play was on its own correct side of the line`);
+      checked++;
+    });
+  }
+  assert.ok(checked > 0, "no bid decisions to check");
+});
+
 test("a forced minimum bid is skipped, not graded", () => {
   const { v, seat } = forcedBidView();           // helper below
   const r = reviewAuction(v, seat, {});
