@@ -15,6 +15,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as R from "../src/core/room/index.js";
+import * as E from "../app/js/core/engine/index.js";
 import { syncWindow } from "../app/js/ui/log.js";
 import { esc } from "../app/js/util/dom.js";
 import { EMOTES } from "../app/js/cards/icons.js";
@@ -716,4 +717,107 @@ test("the match report is requested lazily from the body painter alone", () => {
   // search instead of waiting for the toggle's first click.
   const showFn = sliceFn(src, "showMatchOver");
   assert.doesNotMatch(showFn, /requestReport\(/);
+});
+
+/* ============================================================
+   Fix round C1: a mid-match joiner's report card graded a bot's decisions.
+
+   screens/game.js snapshots the finished deal into util/deals.js on every
+   roundEnd/matchOver render — and that render runs for EVERY viewer, seated
+   or not. modals.js then grades every stored snapshot against view.you.seat.
+   A viewer who is seatless when a deal ends but seated when the match ends
+   therefore had that deal charged to a seat someone else (a bot) played, and
+   the card reported full coverage over it.
+
+   That is the default mid-match join path, not an exotic one: membership.js
+   parks a joiner in a free seat via `wantSeat` and seats.js's
+   applyPendingSeats only hands it over at the NEXT deal (drive.js's
+   dealNext), so the deal they joined during ends with them still a
+   spectator. The two halves below pin both ends of that: the room core
+   really does report spectator:true at exactly the render game.js would
+   snapshot on, and game.js really does read that flag before writing.
+   ============================================================ */
+function joinN(room, n, now) {
+  const pids = [];
+  for (let i = 0; i < n; i++) {
+    const { pid } = R.join(room, { name: "P" + i }, now);
+    assert.ok(pid, "join produced a pid");
+    pids.push(pid);
+  }
+  return pids;
+}
+
+function settleTimers(room, now, stopAt) {
+  for (let i = 0; i < 4000; i++) {
+    if (stopAt(room)) return now;
+    for (const [pid, p] of Object.entries(room.players)) {
+      if (p.seat == null) continue;
+      const v = R.buildView(room, pid, now);
+      if (v.you && v.you.toAct) { R.message(room, pid, E.aiActionFor(room.G, v.you.seat, "normal"), now); break; }
+    }
+    if (stopAt(room)) return now;
+    const due = R.nextTimerDue(room);
+    if (due == null) break;
+    now = due;
+    R.fireTimers(room, now);
+  }
+  assert.ok(stopAt(room), "the room never reached the state this test needs");
+  return now;
+}
+
+test("a mid-match joiner is still a spectator when the deal they joined during ends", () => {
+  let now = 1_000_000;
+  const room = R.createRoom("C1TEST");
+  const [host, p2] = joinN(room, 2, now);      // seats 0 and 1; seats 2 and 3 are bots
+  R.message(room, host, { type: "start" }, now);
+  now = settleTimers(room, now, r => r.G.phase === "playing");
+
+  // The default path: a third human simply joins. No "sit" message is sent —
+  // membership.js parks them itself.
+  const { pid: late } = R.join(room, { name: "Late" }, now);
+  assert.equal(room.players[late].seat, null, "a mid-match joiner takes no seat immediately");
+  assert.notEqual(room.players[late].wantSeat, null, "…but is parked in a free (bot) seat for the next deal");
+  const parked = room.players[late].wantSeat;
+  const dealJoinedDuring = room.G.roundNumber;
+
+  now = settleTimers(room, now, r => r.G.phase === "roundEnd" || r.G.phase === "matchOver");
+  const atRoundEnd = R.buildView(room, late, now);
+  assert.equal(atRoundEnd.roundNumber, dealJoinedDuring, "still the deal they joined during");
+  // The other two halves of game.js's snapshot condition are both satisfied
+  // here — so `spectator` is the only thing standing between this render and
+  // a stored snapshot of a deal this viewer did not play.
+  assert.ok(atRoundEnd.phase === "roundEnd" || atRoundEnd.phase === "matchOver");
+  assert.ok(atRoundEnd.lastResult, "the deal really did finish");
+  assert.equal(atRoundEnd.you.seat, null);
+  assert.equal(atRoundEnd.you.spectator, true,
+    "the joiner must still read as a spectator at the roundEnd of the deal they joined during — " +
+    "the bot in their seat played it, not them");
+
+  // …and only from the next deal on are the decisions in that seat theirs.
+  now = settleTimers(room, now, r => r.G.roundNumber > dealJoinedDuring || r.G.phase === "matchOver");
+  if (room.G.phase !== "matchOver") {
+    const next = R.buildView(room, late, now);
+    assert.equal(next.you.seat, parked, "dealt into the parked seat at the next deal");
+    assert.equal(next.you.spectator, false);
+  }
+});
+
+test("the finished-deal snapshot is never written while spectating", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/screens/game.js"), "utf8");
+  const i = src.indexOf("saveDeal(");
+  assert.ok(i > 0, "screens/game.js no longer stores finished deals at all");
+  // The whole condition guarding that one call — from the `if` that opens it
+  // to the call itself.
+  const guard = src.slice(src.lastIndexOf("if (", i), i);
+  assert.match(guard, /you\.spectator/,
+    "screens/game.js must not snapshot a finished deal while the viewer is seatless: " +
+    "modals.js grades every stored snapshot against view.you.seat, so a deal stored " +
+    "while spectating is later charged to whatever seat its taker ends the match in");
+
+  // solo.js's own identical call site is genuinely unaffected — it builds
+  // view.you itself, with a seat and spectator:false, so there is no
+  // spectating render there to guard against. Pinned rather than assumed.
+  const solo = fs.readFileSync(path.join(root, "app/js/solo.js"), "utf8");
+  assert.match(solo, /spectator:\s*false/, "solo.js's own view is never a spectator's");
+  assert.ok(solo.includes("saveDeal("), "solo.js still stores its finished deals");
 });

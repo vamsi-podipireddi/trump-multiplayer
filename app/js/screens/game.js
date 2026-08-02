@@ -46,8 +46,24 @@ function render() {
 
   /* Snapshot before the modal branches: the deal that wins the match never
      reaches roundEnd, so saving only there would lose the one deal a player is
-     most likely to want graded (the same gap D37's match-over review closed). */
-  if ((S.view.phase === "roundEnd" || S.view.phase === "matchOver") && S.view.lastResult)
+     most likely to want graded (the same gap D37's match-over review closed).
+
+     Never while spectating (fix round C1). This render runs for every viewer,
+     seated or not, and modals.js grades every stored snapshot against
+     view.you.seat — so a snapshot taken while seatless would later be charged
+     to whatever seat its taker happens to hold when the match ends. That is
+     not hypothetical: membership.js parks a mid-match joiner in a free (bot)
+     seat via wantSeat and seats.js's applyPendingSeats only deals them in at
+     the NEXT deal (drive.js's dealNext), so the deal they joined during ends
+     with them still a spectator and that seat's decisions still the bot's.
+     Storing it would have the card claim a bot's play as the player's own,
+     with full coverage — the one thing the report card must never do (D45).
+     Dropping the write instead leaves the deal simply absent, which coverage
+     already states honestly ("graded 11 of 12 deals").
+     solo.js's own identical call site needs no guard: it builds view.you
+     itself with spectator: false and ME always seated. */
+  if ((S.view.phase === "roundEnd" || S.view.phase === "matchOver") && S.view.lastResult &&
+      !S.view.you.spectator)
     saveDeal(S.view.room.code, S.view.matchId, snapshotOf(S.view));
 
   /* One owner for the overlay, so a modal that is still relevant is never
