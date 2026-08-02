@@ -1049,14 +1049,49 @@ test("reviewAuction never lets a later fact reach an earlier position", () => {
   const finished = finishedDealView();          // helper below
   const seen = [];
   reviewAuction(finished.v, finished.seat, { _tap: (pos, kind) => seen.push({ pos, kind }) });
-  assert.ok(seen.length, "at least one auction position was searched");
+  // Review-round finding B1: "at least one" would still pass if a regression
+  // stopped the trump or call tap from ever firing at all (e.g. only bid
+  // positions got searched) — the property would go unverified while the
+  // suite stayed green. Pin the actual set, the same idiom already used above
+  // for the worker's bid/trump/call hint coverage.
+  assert.deepEqual([...new Set(seen.map(s => s.kind))].sort(), ["bid", "call", "trump"],
+    "expected to exercise all three auction decisions");
+
+  /* Review-round finding B3: highBid — "the entire reason G.auction was
+     added" — had no test of its own. Re-derive the same left-to-right fold
+     gradeBids runs internally (auction.js), directly from v.auction rather
+     than by calling into the module under test, and check it against every
+     tapped "bid" position's own pos.highBid, in the order they were tapped.
+     A regression to v.bid (the FINAL contract) here would grade every bid
+     against the level the auction eventually settled at instead of the level
+     actually on offer when it was faced — systematically harsh on early
+     bidders, systematically lenient on whoever pushed the auction, and
+     entirely plausible-looking output either way. */
+  const expectedHighBids = [];
+  let highBid = null;
+  for (const entry of finished.v.auction) {
+    if (entry.seat === finished.seat && !entry.forced) expectedHighBids.push(highBid);
+    if (entry.value != null) highBid = entry.value;
+  }
+  const bidPositions = seen.filter(s => s.kind === "bid").map(s => s.pos);
+  assert.equal(bidPositions.length, expectedHighBids.length,
+    "every one of the seat's non-forced bidding turns must produce exactly one tapped position");
+  bidPositions.forEach((pos, i) => assert.equal(pos.highBid, expectedHighBids[i],
+    `bid position ${i}: highBid must be the auction log's own prefix, not the final contract`));
+
   for (const { pos, kind } of seen) {
     assert.equal(pos.partner, null, `${kind}: partner must not be known`);
     assert.equal(pos.teamsRevealed, false, `${kind}: teams must not be revealed`);
     assert.equal(pos.calledCard, null, `${kind}: the called card must not be known`);
     assert.deepEqual(pos.playedCards, [], `${kind}: no card has been played yet`);
     assert.equal(pos.trickNumber, 0);
+    // Review-round finding B2: the call position's trump was previously exempted
+    // from assertion entirely, so a regression to null there (falling through to
+    // evaluateCalls' own aiPickTrump fallback, scoring every candidate under a
+    // trump the player never chose) would pass silently. Assert what it must
+    // actually be, not just that it's skipped.
     if (kind !== "call") assert.equal(pos.trump, null, `${kind}: trump must not be known`);
+    else assert.deepEqual(pos.trump, finished.v.trump, "call: trump IS legitimately known by the time the call is being chosen");
     assert.equal(pos.hands[finished.seat].length, 13, `${kind}: the full starting hand`);
     assert.ok(pos.hands.filter((h, p) => p !== finished.seat).every(h => h.every(c => c === null)),
       `${kind}: other hands must be placeholders`);
@@ -1070,11 +1105,37 @@ test("reviewAuction repeats exactly when asked twice", () => {
   assert.deepEqual(a.decisions, b.decisions);
 });
 
+/* Review-round finding B10: the original body constructed neither a weak hand
+   nor a pass, and `delta >= 0` is near-tautological — both of decide()'s and
+   gradeBids' own formulas clamp at 0, so this passed even for an
+   implementation that scored the RIGHT side of the line as anything >= 0.
+   Pin the property the title actually claims: a decision on the correct side
+   of the line — a pass the search agrees was right, or a bid the search
+   agrees was right — costs exactly 0, however far past the line it sits, not
+   merely "not negative". Graded across all four seats of the one finished
+   deal, not just the declarer: gradeBids grades every bidding turn a seat
+   took (forced entries aside), so a defender who bid and was later outbid has
+   graded decisions of their own too — pooling them gives the check enough
+   real bid decisions to be reliably non-vacuous without driving a second deal. */
 test("a correct pass on a weak hand is not an error", () => {
-  // one-sided by construction: distance from the line on the RIGHT side is 0
-  const { v, seat } = finishedDealView();
-  const r = reviewAuction(v, seat, {});
-  for (const d of r.decisions) assert.ok(d.delta >= 0, "delta is never negative");
+  const { v } = finishedDealView();
+  let onRightSide = 0;
+  for (const seat of [0, 1, 2, 3]) {
+    const r = reviewAuction(v, seat, {});
+    for (const d of r.decisions) {
+      assert.ok(d.delta >= 0, "delta is never negative");
+      if (d.kind !== "bid") continue;
+      // played == null is a pass, correct when p is at or under the line;
+      // a real bid is correct when p is at or over it — bestProb is always
+      // the 0.5 line itself for "bid" kind decisions (see auction.js).
+      const correctSide = d.played == null ? d.playedProb <= d.bestProb : d.playedProb >= d.bestProb;
+      if (!correctSide) continue;
+      assert.equal(d.delta, 0,
+        `a ${d.played == null ? "pass" : "bid"} on the right side of the line must cost nothing, however far past it`);
+      onRightSide++;
+    }
+  }
+  assert.ok(onRightSide > 0, "expected at least one bid decision on the correct side of the line to actually exercise the clamp");
 });
 
 test("a forced minimum bid is skipped, not graded", () => {

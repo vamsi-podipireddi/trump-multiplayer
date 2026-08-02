@@ -53,9 +53,9 @@ function auctionPosition(v, seat, kind, highBid) {
   };
 }
 
-/* One graded decision, or null when the band swallows it — band decisions still
-   return a decision, graded "fine": they were real decisions that were not
-   errors, and dropping them would inflate the denominator's quality (D43). */
+/* A graded decision — band decisions still return one, graded "fine": they
+   were real decisions that were not errors, and dropping them would inflate
+   the denominator's quality (D43). */
 function decide(kind, roundNumber, played, best, playedProb, bestProb, worlds) {
   const band = bandFor(worlds);
   const raw = Math.max(0, bestProb - playedProb);
@@ -95,7 +95,22 @@ function gradeBids(v, seat, seed, tap, decisions, skipped) {
         const delta = wrongBy > band ? wrongBy : 0;
         decisions.push({
           kind: "bid", roundNumber: v.roundNumber,
-          played: entry.value, best: entry.value == null ? target : null,
+          /* best mirrors aiBidDecisionSearch's own threshold (ai/bid-search.js):
+             bid `target` when makeProb(target) >= 0.5, else pass. Not the
+             unconditional opposite of what was played — that only names the
+             right alternative when the play itself was wrong, and otherwise
+             prints the WRONG suggestion (told to pass when you correctly bid,
+             or to bid when you correctly passed). This equals `played` exactly
+             when you were on the right side of the line, and names the other
+             action only when you were not. */
+          played: entry.value, best: p >= 0.5 ? target : null,
+          /* bestProb is the decision LINE (0.5), not a candidate's own win
+             probability — deliberately: this delta measures distance from the
+             bid/pass boundary, not forgone make-probability. Passing hands the
+             auction on rather than ending the deal, so the true counterfactual
+             to a bid would mean simulating an auction that continues without
+             you; the line is the number that's actually available. Do not
+             "fix" this into a candidate's makeProb. */
           playedProb: p, bestProb: 0.5, delta, band,
           grade: gradeOf(delta), worlds,
         });
