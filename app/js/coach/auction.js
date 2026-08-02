@@ -17,6 +17,17 @@ import { startingHand, preRoundScores, seedFromDeal, gradeOf, MISTAKE_WIN_DELTA 
    grading anyway would assert precision the sampler does not have (D43). */
 const bandFor = (worlds) => 1 / Math.sqrt(worlds);
 
+/* D43 itself, as one expression rather than two. A raw distance the sampler
+   cannot resolve is reported as exactly 0 — not as a small number the panel
+   would then print, rank in "Costliest decisions" and average into the
+   headline as if the search had actually measured it. Strict `>`: a distance
+   equal to the band is still inside it.
+   Extracted (fix round) because both graded quantities clamp the same way and
+   neither had a test: `decide`'s forgone make-probability, and gradeBids'
+   signed distance from the 0.5 line — which is why this takes the raw value
+   already in each caller's own unit rather than recomputing either. */
+const clampToBand = (raw, band) => (raw > band ? raw : 0);
+
 /* The bots run budget -> worlds, which is right for a decision billed per
    invocation. A grader has the opposite constraint. Bid (always 1
    candidate) and trump (always 4) fail it on every hand: worldsFor(1, 3000)
@@ -65,11 +76,16 @@ function auctionPosition(v, seat, kind, highBid) {
 
 /* A graded decision — band decisions still return one, graded "fine": they
    were real decisions that were not errors, and dropping them would inflate
-   the denominator's quality (D43). */
+   the denominator's quality (D43).
+   Exported for the tests, the same reason worker.js exports gradeOneDeal:
+   reaching this through reviewAuction alone means waiting for a real search
+   to happen to land two candidates inside one band, which most matches never
+   do — so the one rule this function exists to apply would be asserted only
+   on the runs that got lucky. */
 function decide(kind, roundNumber, played, best, playedProb, bestProb, worlds) {
   const band = bandFor(worlds);
   const raw = Math.max(0, bestProb - playedProb);
-  const delta = raw > band ? raw : 0;
+  const delta = clampToBand(raw, band);
   return { kind, roundNumber, played, best, playedProb, bestProb, delta, band,
            grade: gradeOf(delta), worlds };
 }
@@ -102,7 +118,7 @@ function gradeBids(v, seat, seed, tap, decisions, skipped) {
            A pass is wrong only when p is high; a bid only when p is low. */
         const wrongBy = entry.value == null ? p - 0.5 : 0.5 - p;
         const band = bandFor(worlds);
-        const delta = wrongBy > band ? wrongBy : 0;
+        const delta = clampToBand(wrongBy, band);
         decisions.push({
           kind: "bid", roundNumber: v.roundNumber,
           /* best mirrors aiBidDecisionSearch's own threshold (ai/bid-search.js):
@@ -173,4 +189,4 @@ function reviewAuction(v, seat, opts) {
   return { decisions, skipped };
 }
 
-export { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor };
+export { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide };

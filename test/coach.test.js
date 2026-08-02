@@ -10,10 +10,10 @@ import * as R from "../src/core/room/index.js";
 import * as E from "../app/js/core/engine/index.js";
 import { shadowFromView } from "../app/js/coach/shadow.js";
 import { tableRead, coachOn } from "../app/js/coach/read.js";
-import { handleRequest } from "../app/js/coach/worker.js";
+import { handleRequest, gradeOneDeal } from "../app/js/coach/worker.js";
 import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coach/review.js";
 import { matchReport } from "../app/js/coach/report.js";
-import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor } from "../app/js/coach/auction.js";
+import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor, clampToBand, decide } from "../app/js/coach/auction.js";
 import { snapshotOf } from "../app/js/util/deals.js";
 import { describeReport, renderReport } from "../app/js/ui/coach.js";
 
@@ -1421,4 +1421,209 @@ test("describeReport words the bid's own line as distance from the line, never a
   const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(s.bidNote, /off the search's line/);
   assert.doesNotMatch(s.bidNote, /probability given away/i);
+});
+
+// ---------------------------------------------------------------------------
+// Fix round: the seam mutation testing found open.
+//
+// Every test above this line either grades ONE deal, or aggregates SYNTHETIC
+// decisions built by dec()/realPlayDecision(). Nothing joined the two halves
+// of the pipeline end to end over real data, so a whole family of edits broke
+// the report card visibly while the suite stayed green: dropping either half
+// of gradeOneDeal's merge, hardcoding its roundNumber, emptying snapshotOf's
+// tricks, and — on the no-worker path — grading the same deal repeatedly or
+// losing dealsInMatch. The four tests below close it.
+
+/* One driven match, kept: every finished deal's view, each paired with the
+   seat that declared it. Memoised because driving a match and grading its
+   deals at MIN_REVIEW_WORLDS is the expensive part of this file, and every
+   test below wants the same thing — several REAL, DISTINCT finished deals,
+   which finishedDealView() above cannot give (it returns only the last one).
+   Nothing here mutates a view; the tests that vary one spread it first. */
+let _matchDeals = null;
+function finishedDealViews() {
+  if (_matchDeals) return _matchDeals;
+  const room = R.createRoom("TEST");
+  const pids = [];
+  for (let i = 0; i < 4; i++) {
+    const { pid } = R.join(room, { name: "P" + i }, 0);
+    pids.push(pid);
+    R.message(room, pid, { type: "sit", seat: i }, 0);
+  }
+  R.message(room, pids[0], { type: "start" }, 0);
+  const out = [];
+  /* Captured at roundEnd, BEFORE readying up — drive()'s own comment above
+     explains why its onStep can never observe that phase, which is exactly
+     why this is a second driver rather than a callback on the first. */
+  for (let step = 0; step < 50000 && room.G.phase !== "matchOver"; step++) {
+    if (room.G.phase === "roundEnd") {
+      out.push({ v: R.buildView(room, pids[room.G.declarer], 0), seat: room.G.declarer });
+      for (const pid of pids) R.message(room, pid, { type: "ready" }, 0);
+      continue;
+    }
+    const ra = E.requiredActor(room.G);
+    if (!ra) { R.fireTimers(room, 1e9); continue; }
+    R.message(room, pids[ra.seat], E.aiActionFor(room.G, ra.seat, "normal"), 0);
+  }
+  // the deal that ends the match never reaches roundEnd — the same gap
+  // screens/game.js's own snapshot site exists to close
+  if (room.G.phase === "matchOver")
+    out.push({ v: R.buildView(room, pids[room.G.declarer], 0), seat: room.G.declarer });
+  assert.ok(out.length >= 2, "a match must have produced at least two finished deals");
+  _matchDeals = out;
+  return out;
+}
+
+/* (1) The whole pipeline, on real data, in one test: a deal the engine
+   actually played -> snapshotOf -> the worker's own report branch ->
+   renderReport. Every intermediate fixture in this file is a place a real
+   value can be replaced by a plausible-looking one and nothing notices;
+   this test has none. realPlayDecision above was the last fix round's
+   answer to the same seam and is still hand-written — it can only ever be
+   as right as whoever typed it. */
+test("end to end: a real finished deal grades and renders with real numbers on both sides of the merge", () => {
+  const { v, seat } = finishedDealViews()[0];
+  const res = handleRequest({ id: 1, kind: "report", deals: [snapshotOf(v)], seat, dealsInMatch: 4 });
+  assert.ok(res.ok, `report failed: ${res.error}`);
+  const r = res.result;
+
+  /* Both halves of gradeOneDeal's merge must have survived into the
+     aggregate. Dropping either one leaves a report that still renders, still
+     states coverage and still prints a headline — just silently over half the
+     decisions, which is the shape of the bug this closes. */
+  assert.ok(r.byKind.play.n > 0,
+    "reviewDeal's card-play decisions must reach the report — an emptied snapshot or a dropped merge half both land here");
+  assert.ok(r.byKind.bid.n + r.byKind.trump.n + r.byKind.call.n > 0,
+    "reviewAuction's bid/trump/call decisions must reach the report too");
+
+  const html = renderReport(r, v, seat);
+  assert.doesNotMatch(html, /undefined/, 'no field the panel prints may ever render as the literal string "undefined"');
+  assert.doesNotMatch(html, /NaN/, "nor as NaN");
+  assert.match(html, /graded 1 of 4 deals/, "coverage must be stated from the numbers actually passed in");
+  assert.match(html, /\d+\.\d%/, "a real, computed percentage must reach the panel — not a dash and not a placeholder");
+  assert.match(html, /Card play/, "the card-play row is what a dropped play.decisions removes");
+});
+
+/* (2) gradeOneDeal's merge itself, against its two halves computed
+   separately. The count equality is what makes "both are present" exact
+   rather than "at least one of each kind appeared". */
+test("gradeOneDeal merges both halves under the deal's own round number, not a hardcoded one", () => {
+  const later = finishedDealViews().find(d => d.v.roundNumber !== 1);
+  assert.ok(later, "the match must have played more than one deal");
+  const snap = snapshotOf(later.v);
+  const merged = gradeOneDeal(snap, later.seat);
+
+  assert.notEqual(later.v.roundNumber, 1,
+    "this fixture must not be deal 1, or a hardcoded roundNumber: 1 would pass unnoticed");
+  assert.equal(merged.roundNumber, later.v.roundNumber,
+    "the merged record must carry the deal's own round number — report.js stamps it onto every decision, and the panel prints it");
+
+  // Both graders are deterministic (seedFromDeal), so these are exactly the
+  // two lists the merge is supposed to concatenate.
+  const play = reviewDeal(snap, later.seat, {});
+  const auction = reviewAuction(snap, later.seat, {});
+  assert.ok(play.decisions.length > 0, "the fixture must contain real card-play decisions");
+  assert.ok(auction.decisions.length > 0, "…and real auction decisions, or neither half proves anything");
+  assert.equal(merged.decisions.length, play.decisions.length + auction.decisions.length,
+    "the merge must keep BOTH halves — dropping either leaves a shorter list that still looks like a valid report");
+  const kinds = new Set(merged.decisions.map(d => d.kind || "play"));
+  assert.ok(kinds.has("play"), "card-play decisions must survive the merge");
+  assert.ok(["bid", "trump", "call"].some(k => kinds.has(k)), "auction decisions must survive the merge");
+});
+
+/* (3) The no-worker chunked path, over two GENUINELY DIFFERENT deals with a
+   dealsInMatch that is not deals.length. The existing chunked test above
+   passes three copies of one snapshot and dealsInMatch === deals.length, so
+   per-deal identity and coverage are both invisible to it: grading deals[0]
+   three times, or letting dealsInMatch fall through as undefined, changes
+   nothing it asserts. */
+test("client.js: the chunked report grades each deal it is given, and reports the match's own deal count", async () => {
+  delete globalThis.Worker;
+  const { requestReport } = await import("../app/js/coach/client.js?t=report-distinct");
+  const all = finishedDealViews();
+  const seat = 0;                        // one seat across both deals, whoever declared them
+  const a = snapshotOf(all[0].v);
+  const b = snapshotOf(all.find(d => d.v.roundNumber !== all[0].v.roundNumber).v);
+  const DEALS_IN_MATCH = all.length + 3; // the match played more deals than this device stored
+
+  const direct = handleRequest({ id: 7, kind: "report", deals: [a, b], seat, dealsInMatch: DEALS_IN_MATCH });
+  const firstTwice = handleRequest({ id: 8, kind: "report", deals: [a, a], seat, dealsInMatch: DEALS_IN_MATCH });
+  assert.notDeepEqual(direct.result, firstTwice.result,
+    "the two snapshots must grade differently, or this test could not tell a per-deal walk from grading the first one twice");
+
+  const res = await requestReport([a, b], seat, DEALS_IN_MATCH);
+  assert.ok(res.ok, `report failed: ${res.error}`);
+  assert.equal(res.result.coverage.dealsGraded, 2);
+  assert.equal(res.result.coverage.dealsInMatch, DEALS_IN_MATCH,
+    "dealsInMatch is the server's own count and must ride through untouched — falling back to deals.length reports full coverage over a partial set (D45)");
+  assert.notEqual(res.result.coverage.dealsInMatch, res.result.coverage.dealsGraded,
+    "…and the fixture must make those two differ, or the fallback would be indistinguishable");
+  assert.deepEqual(res.result, direct.result,
+    "the chunked fallback must walk the deals it was given, in order, exactly once each");
+});
+
+/* (4) D43's dead band, which nothing asserted: a raw distance the sampler
+   cannot resolve is reported as exactly 0, and the decision still appears,
+   graded fine. Both halves — the rule itself at its own boundary, and the
+   consequence a reader actually sees, that a fine decision is never
+   presented as a cost. */
+test("a distance inside its own band grades fine at exactly zero, and never surfaces as a cost", () => {
+  const band = bandFor(MIN_REVIEW_WORLDS);
+  assert.ok(band > 0 && band < 1, `band must be a real probability distance, got ${band}`);
+
+  // strictly inside, exactly on the edge, and just outside
+  assert.equal(clampToBand(band / 2, band), 0, "a distance the sampler cannot resolve is reported as none at all");
+  assert.equal(clampToBand(band, band), 0, "a distance EQUAL to the band is still inside it");
+  assert.equal(clampToBand(band * 1.5, band), band * 1.5, "…and one outside it passes through unchanged, unrounded");
+  // the bid's own quantity is signed — being far from the line on the right
+  // side of it is not an error, and must never read as a negative cost
+  assert.equal(clampToBand(-0.3, band), 0, "distance on the correct side of the bid line is zero cost, never negative");
+
+  /* And through decide(), which is where a trump or call decision actually
+     acquires its delta: a graded decision is still RETURNED for a band
+     distance (dropping it would inflate the denominator's quality, D43) —
+     it just carries no cost. */
+  const inBand = decide("trump", 5, "♠", "♥", 0.50, 0.50 + band / 2, MIN_REVIEW_WORLDS);
+  assert.equal(inBand.delta, 0, "a trump pick the search cannot separate from its own best costs nothing");
+  assert.equal(inBand.grade, "fine");
+  assert.equal(inBand.band, band, "the decision must carry the band it was judged against");
+  assert.equal(inBand.roundNumber, 5, "…and its own deal number, which the panel prints");
+  const outside = decide("call", 5, "♠", "♥", 0.50, 0.50 + band * 2, MIN_REVIEW_WORLDS);
+  assert.ok(Math.abs(outside.delta - band * 2) < 1e-12, "a distance outside the band passes through unchanged");
+  assert.notEqual(outside.grade, "fine", "…and is graded as the error it is");
+
+  /* The same rule where a reader meets it. matchReport ranks only decisions
+     graded worse than fine, so a flawless match must render no costliest
+     list at all — not one row at 0.0%, which reads as a cost that was
+     measured and found to be zero rather than a decision that was fine. */
+  const flawless = matchReport(
+    [{ roundNumber: 1, decisions: [dec("play", 0, "fine"), dec("trump", 0, "fine"), dec("bid", 0, "fine")], skipped: [] }], 0, 1);
+  assert.equal(flawless.worst.length, 0);
+  assert.equal(flawless.worstBid.length, 0);
+  const html = renderReport(flawless, { names: ["A", "B", "C", "D"] }, 0);
+  assert.doesNotMatch(html, /Costliest decisions/, "a flawless match has no costliest decision to name");
+  assert.doesNotMatch(html, /Furthest off the line/, "…nor a bid furthest off the line");
+  assert.equal((html.match(/rv-row/g) || []).length, 0, "and so renders no ranked row at all");
+});
+
+/* The band as a property of every decision a real match produces, not just
+   of the helper in isolation: no graded delta may ever be negative, and none
+   may be a positive value at or below its own band. The bid supplies the
+   negative side in bulk (most passes are correct passes, i.e. on the far
+   side of the line), which is what makes this robust rather than lucky. */
+test("no decision from a real match reports a cost its own sampler could not measure", () => {
+  let checked = 0, fineAtZero = 0;
+  for (const { v } of finishedDealViews()) {
+    for (const s of [0, 1, 2, 3]) {
+      for (const d of reviewAuction(v, s, {}).decisions) {
+        checked++;
+        assert.ok(d.delta >= 0, `${d.kind} delta ${d.delta} is negative — being on the right side of the line is not a cost`);
+        assert.ok(d.delta === 0 || d.delta > d.band,
+          `${d.kind} delta ${d.delta} sits inside its own band ${d.band} — a distance the sampler cannot resolve`);
+        if (d.delta === 0) { assert.equal(d.grade, "fine"); fineAtZero++; }
+      }
+    }
+  }
+  assert.ok(checked > 20, `expected a real match's worth of auction decisions, got ${checked}`);
+  assert.ok(fineAtZero > 0, "a match with no band decision at all would leave this property unexercised");
 });
