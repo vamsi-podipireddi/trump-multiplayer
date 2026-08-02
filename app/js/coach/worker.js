@@ -39,6 +39,25 @@ const FALLBACK_HINT_BUDGET = { determinizations: 8, playBudget: 6000, timeMs: 30
    instead of guessed at. Mirrors flow.js's own requiredActor() switch. */
 const PHASE_FOR_ACT = { play: "playing", bid: "bidding", trump: "trumpSelect", call: "partnerSelect" };
 
+/* One deal's worth of the "report" kind's own grading (handleRequest below):
+   reviewDeal's card-play decisions plus reviewAuction's bid/trump/call ones,
+   folded into the one per-deal shape matchReport expects. Factored out
+   rather than inlined in the branch below so client.js's synchronous
+   fallback (no worker available) can grade a multi-deal report one deal at a
+   time, yielding back to the browser between each, without a second,
+   possibly-drifting copy of this merge (fix round I5 — see client.js's own
+   gradeReportChunked for why a whole match's worth of this in one
+   synchronous burst is a real problem the hint branch never has). */
+function gradeOneDeal(d, seat) {
+  const play = reviewDeal(d, seat, {});
+  const auction = reviewAuction(d, seat, {});
+  return {
+    roundNumber: d.roundNumber,
+    decisions: play.decisions.concat(auction.decisions),
+    skipped: auction.skipped,
+  };
+}
+
 /* Pure: takes a request, returns a response. Exported separately from the
    worker's own message wiring so the tests can execute the real thing in Node,
    where `self` does not exist. */
@@ -128,15 +147,7 @@ function handleRequest(msg) {
          not a perfect score. A zero here would read as flawless play. */
       const deals = Array.isArray(msg.deals) ? msg.deals : [];
       if (!deals.length) return { id: msg.id, ok: false, error: "no finished deal to report on" };
-      const graded = deals.map(d => {
-        const play = reviewDeal(d, msg.seat, {});
-        const auction = reviewAuction(d, msg.seat, {});
-        return {
-          roundNumber: d.roundNumber,
-          decisions: play.decisions.concat(auction.decisions),
-          skipped: auction.skipped,
-        };
-      });
+      const graded = deals.map(d => gradeOneDeal(d, msg.seat));
       return { id: msg.id, ok: true, result: matchReport(graded, msg.seat, msg.dealsInMatch) };
     }
     return { id: msg.id, ok: false, error: `unknown request: ${msg.kind}` };
@@ -151,4 +162,4 @@ function handleRequest(msg) {
 if (typeof self !== "undefined" && typeof window === "undefined" && typeof self.postMessage === "function")
   self.onmessage = (e) => self.postMessage(handleRequest(e.data));
 
-export { handleRequest, HINT_BUDGET, FALLBACK_HINT_BUDGET };
+export { handleRequest, HINT_BUDGET, FALLBACK_HINT_BUDGET, gradeOneDeal };

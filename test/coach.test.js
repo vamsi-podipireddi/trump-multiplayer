@@ -15,7 +15,7 @@ import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coa
 import { matchReport } from "../app/js/coach/report.js";
 import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor } from "../app/js/coach/auction.js";
 import { snapshotOf } from "../app/js/util/deals.js";
-import { describeReport } from "../app/js/ui/coach.js";
+import { describeReport, renderReport } from "../app/js/ui/coach.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -763,6 +763,53 @@ test("client.js: requestHint resolves a real recommendation through the sync fal
     "the fallback's hint must be a legal card");
 });
 
+/* Fix round I5: with no Worker, every OTHER kind still answers in one
+   synchronous handleRequest(...) call (the two tests immediately around this
+   one exercise exactly that, for hint and for review/generic failure) — cheap
+   enough at FALLBACK_HINT_BUDGET that blocking this thread for it doesn't
+   read as a stall. "report" grades a whole match's worth of deals at FULL
+   (worker-quality, unreduced) budget, so left as a single synchronous call it
+   would freeze the tab for the entire match, and — the specific bug named —
+   would do so before modals.js's own "Analysing…" wait message ever got a
+   chance to paint, since nothing yields back to the browser between that
+   write and handleRequest running.
+   The property checked: the promise must NOT settle on the very first
+   event-loop turn (proving at least one real yield happens before any
+   grading starts — the old code settled synchronously, indistinguishable
+   from a `Promise.resolve(x)` already-resolved value, well before even one
+   real setTimeout(0) could fire), and the eventual result must be BYTE
+   IDENTICAL to a single direct handleRequest call over the same input —
+   proving the chunking changes only WHEN the work happens, never WHAT gets
+   computed (gradeOneDeal is called with no seed override on both paths, so
+   both are deterministic functions of the same input). */
+test("client.js: with no Worker, a multi-deal report yields to the event loop instead of blocking in one synchronous burst, and still answers correctly", async () => {
+  delete globalThis.Worker;
+  const { requestReport } = await import("../app/js/coach/client.js?t=report-chunked");
+  const { v, seat } = finishedDealView();
+  const snap = snapshotOf(v);
+  const deals = [snap, snap, snap];
+  const p = requestReport(deals, seat, 3);
+  let settled = false;
+  p.then(() => { settled = true; });
+  await new Promise(r => setTimeout(r, 0));
+  assert.equal(settled, false,
+    "a multi-deal report must not settle on the very first event-loop turn — the caller's own \"Analysing…\" paint needs a chance first");
+  const res = await p;
+  assert.ok(res.ok, `report failed: ${res.error}`);
+  assert.equal(res.result.coverage.dealsGraded, 3);
+  const direct = handleRequest({ id: 999, kind: "report", deals, seat, dealsInMatch: 3 });
+  assert.deepEqual(res.result, direct.result,
+    "the chunked fallback must grade identically to handleRequest's own single-shot report branch");
+});
+
+test("client.js: with no Worker, an empty report still refuses immediately rather than chunking nothing", async () => {
+  delete globalThis.Worker;
+  const { requestReport } = await import("../app/js/coach/client.js?t=report-chunked-empty");
+  const res = await requestReport([], 0, 3);
+  assert.equal(res.ok, false);
+  assert.match(res.error, /no finished deal/i);
+});
+
 test("client.js: a worker response resolves the correlated request, even answered out of order", async () => {
   await withFakeWorker(FakeWorker, async () => {
     const { requestHint } = await import("../app/js/coach/client.js?t=correlate");
@@ -1043,15 +1090,79 @@ test("coverage reports missing deals rather than hiding them", () => {
   assert.equal(r.coverage.dealsInMatch, 5);
 });
 
-test("worst is the two costliest across the whole match, not per deal", () => {
+/* Fix round I2: strengthened with a bid delta (0.90) that is the single
+   LARGEST delta in the whole match — the original version's bid delta (0.20)
+   never contended for the top two either way, so it could not have told the
+   old (buggy) behaviour, which ranked all four kinds in one list, apart from
+   the new one, which ranks only play/trump/call. Under the old behaviour
+   worst[0] would have been the bid at 0.90; under the fix it must be call at
+   0.40, and the bid must surface only in worstBid. */
+test("worst is the two costliest among the commensurable kinds across the whole match, not per deal, and never includes the bid", () => {
   const deals = [
     { roundNumber: 1, decisions: [dec("play", 0.30, "blunder"), dec("play", 0.05, "fine")], skipped: [] },
-    { roundNumber: 2, decisions: [dec("call", 0.40, "blunder"), dec("bid", 0.20, "blunder")], skipped: [] },
+    { roundNumber: 2, decisions: [dec("call", 0.40, "blunder"), dec("bid", 0.90, "blunder")], skipped: [] },
   ];
   const r = matchReport(deals, 0, 2);
   assert.equal(r.worst.length, 2);
   assert.equal(r.worst[0].delta, 0.40);
   assert.equal(r.worst[1].delta, 0.30);
+  assert.ok(r.worst.every(d => d.kind !== "bid"),
+    "the bid's own 0.90 — the single largest delta in the whole match — must never enter worst");
+  assert.equal(r.worstBid.length, 1);
+  assert.equal(r.worstBid[0].delta, 0.90);
+  assert.equal(r.worstBid[0].kind, "bid");
+  assert.equal(r.worstBid[0].roundNumber, 2);
+});
+
+/* Fix round C1 (Critical): the shape check that actually matters.
+   reviewDeal's own decisions (review.js:210-214) carry neither `kind` nor
+   `roundNumber` — only trickNo/played/best/playedWinProb/bestWinProb/delta/
+   grade/samples. Every other test in this file builds its decisions with
+   dec(), which always supplies both fields — exactly why the original bug
+   (every card-play entry in `worst` printing "undefined · deal undefined",
+   confirmed by the reviewer running the real renderer) survived a full
+   implementation pass, a self-review and a whole prior fix round unnoticed:
+   every synthetic decision in this file was shaped unlike a real one. This
+   one is not — it is reviewDeal's own literal shape, unmodified. */
+const realPlayDecision = (delta, grade) => ({
+  trickNo: 3, played: { suit: "♠", rank: 10 }, best: { suit: "♠", rank: 12 },
+  playedWinProb: 0.5, bestWinProb: 0.5 + delta, delta, grade, samples: 24,
+});
+
+test("matchReport stamps kind and roundNumber onto a real reviewDeal-shaped decision, so worst never carries an undefined field", () => {
+  const deals = [{ roundNumber: 7, decisions: [realPlayDecision(0.22, "mistake")], skipped: [] }];
+  const r = matchReport(deals, 0, 1);
+  assert.equal(r.worst.length, 1);
+  assert.equal(r.worst[0].kind, "play", "a reviewDeal decision with no kind of its own must be inferred as play");
+  assert.equal(r.worst[0].roundNumber, 7, "roundNumber must come from the owning deal record — the decision itself carries none");
+});
+
+/* Fix round C1's own reported symptom, reproduced at the renderer: the
+   reviewer's transcript showed "rendered -> undefined · deal undefined" for
+   exactly this shape. renderReport was untouched by any test before this
+   fix round — the root cause C1 itself names — so this is deliberately the
+   first test that calls it at all, and it checks the literal failure text
+   rather than trusting the data-level assertion above to imply the render
+   is fixed too. */
+test("renderReport never prints an undefined kind or deal number for a real reviewDeal decision", () => {
+  const deals = [{ roundNumber: 4, decisions: [realPlayDecision(0.22, "mistake"), dec("bid", 0.9, "blunder")], skipped: [] }];
+  const report = matchReport(deals, 0, 1);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.doesNotMatch(html, /undefined/, 'no field the panel prints may ever render as the literal string "undefined"');
+  assert.match(html, /play · deal 4/);
+});
+
+/* Fix round I2, at the renderer: the bid's own worst must land in a visibly
+   separate list from the commensurable "Costliest decisions" one, never a
+   third row merged into it under the same "costliest" caption. */
+test("renderReport prints the bid's own worst separately from the commensurable 'Costliest decisions' list, never merged", () => {
+  const deals = [{ roundNumber: 1, decisions: [realPlayDecision(0.10, "mistake"), dec("bid", 0.30, "blunder")], skipped: [] }];
+  const report = matchReport(deals, 0, 1);
+  const html = renderReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(html, /Costliest decisions/);
+  assert.match(html, /Furthest off the line/);
+  assert.equal((html.match(/rv-row/g) || []).length, 2,
+    "one row for the commensurable decision, one for the bid — never combined into one list");
 });
 
 // ---------------------------------------------------------------------------
@@ -1285,4 +1396,29 @@ test("describeReport states coverage even when it is complete", () => {
   const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0, "fine")], skipped: [] }], 0, 1);
   const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
   assert.match(s.coverage, /1 of 1/);
+});
+
+/* Fix round I3: pins the two strings F1/F1's own extended ruling actually
+   constrain, neither of which any test touched before this round. A
+   regression back to counts.fine+mistake+blunder as headline's own
+   denominator would print "over 2 decisions" here — wrong, since the
+   headline percentage itself is a mean over only the one commensurable
+   (play) decision; the bid decision is graded but not part of that mean. */
+test("describeReport's headline states its own commensurable count, not the unified counts sum", () => {
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("play", 0.1, "mistake"), dec("bid", 0.9, "blunder")], skipped: [] }], 0, 1);
+  const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(s.headline, /over 1 decision\./,
+    "the headline's own count must be the one commensurable (play) decision, not both graded decisions");
+});
+
+/* Fix round I3: pins bidNote's wording directly — "off the search's line",
+   never "probability given away" (the headline's own phrase, reserved for
+   the three genuinely commensurable kinds). A regression that reused the
+   headline's phrasing for the bid would misstate what byKind.bid.meanDelta
+   actually measures. */
+test("describeReport words the bid's own line as distance from the line, never as probability given away", () => {
+  const report = matchReport([{ roundNumber: 1, decisions: [dec("bid", 0.3, "blunder")], skipped: [] }], 0, 1);
+  const s = describeReport(report, { names: ["A", "B", "C", "D"] }, 0);
+  assert.match(s.bidNote, /off the search's line/);
+  assert.doesNotMatch(s.bidNote, /probability given away/i);
 });

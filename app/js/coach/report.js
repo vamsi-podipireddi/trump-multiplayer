@@ -40,15 +40,27 @@ const kindOf = (d) => d.kind || "play";
 const HEADLINE_KINDS = new Set(["play", "trump", "call"]);
 
 function matchReport(deals, seat, dealsInMatch) {
+  /* Normalised once, here, rather than left for each consumer below (or
+     worse, each consumer of THIS function's own return value) to
+     rediscover: reviewDeal's own decisions carry neither `kind` nor
+     `roundNumber` (review.js:210-214 — trickNo, played, best, ..., nothing
+     else), only reviewAuction's do. Every entry in `all` is a fresh object
+     (never the caller's own decision, mutated) with both stamped on — kind
+     via kindOf, roundNumber off the owning deal record — so every field
+     built from `all` below, worst/worstBid included, can read `d.kind`/
+     `d.roundNumber` directly and trust it. Fix round C1: the original
+     shipped `worst` without this, reading the raw decision straight through,
+     so every card-play entry in it printed "undefined · deal undefined". */
   const all = [];
-  for (const d of (deals || [])) for (const dec of (d.decisions || [])) all.push(dec);
+  for (const d of (deals || [])) for (const dec of (d.decisions || []))
+    all.push({ ...dec, kind: kindOf(dec), roundNumber: d.roundNumber });
 
   const counts = { fine: 0, mistake: 0, blunder: 0 };
   for (const d of all) if (counts[d.grade] !== undefined) counts[d.grade]++;
 
   const byKind = {};
   for (const k of KINDS) {
-    const mine = all.filter(d => kindOf(d) === k);
+    const mine = all.filter(d => d.kind === k);
     byKind[k] = {
       n: mine.length,
       meanDelta: mine.length ? mine.reduce((s, d) => s + d.delta, 0) / mine.length : null,
@@ -61,13 +73,25 @@ function matchReport(deals, seat, dealsInMatch) {
      match where you only ever bid and never faced an open card-play, trump
      or call choice (never declared, and every card you played was forced)
      has no headline, even though `counts`/`byKind.bid` may be nonzero. */
-  const commensurable = all.filter(d => HEADLINE_KINDS.has(kindOf(d)));
+  const commensurable = all.filter(d => HEADLINE_KINDS.has(d.kind));
 
   return {
     headline: commensurable.length ? commensurable.reduce((s, d) => s + d.delta, 0) / commensurable.length : null,
     counts,
     byKind,
-    worst: all.filter(d => d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2),
+    /* Fix round I2: ranked separately, on HEADLINE_KINDS' own split — the
+       same reason headline is. Sorting a bid's distance-from-the-line
+       together with a card play's forgone win probability by raw magnitude
+       is the same cardinal comparison headline was fixed to stop making,
+       just moved from a mean into a ranking: a bid at 0.30 (well off the
+       line) would otherwise outrank a card play at 0.22 (real forgone win
+       probability) in one list captioned "costliest", inviting exactly the
+       reading bidNote (ui/coach.js) exists to prevent. worst: the two
+       costliest among play/trump/call — empty, not merged into worstBid,
+       when nothing commensurable was graded. worstBid: the costliest bid(s)
+       alone, in their own unit, never interleaved with the first list. */
+    worst: commensurable.filter(d => d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2),
+    worstBid: all.filter(d => !HEADLINE_KINDS.has(d.kind) && d.grade !== "fine").sort((a, b) => b.delta - a.delta).slice(0, 2),
     coverage: {
       dealsGraded: (deals || []).length,
       dealsInMatch: dealsInMatch != null ? dealsInMatch : (deals || []).length,

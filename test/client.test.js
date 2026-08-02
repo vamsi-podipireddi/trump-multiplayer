@@ -660,3 +660,35 @@ test("the match review is requested lazily from the body painter alone", () => {
   const showFn = sliceFn(src, "showMatchOver");
   assert.doesNotMatch(showFn, /requestReview\(/);
 });
+
+/* Fix round I4: the review's own two guards above ("...offers a review
+   without displacing rematch" and "...is requested lazily...") were never
+   ported to the report card's own pane when it was added — paintMatchReport
+   is a separate top-level function neither guard's sliceFn call ever
+   touched, so the same D37/D45 structural guarantee held for it only by
+   discipline, not by construction. Same two properties, same technique,
+   this time against paintMatchReport/matchAction. */
+test("the match-over modal offers a report card without displacing rematch", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  assert.match(reportFn, /renderReport\(/);
+  assert.doesNotMatch(reportFn, /btn-rematch|match-action/,
+    "the report body painter must never reach the rematch control's id or host");
+
+  const actionFn = sliceFn(src, "matchAction");
+  assert.match(actionFn, /btn-rematch/);
+  assert.doesNotMatch(actionFn, /renderReport\(/, "the action painter must never touch the report body directly");
+});
+
+test("the match report is requested lazily from the body painter alone", () => {
+  const src = fs.readFileSync(path.join(root, "app/js/ui/modals.js"), "utf8");
+  const reportFn = sliceFn(src, "paintMatchReport");
+  assert.match(reportFn, /requestReport\(/);
+  assert.match(reportFn, /REVIEW_WAIT/, "a working state must show while the search runs");
+  // showMatchOver's own body must never call requestReport directly, for the
+  // same reason it must never call requestReview directly (see the review's
+  // own identical test above) — every render would otherwise re-fire the
+  // search instead of waiting for the toggle's first click.
+  const showFn = sliceFn(src, "showMatchOver");
+  assert.doesNotMatch(showFn, /requestReport\(/);
+});

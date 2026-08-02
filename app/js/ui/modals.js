@@ -192,16 +192,23 @@ function paintMatchBody(view) {
    reach TIMEOUT_MS on a slow phone — so it gets the identical pending/
    settled state machine paintMatchBody's review branch above already uses,
    including the same REVIEW_REJECTED_MESSAGE on outright rejection. Unlike
-   that review branch, a failed state here does not cache forever: closing
-   the toggle behind a failure clears it (see matchAction's rpb.onclick), so
-   reopening genuinely retries instead of replaying the same "try again"
-   message with nothing behind it. */
+   that review branch, a failure here is not a dead end: the failure message
+   carries its own retry button (fix round M10 — a rejection can land while
+   the panel is closed just as easily as while it's open, so a working retry
+   cannot depend on a close/open transition at all; it has to live inside
+   the failure state itself, reachable in the one click from wherever that
+   state is actually shown). */
 function paintMatchReport(view, host) {
   if (matchReportState === "pending") { host.innerHTML = REVIEW_WAIT; return; }
   if (matchReportState) {
-    host.innerHTML = matchReportState.ok
-      ? renderReport(matchReportState.result, view, view.you.seat)
-      : `<div class="deal-review"><p class="muted">${esc(matchReportState.message)}</p></div>`;
+    if (matchReportState.ok) { host.innerHTML = renderReport(matchReportState.result, view, view.you.seat); return; }
+    host.innerHTML = `<div class="deal-review"><p class="muted">${esc(matchReportState.message)}</p>` +
+      `<button class="btn ghost" id="btn-report-retry">Try again</button></div>`;
+    // Resets the cached failure and repaints in place — matchReportOpen
+    // itself never changes, so this can never reach the rematch button's own
+    // action row (same guarantee the toggle buttons themselves carry, see
+    // matchAction below).
+    $("btn-report-retry").onclick = () => { matchReportState = null; paintMatchBody(view); };
     return;
   }
 
@@ -243,9 +250,20 @@ function matchAction(view, onRematch) {
   if (view.room.isHost) $("btn-rematch").onclick = onRematch;
 
   if (view.you && view.you.seat != null) {
+    /* Both buttons are created before either's onclick is wired (fix round
+       M9): rb's own handler closes over rpb, and — while that was already
+       safe today, since neither handler can run before this function itself
+       returns — a later refactor that invoked one during setup, before the
+       `const rpb` below had run, would hit a real TDZ ReferenceError.
+       Declaring both first removes the ordering dependency entirely rather
+       than relying on "the handler never runs early" staying true. */
     const rb = document.createElement("button");
     rb.className = "btn ghost";
+    const rpb = document.createElement("button");
+    rpb.className = "btn ghost";
     paintReviewToggle(rb, matchReviewOpen);
+    paintReviewToggle(rpb, matchReportOpen, "Report card");
+
     /* Mutates this same node rather than rebuilding #match-action: see
        roundAction's identical comment below — a keyboard/screen-reader user
        tabbed here must not lose focus the instant they activate the control
@@ -265,25 +283,15 @@ function matchAction(view, onRematch) {
 
     /* Third sibling, next to — never replacing — the rematch button above,
        per D37/D45: the whole-match report card gets its own toggle,
-       additive exactly the way the deal-review toggle already is. */
-    const rpb = document.createElement("button");
-    rpb.className = "btn ghost";
-    paintReviewToggle(rpb, matchReportOpen, "Report card");
+       additive exactly the way the deal-review toggle already is. Plain flip
+       + mutual exclusion, same shape as rb's own handler — fix round M10
+       moved the failure-specific retry into the failure state's own render
+       (paintMatchReport's #btn-report-retry) rather than tying it to this
+       click, since a rejection landing while the panel is closed would
+       otherwise need a further close/open to actually retry. */
     rpb.onclick = () => {
       matchReportOpen = !matchReportOpen;
-      if (matchReportOpen) {
-        matchReviewOpen = false;   // one pane at a time — see rb's own comment above
-      } else if (matchReportState && matchReportState.ok === false) {
-        /* Closing behind a failed attempt clears it, so the next open is a
-           real retry rather than replaying the same cached failure message
-           forever — a whole match's grading is heavy enough to plausibly hit
-           client.js's own 10s TIMEOUT_MS on a slow phone, and "try again" in
-           that message must actually mean something. A successful result is
-           left cached (untouched here): toggling back and forth to glance at
-           the standings must not re-run an expensive search that already
-           answered. */
-        matchReportState = null;
-      }
+      if (matchReportOpen) matchReviewOpen = false;   // one pane at a time — see rb's own comment above
       paintReviewToggle(rpb, matchReportOpen, "Report card");
       paintReviewToggle(rb, matchReviewOpen);
       paintMatchBody(view);

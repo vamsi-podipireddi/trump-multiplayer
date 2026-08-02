@@ -494,6 +494,14 @@ function describeReport(report, v, seat) {
   };
 }
 
+/* worst/worstBid (report.js) are already normalised — every entry carries a
+   real kind and roundNumber (fix round C1) — and already split on
+   HEADLINE_KINDS (fix round I2), so this only has to word the two lists
+   differently, never rank or merge them itself. worst prints its own kind
+   per row (play/trump/call all land in the one list); worstBid does not —
+   its own section header already says these are bids, so repeating that on
+   every row would be the one thing that list does NOT need, unlike worst's
+   mixed one. */
 function renderReport(report, v, seat) {
   const s = describeReport(report, v, seat);
   const row = (k, label) => report.byKind[k].n
@@ -501,6 +509,8 @@ function renderReport(report, v, seat) {
     : "";
   const worst = report.worst.map(d =>
     `<div class="rv-row"><span>${esc(String(d.kind))} · deal ${d.roundNumber}</span><span>${(d.delta * 100).toFixed(1)}%</span></div>`).join("");
+  const worstBid = report.worstBid.map(d =>
+    `<div class="rv-row"><span>Deal ${d.roundNumber}</span><span>${(d.delta * 100).toFixed(1)}%</span></div>`).join("");
   return `<div class="deal-review">` +
     `<p class="kicker">${esc(s.coverage)}</p>` +
     `<p>${esc(s.headline)}</p>` +
@@ -508,6 +518,7 @@ function renderReport(report, v, seat) {
     row("play", "Card play") + row("trump", "Trump") + row("call", "The call") +
     (s.bidNote ? `<p class="muted">${esc(s.bidNote)}</p>` : "") +
     (worst ? `<div class="note">Costliest decisions</div>${worst}` : "") +
+    (worstBid ? `<div class="note">Furthest off the line</div>${worstBid}` : "") +
     (s.partial ? `<div class="note">${esc(s.partial)}</div>` : "") +
     `</div>`;
 }
