@@ -954,9 +954,12 @@ test("the heuristic's own answer is evaluated first, so a tie leaves it standing
    because bestOf is the one function both consumers share, and the call side
    has its own candidate-construction order to pin
    (`cands = heuristic ? [heuristic, ...honours] : honours`). Kept at the
-   shipped CALL_PLAY_BUDGET (24000): unlike trump, ties there are already
-   common at that budget (9 of 60 sampled seeds), so there is no reason to
-   shrink it. */
+   literal 24000, not the CALL_PLAY_BUDGET constant (raised to 96000 by D36's
+   correction — scripts/bench-auction-search.js `regret`): unlike trump, ties
+   were already common at 24000 (9 of 60 sampled seeds), and a wider budget
+   only makes an exact makeProb tie rarer, so this pins the coarse budget the
+   tie-break needs to find one rather than tracking wherever the shipped
+   default moves. */
 test("evaluateCalls' tie leaves the earliest candidate standing too (bestOf is shared)", () => {
   let tieFound = false;
   for (let seed = 0; seed < 80; seed++) {

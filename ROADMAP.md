@@ -247,11 +247,29 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   candidate, ~115 worlds) was already over-provisioned, while the call (~10 candidates, ~11 worlds) was
   measurably no better than the hand-count it was meant to replace (regret 3.60 vs. the heuristic's own
   3.33). Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
-  measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), `TRUMP_PLAY_BUDGET =
+  measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), ~~`TRUMP_PLAY_BUDGET =
   CALL_PLAY_BUDGET = 24000` (a 150-deal hold-out on seeds disjoint from tuning: +2.47 ± 0.95 and
-  +2.60 ± 0.87 points/deal respectively). Rejected, once measured: a single shared budget for all three
-  questions. Common random numbers itself is unaffected — worlds are still shared within each question's
-  own candidate set — only their count stopped being one constant across all three.
+  +2.60 ± 0.87 points/deal respectively)~~ — **CORRECTED, measured** (`node scripts/bench-auction-search.js
+  regret`): the struck pair was a *mean-points* hold-out, and the auction search stopped ranking trump/call
+  candidates by mean points shortly after (make-probability instead, the coach report card's D42). A
+  budget tuned against one statistic is not guaranteed right for the other — a binomial outcome's variance
+  is p(1−p), not a points mean's — so both were re-measured rather than assumed. `TRUMP_PLAY_BUDGET`
+  **stays 24000**: regret against a wide oracle is 0.004 make-prob (0.36 pts) there against 0.003
+  (0.23 pts) at 4x the budget (96000, gain vs hand-count ranged +0.014 to +0.025 make-prob across four
+  150-deal runs, against 24000's own +0.013 to +0.023 in the same four — heavily overlapping), and a
+  one-off 16x check (384000, not a swept point) landed at regret 0.001, indistinguishable from that same
+  run's own 96000 (regret 0.002) — the curve was already flat, so re-measuring it changed nothing.
+  `CALL_PLAY_BUDGET` **raised 24000 → 96000**: at 24000 it still gave up 0.017 make-prob (1.50 pts) of
+  regret against the wide oracle and beat the hand-count by only +0.029 ± 0.011 make-prob
+  (+2.25 ± 0.94 pts); at 96000 regret fell to 0.006 (0.47 pts) and the gain rose to +0.040 ± 0.010
+  (+3.28 ± 0.91 pts) — reproduced across four independent 150-deal runs (deals are unseeded CSPRNG
+  hands, so each rerun is a fresh sample, not a replay: 24000's gain ranged +0.027 to +0.031 make-prob /
+  +2.13 to +2.63 pts across those runs, 96000's ranged +0.039 to +0.041 / +3.28 to +3.84 pts), with a
+  one-off 384000 check (regret 0.002, gain +0.043 ± 0.009 / +4.04 ± 0.85 pts) showing the curve itself
+  flattening from 96000 on — unlike trump, call had not reached that point at 24000. Rejected, once
+  measured: a single shared budget for all three questions. Common random numbers itself is unaffected —
+  worlds are still shared within each question's own candidate set — only their count stopped being one
+  constant across all three.
 - **D37. The review opens on demand from the round-result modal, never automatically.** Rejected:
   auto-opening — it would sit on top of the ready gate that three other players are waiting on.
   **Extended by Task 14:** a deal that wins the match never reaches `roundEnd` (`match.js`'s `endRound`

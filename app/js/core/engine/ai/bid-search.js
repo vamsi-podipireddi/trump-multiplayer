@@ -26,9 +26,16 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    one splits them exactly backwards: worldsFor divides by the candidate count,
    so the more candidates a question has the fewer worlds each is judged on — yet
    an argmax over C near-equal candidates needs MORE samples as C grows, not
-   fewer. Scored against a 300-world oracle as mean regret in captured points
-   against the best available candidate (lower is better; the hand-count these
-   replace is the bar to beat):
+   fewer. bid's row is unaffected by anything below: bidValue was already a
+   make-probability threshold, never a points argmax, so it is scored as
+   decisions that differ from a near-ground-truth oracle call, not as a regret.
+   trump and call are scored against a wide oracle (scripts/bench-auction-search.js
+   `regret`) as mean regret in make-probability — the unit aiPickTrumpSearch/
+   aiPickPartnerSearch have ranked candidates by since D42, evaluateTrumps/
+   evaluateCalls's own scoreCandidates — against the best available candidate
+   (lower is better; the hand-count these replace is the bar to beat). meanPoints
+   rides alongside each regret in parens so this run can still be read against
+   the mean-points rows it replaces:
 
      bid    1 candidate     3000 ->  57 worlds  6 of 250 decisions differ from a
                                                 2000-world oracle (6000 gives 4),
@@ -45,23 +52,58 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
                                                 does, and this is the one that
                                                 runs on every bidding turn
                                                 (~10.7 an auction, all seats).
-     trump  4 candidates    6000 ->  28 worlds  regret 1.02 vs heuristic 2.28
-                           24000 -> 115 worlds  regret 0.48 vs heuristic 2.96
-     call  ~10 candidates   6000 ->  11 worlds  regret 3.60 vs heuristic 3.33 —
-                                                at this width the call search
-                                                buys nothing measurable (-0.27
-                                                +/- 0.96 pts a deal, pooled).
-                                                Eleven worlds cannot rank ten
-                                                cards whose true spread is ~20
-                                                points, so the argmax is largely
-                                                ranking its own sampling noise.
-                           24000 ->  46 worlds  regret 1.06 vs heuristic 3.65
+     trump  4 candidates    hand-count regret 0.027 (2.40 pts)
+                            6000 -> ~28 worlds  regret 0.010 (0.86 pts)
+                           24000 -> ~115 worlds regret 0.004 (0.36 pts)  <- shipped
+                           96000 -> ~461 worlds regret 0.003 (0.23 pts) — barely
+                                                past 24000 (gain vs hand-count
+                                                +0.025 +/- 0.010 / +2.17 +/- 0.99
+                                                pts, against 24000's own +0.023
+                                                +/- 0.010 / +2.04 +/- 0.98 pts):
+                                                already flat by the shipped
+                                                budget. A one-off check at
+                                                384000 (16x) landed at regret
+                                                0.001 (0.09 pts), gain +0.021
+                                                +/- 0.009 (+1.74 +/- 0.87 pts) —
+                                                indistinguishable from that same
+                                                run's own 96000 (regret 0.002,
+                                                gain +0.021 +/- 0.009 / +1.69
+                                                +/- 0.87 pts) — so 24000 stands.
+     call  ~8 candidates    hand-count regret 0.045 (3.75 pts)
+                            6000 -> ~14 worlds  regret 0.046 (4.03 pts) — at this
+                                                width the call search cannot beat
+                                                the hand-count it replaces (gain
+                                                -0.001 +/- 0.013 / -0.28 +/- 1.18
+                                                pts — noise, not signal).
+                           24000 -> ~59 worlds  regret 0.017 (1.50 pts) — real
+                                                (gain +0.029 +/- 0.011 / +2.25
+                                                +/- 0.94 pts) but, unlike trump,
+                                                nowhere near flat yet.
+                           96000 -> ~237 worlds regret 0.006 (0.47 pts)  <- NOW
+                                                shipped: gain +0.040 +/- 0.010 /
+                                                +3.28 +/- 0.91 pts, reproduced
+                                                across four independent 150-deal
+                                                runs (24000's gain ranged +0.027
+                                                to +0.031 / +2.13 to +2.63 pts in
+                                                the same four; 96000's ranged
+                                                +0.039 to +0.041 / +3.28 to +3.84
+                                                pts). A one-off 384000 check
+                                                (regret 0.002, gain +0.043 +/-
+                                                0.009 / +4.04 +/- 0.85 pts) shows
+                                                the curve flattening from 96000
+                                                on, which is why the constant
+                                                stops there rather than higher.
 
-   The 24000 rows are a 150-deal hold-out on seeds disjoint from the tuning runs:
-   +2.47 +/- 0.95 pts a deal for trump, +2.60 +/- 0.87 for the call, and the
-   raise rests on those, not on the 6000 result. Confirmed out of model on 9991
+   The trump and call rows above are each a 150-deal run
+   (`node scripts/bench-auction-search.js regret`; deals come off the platform
+   CSPRNG unseeded, so a rerun is an independent replication, not a replay —
+   see the "reproduced across four" note above). Confirmed out of model on 9991
    played deals: +2.08 +/- 1.25 pts to the declaring side, +0.56 +/- 0.42 pp of
-   deals won. Both are asked once a deal and only of the seat that won it.
+   deals won. Both are asked once a deal and only of the seat that won it. That
+   9991-deal figure is ROADMAP D35's, not D36's: it predates both D42's
+   re-ranking and CALL_PLAY_BUDGET's raise to 96000 and was not re-measured by
+   this task — read it as the history behind D35's own cut, not as current
+   evidence for these two constants.
 
    WHERE EACH OF THESE ACTUALLY RUNS, which the rows above do not say. Only
    aiBidDecisionSearch is routed server-side (ai/index.js, "hard" only). Trump
@@ -84,7 +126,10 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    scripts/bench-auction-search.js re-derives every number in this comment. */
 const BID_PLAY_BUDGET = 3000;
 const TRUMP_PLAY_BUDGET = 24000;
-const CALL_PLAY_BUDGET = 24000;
+// Raised from 24000 (D36 correction, node scripts/bench-auction-search.js
+// regret): re-measured in make-probability, 24000 still left real regret on
+// the table that trump's equivalent budget did not — see the comment above.
+const CALL_PLAY_BUDGET = 96000;
 /* Exported for scripts/bench-auction-search.js, which prints the world counts
    this comment block quotes: a bench carrying its own copy of the formula would
    keep printing numbers after a change here, and those numbers are pasted into

@@ -50,6 +50,7 @@ import { chooseAICard, aiPickTrump, aiPickPartner, aiBidDecision } from "../app/
    replaced had also silently dropped withTrump's `G.trump === trump ? G :`
    identity short-circuit.) */
 import { aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch,
+         evaluateTrumps, evaluateCalls,
          BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET,
          worldsFor, withTrump } from "../app/js/core/engine/ai/bid-search.js";
 import { sortHand } from "../app/js/core/engine/cards.js";
@@ -60,6 +61,9 @@ const ci = xs => 1.96 * sd(xs) / Math.sqrt(xs.length);
 const key = c => c.suit + c.rank;
 const fresh = () => { const G = E.createMatch(); E.startMatch(G); return G; };
 const pm = (xs) => `${mean(xs) >= 0 ? "+" : ""}${mean(xs).toFixed(2)} +/- ${ci(xs).toFixed(2)}`;
+// Same as pm, 3dp instead of 2: make-probability figures live on [0,1], where a
+// 2dp print rounds any regret under half a point of probability to "0.00".
+const pmP = (xs) => `${mean(xs) >= 0 ? "+" : ""}${mean(xs).toFixed(3)} +/- ${ci(xs).toFixed(3)}`;
 // up here rather than beside `table`'s tally(): `cost` runs first, and a const is
 // not usable before its own initialiser has evaluated
 const pct = (sorted, q) => sorted[Math.min(sorted.length - 1, Math.floor(q * sorted.length))];
@@ -225,44 +229,64 @@ if (on("cost")) {
 // -------------------------------------------------------------- regret
 if (on("regret")) {
   const BUDGETS = [6000, 12000, 24000, 96000];
-  console.log(`\n== regret vs the best available candidate (${DEALS} deals, ${EW}-world oracle; lower is better) ==`);
+  /* The oracle used to be an independent 300-world sample scored in mean
+     captured points (truth/evalDeal — still what `shortlist` and `calibration`
+     below use, untouched). D42 moved the search's own ranking onto
+     make-probability, so a points oracle would be grading a different question
+     than the one the shipped code now answers. evaluateTrumps/evaluateCalls ARE
+     that ranking function (bid-search.js's own scoreCandidates), so the oracle
+     here is the same call at a much wider budget rather than a second,
+     independent implementation — "regret" is how much make-probability a cheap
+     budget gives up against a near-ground-truth one, not a gap between two
+     estimators. Budget picked so trump (4 fixed candidates) lands at the
+     pre-D42 EW=300 worlds/candidate; call gets a bigger one so its wider (up to
+     ~12-candidate) shortlist doesn't get thinned below that same floor. */
+  const ORACLE_BUDGET = { trump: 300 * 4 * 52, call: 300 * 12 * 52 };
+  console.log(`\n== regret vs a wide-oracle best (${DEALS} deals; make-probability, the unit the search ranks by since D42 — lower is better; meanPoints alongside so this run reads against the pre-D42 rows) ==`);
   for (const what of ["trump", "call"]) {
-    const reg = {}, gain = {}; BUDGETS.forEach(b => { reg[b] = []; gain[b] = []; });
-    const regH = [], spread = [];
+    const reg = {}, gain = {}, regPts = {}, gainPts = {}, worldsAt = {};
+    BUDGETS.forEach(b => { reg[b] = []; gain[b] = []; regPts[b] = []; gainPts[b] = []; worldsAt[b] = []; });
+    const regH = [], regHPts = [], spread = [], spreadPts = [], oracleWorlds = [];
+    const keyOf = what === "trump" ? (c => c.suit) : (c => key(c.card));
     for (let d = 0; d < DEALS; d++) {
       const G = fresh();
-      let seat, cands, valOf;
+      let seat, ev;
       if (what === "trump") {
         seat = E.findBidActor(G);
-        const ws = worldsOf(G, seat, EW, E.mulberry32(900000 + d));
-        cands = E.SUITS;
-        const v = {}; for (const t of cands) v[t] = truth(G, seat, t, aiPickPartner(withTrump(G, t), seat), ws);
-        valOf = (t) => v[t];
+        ev = evaluateTrumps(G, seat, { rnd: E.mulberry32(900000 + d), playBudget: ORACLE_BUDGET.trump });
       } else {
         if (!toTrumpSelect(G)) continue;
         seat = G.declarer;
         E.applyTrump(G, aiPickTrump(G, seat));
-        const h = aiPickPartner(G, seat);
-        cands = [h, ...E.callableCards(G, seat).filter(c => c.rank >= 12 && !E.sameCard(c, h))];
-        const ws = worldsOf(G, seat, EW, E.mulberry32(800000 + d));
-        const v = {}; for (const c of cands) v[key(c)] = truth(G, seat, G.trump, c, ws);
-        valOf = (c) => v[key(c)];
+        ev = evaluateCalls(G, seat, { rnd: E.mulberry32(800000 + d), playBudget: ORACLE_BUDGET.call });
       }
-      const vals = cands.map(valOf), best = Math.max(...vals);
-      spread.push(best - Math.min(...vals));
-      const h = what === "trump" ? aiPickTrump(G, seat) : aiPickPartner(G, seat);
-      regH.push(best - valOf(h));
+      if (!ev) continue;
+      oracleWorlds.push(ev.worlds);
+      const byKey = new Map(ev.candidates.map(c => [keyOf(c), c]));
+      const oracleBest = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));
+      const worst = ev.candidates.reduce((a, b) => (b.makeProb < a.makeProb ? b : a));
+      spread.push(oracleBest.makeProb - worst.makeProb);
+      spreadPts.push(oracleBest.meanPoints - worst.meanPoints);
+      const h = ev.candidates[0]; // evaluateTrumps/evaluateCalls always place the heuristic's own pick first
+      regH.push(oracleBest.makeProb - h.makeProb);
+      regHPts.push(oracleBest.meanPoints - h.meanPoints);
       for (const b of BUDGETS) {
-        const s = what === "trump" ? aiPickTrumpSearch(G, seat, { rnd: E.mulberry32(1000 + d), playBudget: b })
-                                   : aiPickPartnerSearch(G, seat, { rnd: E.mulberry32(2000 + d), playBudget: b });
-        reg[b].push(best - valOf(s)); gain[b].push(valOf(s) - valOf(h));
+        const bev = what === "trump" ? evaluateTrumps(G, seat, { rnd: E.mulberry32(1000 + d), playBudget: b })
+                                     : evaluateCalls(G, seat, { rnd: E.mulberry32(2000 + d), playBudget: b });
+        if (!bev) continue;
+        worldsAt[b].push(bev.worlds);
+        const chosenAtB = bev.candidates.reduce((a, c) => (c.makeProb > a.makeProb ? c : a));
+        const chosen = byKey.get(keyOf(chosenAtB)); // scored against the oracle, not bev's own noisy self-estimate
+        reg[b].push(oracleBest.makeProb - chosen.makeProb);
+        regPts[b].push(oracleBest.meanPoints - chosen.meanPoints);
+        gain[b].push(chosen.makeProb - h.makeProb);
+        gainPts[b].push(chosen.meanPoints - h.meanPoints);
       }
     }
     const shipped = what === "trump" ? TRUMP_PLAY_BUDGET : CALL_PLAY_BUDGET;
-    const nc = what === "trump" ? 4 : 10;
-    console.log(`  ${what}: best-worst spread ${mean(spread).toFixed(1)} pts · hand-count regret ${mean(regH).toFixed(2)}`);
+    console.log(`  ${what}: oracle ~${Math.round(mean(oracleWorlds))} worlds/cand · best-worst spread ${mean(spread).toFixed(3)} (${mean(spreadPts).toFixed(1)} pts) · hand-count regret ${mean(regH).toFixed(3)} (${mean(regHPts).toFixed(2)} pts)`);
     for (const b of BUDGETS)
-      console.log(`    ${String(b).padStart(6)} (~${String(worldsFor(nc, b)).padStart(3)} worlds/cand) regret ${mean(reg[b]).toFixed(2)}  gain vs hand-count ${pm(gain[b])}${b === shipped ? "   <- shipped" : ""}`);
+      console.log(`    ${String(b).padStart(6)} (~${String(Math.round(mean(worldsAt[b]))).padStart(3)} worlds/cand) regret ${mean(reg[b]).toFixed(3)} (${mean(regPts[b]).toFixed(2)} pts)  gain vs hand-count ${pmP(gain[b])} (${pm(gainPts[b])} pts)${b === shipped ? "   <- shipped" : ""}`);
   }
 }
 
