@@ -12,6 +12,7 @@ import { fitTable, tickTimers } from "../ui/layout.js";
 import { renderLobby, renderSettings, showSettingsModal, DIFF_OPTS } from "./lobby.js";
 import { coachOn } from "../coach/read.js";
 import { renderCoach } from "../ui/coach.js";
+import { snapshotOf, saveDeal } from "../util/deals.js";
 
 // ---------- orientation ----------
 const orient = () => (S.mySeat == null ? 0 : S.mySeat);
@@ -42,6 +43,12 @@ function render() {
   if (!S.view.room.started) { closeSheet(); hideReveal(); }
   $("awaybar").classList.toggle("show", !!(S.view.room.started && S.view.you.away));
   $("btn-stand").style.display = S.view.room.started && !S.view.you.spectator ? "" : "none";
+
+  /* Snapshot before the modal branches: the deal that wins the match never
+     reaches roundEnd, so saving only there would lose the one deal a player is
+     most likely to want graded (the same gap D37's match-over review closed). */
+  if ((S.view.phase === "roundEnd" || S.view.phase === "matchOver") && S.view.lastResult)
+    saveDeal(S.view.room.code, S.view.matchId, snapshotOf(S.view));
 
   /* One owner for the overlay, so a modal that is still relevant is never
      yanked out from under a click. Settings and Help are user-opened and

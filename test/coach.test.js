@@ -14,6 +14,7 @@ import { handleRequest } from "../app/js/coach/worker.js";
 import { reviewDeal, REVIEW_PLAY_BUDGET, MISTAKE_WIN_DELTA } from "../app/js/coach/review.js";
 import { matchReport } from "../app/js/coach/report.js";
 import { reviewAuction, MIN_REVIEW_WORLDS, auctionBudgetFor, bandFor } from "../app/js/coach/auction.js";
+import { snapshotOf } from "../app/js/util/deals.js";
 
 /* Seat four humans and drive the match with the engine's own AI, so every
    action is legal, sampling every seat's view after each event. */
@@ -1101,4 +1102,24 @@ test("trump and call are skipped for a seat that did not declare", () => {
   const r = reviewAuction(v, other, {});
   assert.ok(r.skipped.some(s => s.kind === "trump" && s.reason === "not-declarer"));
   assert.ok(r.skipped.some(s => s.kind === "call" && s.reason === "not-declarer"));
+});
+
+// ---------------------------------------------------------------------------
+// util/deals.js — finished deals kept on this device, so the match-over
+// report card has something to grade without a server round-trip.
+
+test("a snapshot carries exactly what the graders read, and no hand", () => {
+  const { v } = finishedDealView();
+  const s = snapshotOf(v);
+  for (const k of ["tricks", "auction", "trump", "calledCard", "declarer", "partner",
+                   "bid", "bonusSuit", "dealer", "roundNumber", "names", "scores",
+                   "lastResult", "teamsRevealed", "consts"])
+    assert.ok(k in s, `snapshot must carry ${k}`);
+  assert.equal(s.you, undefined, "a snapshot never carries a hand");
+  assert.equal(s.chat, undefined, "a snapshot never carries chat");
+  // and it must still be enough to grade with
+  const r = reviewAuction(s, s.declarer, {});
+  assert.ok(r.decisions.length || r.skipped.length);
+  const rd = reviewDeal(s, s.declarer, {});
+  assert.ok(Array.isArray(rd.decisions));
 });
