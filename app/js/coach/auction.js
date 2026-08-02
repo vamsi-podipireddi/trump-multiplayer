@@ -36,8 +36,10 @@ const clampToBand = (raw, band) => (raw > band ? raw : 0);
    shortlist averages ~8 candidates (bid-search.js's own measured figure),
    where CALL_PLAY_BUDGET's 96000 is actually enough — worldsFor(8, 96000) =
    230 worlds, band ~0.0659, under the line — but the shortlist runs up to
-   13 (12 honours plus the heuristic), where the same budget gives only 142
-   worlds, band ~0.0839, over it again. So inheriting doesn't fail every
+   12 (the honours the seat does not hold, at most all 12 of them, with the
+   heuristic's own pick deduped into that same list rather than added to
+   it), where the same budget gives only 153 worlds, band ~0.0808, over it
+   again. So inheriting doesn't fail every
    call, only the widest hands — exactly where a fixed budget is weakest.
    Deriving the budget from the precision needed instead guarantees the
    same band (205 worlds, ~0.0698) on every position the review might
@@ -163,6 +165,13 @@ function gradeCall(v, seat, seed, tap, decisions, skipped) {
   if (!v.calledCard) { skipped.push({ kind: "call", roundNumber: v.roundNumber, reason: "no-world" }); return; }
   const pos = auctionPosition(v, seat, "call", null);
   if (tap) tap(pos, "call", v.roundNumber);
+  /* 13, one above the real 12-candidate ceiling (see this file's header): a
+     budget only ever buys MORE worlds than the floor needs, never fewer —
+     evaluateCalls divides it by the shortlist it actually built — so the
+     one-candidate margin costs a little search and cannot cost precision.
+     Left as-is deliberately rather than tightened to 12, since changing it
+     would move every graded call's numbers for no gain in what the band
+     guarantees. */
   const ev = E.evaluateCalls(pos, seat, { rnd: E.mulberry32(seed + 300), playBudget: auctionBudgetFor(13) });
   if (!ev) { skipped.push({ kind: "call", roundNumber: v.roundNumber, reason: "no-world" }); return; }
   const best = ev.candidates.reduce((a, b) => (b.makeProb > a.makeProb ? b : a));

@@ -143,15 +143,23 @@ play: `aiPickTrump`/`aiPickPartner` (the hand-count) remain every tier's trump a
   8, inheriting `CALL_PLAY_BUDGET` (96000) is actually *adequate*: `worldsFor(8, 96000) =
   floor(96000/416)` = **230** worlds, band `1/√230` = **0.0659** — *below* `MISTAKE_WIN_DELTA`
   (matches `ai/bid-search.js`'s own printed "~229 worlds" at this budget, to within the rounding of
-  an average over many hands' exact counts). But the shortlist is capped at **13** (12 honours plus
+  an average over many hands' exact counts). ~~But the shortlist is capped at **13** (12 honours plus
   the heuristic), and at that ceiling `worldsFor(13, 96000) = floor(96000/676)` = **142** worlds,
-  band `1/√142` = **0.0839** — *above* `MISTAKE_WIN_DELTA` again.
+  band `1/√142` = **0.0839**~~ — **CORRECTED, derived:** the ceiling is **12**, not 13.
+  `evaluateCalls` (`ai/bid-search.js:313`) dedupes the heuristic *out of* the honour list rather than
+  adding it alongside, so the candidates are the rank≥12 cards the seat does not hold — at most all
+  12 of them — and `aiPickPartner` is itself one of those on every hand but one holding all twelve
+  honours (where the shortlist is 1). Measured over 8,000 hand-count auctions driven to
+  `trumpSelect`, at the declaring seat: mean **8.05**, max **12**. At the real ceiling
+  `worldsFor(12, 96000) = floor(96000/624)` = **153** worlds, band `1/√153` = **0.0808** — still
+  *above* `MISTAKE_WIN_DELTA`, so the conclusion is unchanged; only the figures were wrong. Pinned as
+  an executable invariant in `test/coach.test.js` (`CALL_SHORTLIST_MAX`), not restated.
   So "inheriting the bots' budgets breaks it outright" was never quite the right claim for the call,
   and correcting only the arithmetic would still have left it wrong: the call's inherited budget is
   adequate on a typical hand and inadequate on the widest one. That is still a real and sufficient
   reason to derive the budget rather than inherit it — not because inheriting always fails, but
   because only a derived budget *guarantees* the same precision on every position the review might
-  grade, including the 13-candidate hand a constant tuned to the average case would silently
+  grade, including the 12-candidate hand a constant tuned to the average case would silently
   under-serve. Bid and trump's unconditional failure makes the same point without the
   hand-dependence: neither question's candidate count ever moves, so neither ever crosses back over
   the line the way the call does.
@@ -166,8 +174,11 @@ play: `aiPickTrump`/`aiPickPartner` (the hand-count) remain every tier's trump a
   never actually a function of any `*_PLAY_BUDGET` constant, so nothing about `CALL_PLAY_BUDGET`'s
   own value changes what `MIN_REVIEW_WORLDS`/`auctionBudgetFor` compute, only what inheriting it
   instead would have delivered — which is exactly the comparison above. Bounded by construction —
-  the call's candidate list is at most 13 (12 honours plus the heuristic), so the widest question
-  costs `205 · 13 · 52` = 138,580 simulated plays.
+  the call's candidate list is at most **12** (the honours the seat does not hold, heuristic deduped
+  into them), so the widest question the review can face costs `205 · 12 · 52` = 127,920 simulated
+  plays. `coach/auction.js` asks for `auctionBudgetFor(13)` = 138,580 anyway, which errs safe by
+  exactly one candidate's worth: `evaluateCalls` divides the budget by the shortlist it actually
+  built, so a larger budget only ever buys more worlds, never fewer.
   Rejected: a fixed `REVIEW_AUCTION_BUDGET` split across a deal's auction decisions, mirroring
   `REVIEW_PLAY_BUDGET` — it reintroduces exactly the fault D36 found in the single shared budget,
   where precision falls as the candidate list grows and the argmax ends up ranking its own noise.

@@ -244,9 +244,14 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   single budget splits the three questions exactly backwards. `worldsFor` divides the budget by the
   candidate count, so precision *falls* as the candidate list grows — but an argmax over more near-equal
   candidates needs *more* samples, not fewer, to tell them apart. At a uniform 6000, the bid (1
-  candidate, ~115 worlds) was already over-provisioned, while the call (~10 candidates, ~11 worlds) was
-  measurably no better than the hand-count it was meant to replace (regret 3.60 vs. the heuristic's own
-  3.33). Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
+  candidate, ~115 worlds) was already over-provisioned, while the call ~~(~10 candidates, ~11
+  worlds)~~ — **CORRECTED, derived:** (~8 candidates, `worldsFor(8, 6000)` = **14** worlds). The 10
+  came from counting the call shortlist without `evaluateCalls`' own dedupe of the heuristic out of
+  the honour list — the same error D44 corrects at the ceiling — and `ai/bid-search.js:86-91` already
+  publishes the right pair. D36's conclusion is untouched: it rests on the measured regret below, not
+  on the world count. — was measurably no better than the hand-count it was meant to replace (regret
+  3.60 vs. the heuristic's own 3.33).
+  Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
   measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), ~~`TRUMP_PLAY_BUDGET =
   CALL_PLAY_BUDGET = 24000` (a 150-deal hold-out on seeds disjoint from tuning: +2.47 ± 0.95 and
   +2.60 ± 0.87 points/deal respectively)~~ — **CORRECTED, measured** (`node scripts/bench-auction-search.js
@@ -391,15 +396,28 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   8, inheriting `CALL_PLAY_BUDGET` (96000) is actually *adequate*: `worldsFor(8, 96000) =
   floor(96000/416)` = **230** worlds, band `1/√230` = **0.0659** — *below* `MISTAKE_WIN_DELTA`
   (matches `ai/bid-search.js`'s own printed "~229 worlds" at this budget, to within the rounding of
-  an average over many hands' exact counts). But the shortlist is capped at **13** (12 honours plus
+  an average over many hands' exact counts). ~~But the shortlist is capped at **13** (12 honours plus
   the heuristic), and at that ceiling `worldsFor(13, 96000) = floor(96000/676)` = **142** worlds,
-  band `1/√142` = **0.0839** — *above* `MISTAKE_WIN_DELTA` again.
+  band `1/√142` = **0.0839**~~ — **CORRECTED, derived:** the ceiling is **12**, not 13, and 13
+  describes a hand that cannot be dealt. `evaluateCalls` (`ai/bid-search.js:313`) dedupes the
+  heuristic *out of* the honour list rather than adding it alongside: the candidates are the rank≥12
+  cards the seat does not hold — at most all 12 of them — and `aiPickPartner` returns an un-held ace,
+  else an un-held king, else `callableCards[0]`, so it is itself one of those 12 on every hand but one
+  holding all twelve honours, where the honour list is empty and the shortlist is 1. Measured over
+  8,000 hand-count auctions driven to `trumpSelect`, at the declaring seat the search actually grades:
+  mean **8.05**, max **12** (at an arbitrary seat, mean 9.00, max 12 — a declarer holds more honours,
+  so fewer remain callable, which is why the population matters). At the real ceiling
+  `worldsFor(12, 96000) = floor(96000/624)` = **153** worlds, band `1/√153` = **0.0808** — still
+  *above* `MISTAKE_WIN_DELTA`, so the conclusion below is unchanged; only the figures were wrong. This
+  is the same undeduped-candidate-count error the head commit exists to fix, corrected in the average
+  and left standing in the ceiling. Pinned as an executable invariant in `test/coach.test.js`
+  (`CALL_SHORTLIST_MAX`), not restated.
   So "inheriting the bots' budgets breaks it outright" was never quite the right claim for the call,
   and correcting only the arithmetic would still have left it wrong: the call's inherited budget is
   adequate on a typical hand and inadequate on the widest one. That is still a real and sufficient
   reason to derive the budget rather than inherit it — not because inheriting always fails, but
   because only a derived budget *guarantees* the same precision on every position the review might
-  grade, including the 13-candidate hand a constant tuned to the average case would silently
+  grade, including the 12-candidate hand a constant tuned to the average case would silently
   under-serve. Bid and trump's unconditional failure makes the same point without the
   hand-dependence: neither question's candidate count ever moves, so neither ever crosses back over
   the line the way the call does.
@@ -414,8 +432,12 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   never actually a function of any `*_PLAY_BUDGET` constant, so nothing about `CALL_PLAY_BUDGET`'s
   own value changes what `MIN_REVIEW_WORLDS`/`auctionBudgetFor` compute, only what inheriting it
   instead would have delivered — which is exactly the comparison above.
-  Bounded by construction — the call's candidate list is at most 13 (12 honours plus the heuristic),
-  so the widest question costs `205 · 13 · 52` = 138,580 simulated plays.
+  Bounded by construction — the call's candidate list is at most **12** (the honours the seat does
+  not hold, heuristic deduped into them), so the widest question the review can face costs
+  `205 · 12 · 52` = 127,920 simulated plays. `coach/auction.js` asks for `auctionBudgetFor(13)`
+  = 138,580 anyway, which errs safe by exactly one candidate's worth: `evaluateCalls` divides the
+  budget by the shortlist it actually built, so a larger budget only ever buys more worlds than the
+  floor requires, never fewer.
   Rejected: a fixed `REVIEW_AUCTION_BUDGET` split across a deal's auction decisions, mirroring
   `REVIEW_PLAY_BUDGET` — it reintroduces exactly the fault D36 found in the single shared budget,
   where precision falls as the candidate list grows and the argmax ends up ranking its own noise.
@@ -648,11 +670,18 @@ corrected the spec's own numbers and contracts, not just its conclusions.
 - [x] Task 8: fixed what "Your record" measures (③) — `writeMatchStats` now folds every deal in
       `G.dealHistory` instead of reading only `G.lastResult`, so a player who won four bids and made
       all four then lost the fifth deal no longer records zero; migration for existing D1 databases at
-      `migrations/0001-report-card.sql`.
+      `migrations/0001-report-card.sql` (Task 10 adds a second, `migrations/0002-difficulty.sql` —
+      both are needed, and `/stats` degrades one line at a time if only the first has been applied).
 - [x] Task 9: this documentation and decision log — plus three corrections to shipped text the
       earlier tasks' own measurements had already outrun: `coach/auction.js`'s dead-band comment
       (D44, re-derived above), the design spec's headline/costliest-decisions contract (D41), and
       this log itself, which shipped source had been citing since Task 4 while it still stopped at
       D37.
-- [ ] Task 10: career trend on the join screen, sliced by difficulty, off `deals`/`bids_won`/
-      `bids_made` — separable and deferred (spec Scope: "shipped last and separably").
+- [x] Task 10: **recent form** on the join screen, sliced by difficulty and never pooled — the last
+      up-to-20 matches at whichever tier the player's most recent match was recorded under, dropping
+      any flagged `difficulty_mixed`, and saying nothing at all below 3 same-tier matches. Shipped as
+      recent form rather than the career trend this line originally described: a win rate is
+      invariant to match length but not to bot difficulty, so the tier has to be recorded before any
+      trend over it means anything, and recording it is what actually landed.
+      `src/worker/stats.js:28-57`, `app/js/screens/join.js:23-38`, `src/core/room/handlers.js:77-85`,
+      `migrations/0002-difficulty.sql`, `README.md:100-123`, 5 tests.

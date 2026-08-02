@@ -170,7 +170,6 @@ if (on("cost")) {
     }
     if (G.phase !== "trumpSelect") continue;
     nbids.push(n); contracts.push(G.bid);
-    sls.push(1 + E.callableCards(G, G.declarer).filter(c => c.rank >= 12).length);
     /* the oracle above must still agree with the module's own playOutWith —
        in MAKE-PROBABILITY, the statistic aiPickPartnerSearch has argmaxed via
        bestOf since D42, not the mean captured points this compared in before.
@@ -185,6 +184,19 @@ if (on("cost")) {
        worse than no check, since a real regression would sit here silently. */
     const seat = G.declarer, h = aiPickPartner(withTrump(G, aiPickTrump(G, seat)), seat);
     const list = [h, ...E.callableCards(G, seat).filter(c => c.rank >= 12 && !E.sameCard(c, h))];
+    /* `list` itself, not a second count of it. This read `1 +
+       callableCards(...).filter(rank >= 12).length`, which omits the
+       `!sameCard(c, h)` dedupe that BOTH the shipped evaluateCalls
+       (ai/bid-search.js:313) and the oracle on the line above apply — and the
+       heuristic is by construction a card the seat does not hold, and rank >=
+       12 on every hand but one holding all twelve honours, so it was counted
+       twice. Deterministically +1 on every hand: this printed "~9.0" while
+       bid-search.js:86 documents ~8 and ROADMAP D44 rests on 8, so the one
+       instrument that exists to keep those figures honest contradicted them,
+       and the natural way to resolve that is to "fix" the right number to the
+       wrong one. Same undeduped-candidate-count class as the defect D44's own
+       correction is about. */
+    sls.push(list.length);
     const ws = worldsOf(withTrump(G, aiPickTrump(G, seat)), seat, worldsFor(list.length, CALL_PLAY_BUDGET), E.mulberry32(d));
     let best = list[0], bestM = truthProb(G, seat, aiPickTrump(G, seat), list[0], ws, G.bid);
     for (const c of list.slice(1)) { const m = truthProb(G, seat, aiPickTrump(G, seat), c, ws, G.bid); if (m > bestM) { bestM = m; best = c; } }
