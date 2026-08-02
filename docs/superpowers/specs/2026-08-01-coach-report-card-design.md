@@ -252,18 +252,32 @@ module-private today, so Milestone 4 adds them to its export list alongside the 
 ### `app/js/coach/report.js` — new, pure, no search
 
 ```js
-matchReport(graded, seat) -> {
-  headline,                  // mean delta per graded decision; null when graded === 0
-  counts: { fine, mistake, blunder },
+matchReport(deals, seat, dealsInMatch) -> {
+  headline,                  // mean delta over play/trump/call ONLY — the commensurable
+                              // three (D41); null when none of them were graded, even if
+                              // counts/byKind.bid are nonzero. The bid shares the
+                              // fine/mistake/blunder thresholds (ordinal comparability)
+                              // but is excluded from this mean: its delta measures
+                              // distance from the search's own 0.5 line, not forgone win
+                              // probability, so averaging it in would average two
+                              // different quantities into a third that is neither (see
+                              // Grading rules, below — cardinal commensurability is a
+                              // stronger requirement than the shared threshold implies).
+  counts: { fine, mistake, blunder },     // unified across all four kinds, bid included
   byKind: { play, bid, trump, call },     // each { n, meanDelta, blunders }
-  worst: [decision, decision],            // top 2 by delta across the whole match
-  coverage: { dealsGraded, dealsInMatch, seatedFor },
+  worst: [decision, decision],            // top 2 by delta, play/trump/call only — same
+                                           // split as headline, for the same reason
+  worstBid: [decision, decision],         // the bid's own costliest, kept in its own list
+                                           // rather than ranked against the other three
+  coverage: { dealsGraded, dealsInMatch, seat },
 }
 ```
 
-`graded` is an array of `{ roundNumber, decisions }` — the concatenation of `reviewDeal` and
-`reviewAuction` output per snapshot. `matchReport` runs no search and touches no storage, so it is
-directly unit-testable over synthetic decisions.
+`deals` is an array of `{ roundNumber, decisions }` per finished deal — the concatenation of
+`reviewDeal` and `reviewAuction` output for that snapshot. `dealsInMatch` is a third argument rather
+than derived from `deals.length`, because `coverage.dealsInMatch` is exactly the number a partial or
+missing set of snapshots cannot answer for itself. `matchReport` runs no search and touches no storage,
+so it is directly unit-testable over synthetic decisions.
 
 **Headline is a mean, not a sum.** Sums are not comparable across 3-, 5- and 7-deal matches, and the
 metric has to survive into a career trend. It is invariant to match length; it is *not* invariant to
@@ -409,9 +423,12 @@ not a smoke test.
 13. A bid of V > `need` is graded against `makeProb(V)`, not `makeProb(need)`.
 
 **Aggregation (`test/coach.test.js`)**
-14. `matchReport` denominators exclude skipped decisions and include band decisions.
+14. `matchReport` denominators exclude skipped decisions and include band decisions; `worst`
+    (play/trump/call, top 2 by delta) and `worstBid` (the bid's own top 2) are ranked separately and
+    never merged into one list.
 15. `headline` is invariant to match length for the same per-decision distribution, and `null` — not
-    `0` — when nothing was graded.
+    `0` — when nothing commensurable was graded (a match of bid-only decisions has a null headline
+    even though `counts` and `byKind.bid` are nonzero).
 16. `coverage` reports `dealsGraded < dealsInMatch` when snapshots are missing.
 
 **Adapter (`test/worker.test.js`)**

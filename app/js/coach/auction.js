@@ -19,11 +19,20 @@ const bandFor = (worlds) => 1 / Math.sqrt(worlds);
 
 /* The bots run budget -> worlds, which is right for a decision billed per
    invocation. A grader has the inverse constraint, and inheriting the bots'
-   budgets breaks it: CALL_PLAY_BUDGET's 24000 over ~10 candidates yields 46
-   worlds and a band of 0.147 — wider than MISTAKE_WIN_DELTA, so no call could
-   ever grade "mistake". So the review runs precision -> worlds -> budget, and
-   the floor is derived from the finest grade it has to express rather than
-   chosen: change MISTAKE_WIN_DELTA and this follows (D44). */
+   budgets breaks it — though by less than this comment used to claim.
+   CALL_PLAY_BUDGET is now 96000 (raised from 24000, D36), and
+   worldsFor(10, 96000) = 184 worlds over ~10 candidates gives a band of
+   1/sqrt(184) = ~0.0737 — still wider than MISTAKE_WIN_DELTA (0.07), but by
+   about 5% now, not the >2x margin this comment argued at the old
+   24000/46-worlds/0.147. A delta just past today's band already clears
+   "mistake" outright, where it used to have to clear almost the whole way to
+   "blunder" first — so an inherited budget no longer makes "mistake"
+   unreachable, only less precise than the review's own floor below (205
+   worlds by construction, band ~0.0698, for any candidate count). The case
+   for deriving a budget instead of inheriting one is thinner than it was, not
+   gone. So the review runs precision -> worlds -> budget, and the floor is
+   derived from the finest grade it has to express rather than chosen: change
+   MISTAKE_WIN_DELTA and this follows (D44). */
 const MIN_REVIEW_WORLDS = Math.ceil(1 / MISTAKE_WIN_DELTA ** 2);   // 205
 const auctionBudgetFor = (candidates) => MIN_REVIEW_WORLDS * candidates * 52;
 
