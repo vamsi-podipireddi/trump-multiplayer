@@ -253,20 +253,29 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   regret`): the struck pair was a *mean-points* hold-out, and the auction search stopped ranking trump/call
   candidates by mean points shortly after (make-probability instead, the coach report card's D42). A
   budget tuned against one statistic is not guaranteed right for the other — a binomial outcome's variance
-  is p(1−p), not a points mean's — so both were re-measured rather than assumed. `TRUMP_PLAY_BUDGET`
-  **stays 24000**: regret against a wide oracle is 0.004 make-prob (0.36 pts) there against 0.003
-  (0.23 pts) at 4x the budget (96000, gain vs hand-count ranged +0.014 to +0.025 make-prob across four
-  150-deal runs, against 24000's own +0.013 to +0.023 in the same four — heavily overlapping), and a
-  one-off 16x check (384000, not a swept point) landed at regret 0.001, indistinguishable from that same
-  run's own 96000 (regret 0.002) — the curve was already flat, so re-measuring it changed nothing.
-  `CALL_PLAY_BUDGET` **raised 24000 → 96000**: at 24000 it still gave up 0.017 make-prob (1.50 pts) of
-  regret against the wide oracle and beat the hand-count by only +0.029 ± 0.011 make-prob
-  (+2.25 ± 0.94 pts); at 96000 regret fell to 0.006 (0.47 pts) and the gain rose to +0.040 ± 0.010
-  (+3.28 ± 0.91 pts) — reproduced across four independent 150-deal runs (deals are unseeded CSPRNG
-  hands, so each rerun is a fresh sample, not a replay: 24000's gain ranged +0.027 to +0.031 make-prob /
-  +2.13 to +2.63 pts across those runs, 96000's ranged +0.039 to +0.041 / +3.28 to +3.84 pts), with a
-  one-off 384000 check (regret 0.002, gain +0.043 ± 0.009 / +4.04 ± 0.85 pts) showing the curve itself
-  flattening from 96000 on — unlike trump, call had not reached that point at 24000. Rejected, once
+  is p(1−p), not a points mean's — so both were re-measured rather than assumed. Both re-measured at
+  trumpSelect, from the real declarer against the real winning contract — an earlier pass of this
+  re-measurement evaluated trump from an arbitrary pre-auction seat targeting a fresh deal's 130-point
+  minimum bid instead, which barely mattered under mean points but not under make-probability, where the
+  target *is* the statistic; fixed before these numbers were written down. `TRUMP_PLAY_BUDGET`
+  **stays 24000**: regret against a wide oracle is 0.002 make-prob (0.20 pts) there against 0.001
+  (0.06 pts) at 4x the budget (96000) — the real movement is between 6000 and 24000 (regret 0.010 → 0.002);
+  what's left at 96000 is small enough not to buy, not simply flat throughout. The paired within-deal
+  24000→96000 difference (96000's worlds are a superset of 24000's, same seed, so this is tighter than a
+  marginal comparison) is +0.001 ± 0.002 make-prob (+0.14 ± 0.18 pts, n=150), ranging +0.001 to +0.004
+  paired across four independent 150-deal runs — never enough to argue for raising it. A one-off 16x check
+  (384000, not a swept point) landed at the same regret (0.001) and gain (+0.013) as that run's own 96000,
+  confirming the curve does flatten, just starting around 24000, not from 6000.
+  `CALL_PLAY_BUDGET` **raised 24000 → 96000**: at 24000 it still gave up 0.014 make-prob (1.18 pts) of
+  regret against the wide oracle and beat the hand-count by only +0.025 ± 0.011 make-prob
+  (+2.01 ± 0.99 pts); at 96000 regret fell to 0.006 (0.40 pts) and the gain rose to +0.034 ± 0.009
+  (+2.79 ± 0.84 pts). Unlike trump this is a real further gain: the paired within-deal 24000→96000
+  difference is +0.008 ± 0.005 make-prob (+0.78 ± 0.52 pts, n=150) and never crossed zero across four
+  independent 150-deal runs (+0.008 to +0.013 paired each time — deals are unseeded CSPRNG hands, so each
+  rerun is a fresh sample, not a replay) — an order of magnitude tighter than the marginal per-run CIs,
+  which *do* overlap (the canonical run above: 24000's make-prob-gain CI is [0.014, 0.036], 96000's is
+  [0.025, 0.043]), so the paired difference, not the marginal ranges, is what this decision rests on. A one-off 384000 check (regret 0.002, gain +0.043 ± 0.009 / +3.93 ± 0.91 pts) shows the curve
+  itself flattening from 96000 on — unlike trump, call had not reached that point at 24000. Rejected, once
   measured: a single shared budget for all three questions. Common random numbers itself is unaffected —
   worlds are still shared within each question's own candidate set — only their count stopped being one
   constant across all three.

@@ -52,58 +52,89 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
                                                 does, and this is the one that
                                                 runs on every bidding turn
                                                 (~10.7 an auction, all seats).
-     trump  4 candidates    hand-count regret 0.027 (2.40 pts)
-                            6000 -> ~28 worlds  regret 0.010 (0.86 pts)
-                           24000 -> ~115 worlds regret 0.004 (0.36 pts)  <- shipped
-                           96000 -> ~461 worlds regret 0.003 (0.23 pts) — barely
-                                                past 24000 (gain vs hand-count
-                                                +0.025 +/- 0.010 / +2.17 +/- 0.99
-                                                pts, against 24000's own +0.023
-                                                +/- 0.010 / +2.04 +/- 0.98 pts):
-                                                already flat by the shipped
-                                                budget. A one-off check at
-                                                384000 (16x) landed at regret
-                                                0.001 (0.09 pts), gain +0.021
-                                                +/- 0.009 (+1.74 +/- 0.87 pts) —
-                                                indistinguishable from that same
-                                                run's own 96000 (regret 0.002,
-                                                gain +0.021 +/- 0.009 / +1.69
-                                                +/- 0.87 pts) — so 24000 stands.
-     call  ~8 candidates    hand-count regret 0.045 (3.75 pts)
-                            6000 -> ~14 worlds  regret 0.046 (4.03 pts) — at this
-                                                width the call search cannot beat
-                                                the hand-count it replaces (gain
-                                                -0.001 +/- 0.013 / -0.28 +/- 1.18
-                                                pts — noise, not signal).
-                           24000 -> ~59 worlds  regret 0.017 (1.50 pts) — real
-                                                (gain +0.029 +/- 0.011 / +2.25
-                                                +/- 0.94 pts) but, unlike trump,
-                                                nowhere near flat yet.
-                           96000 -> ~237 worlds regret 0.006 (0.47 pts)  <- NOW
-                                                shipped: gain +0.040 +/- 0.010 /
-                                                +3.28 +/- 0.91 pts, reproduced
-                                                across four independent 150-deal
-                                                runs (24000's gain ranged +0.027
-                                                to +0.031 / +2.13 to +2.63 pts in
-                                                the same four; 96000's ranged
-                                                +0.039 to +0.041 / +3.28 to +3.84
-                                                pts). A one-off 384000 check
-                                                (regret 0.002, gain +0.043 +/-
-                                                0.009 / +4.04 +/- 0.85 pts) shows
-                                                the curve flattening from 96000
-                                                on, which is why the constant
-                                                stops there rather than higher.
+     trump  4 candidates    hand-count regret 0.010 (1.00 pts)
+                            6000 -> ~28 worlds  regret 0.010 (0.91 pts)  gain
+                                                +0.000 +/- 0.008 (+0.09 +/- 0.78
+                                                pts)
+                           24000 -> ~115 worlds regret 0.002 (0.20 pts)  gain
+                                                +0.008 +/- 0.006 (+0.80 +/- 0.58
+                                                pts)  <- shipped
+                           96000 -> ~461 worlds regret 0.001 (0.06 pts)  gain
+                                                +0.010 +/- 0.006 (+0.94 +/- 0.55
+                                                pts). What 96000 adds over
+                                                24000 is small enough not to
+                                                buy, not flat throughout: the
+                                                real movement is 6000 -> 24000
+                                                (regret 0.010 -> 0.002); paired
+                                                24000->96000, same deals, is
+                                                +0.001 +/- 0.002 make-prob
+                                                (+0.14 +/- 0.18 pts, n=150) —
+                                                tighter than the marginal CIs
+                                                above because 96000's worlds
+                                                are a superset of 24000's (same
+                                                seed), not an independent
+                                                sample — ranged +0.001 to
+                                                +0.004 paired across four
+                                                independent 150-deal runs. A
+                                                one-off 384000 (16x) check
+                                                landed at the same regret 0.001
+                                                and gain +0.013 as that run's
+                                                own 96000: the curve does
+                                                flatten, just starting around
+                                                24000, not from 6000. 24000
+                                                stands.
+     call  ~8 candidates    hand-count regret 0.039 (3.19 pts)
+                            6000 -> ~14 worlds  regret 0.044 (3.83 pts)  gain
+                                                -0.005 +/- 0.012 (-0.64 +/- 1.09
+                                                pts) — at this width the call
+                                                search cannot beat the
+                                                hand-count it replaces.
+                           24000 -> ~57 worlds  regret 0.014 (1.18 pts)  gain
+                                                +0.025 +/- 0.011 (+2.01 +/- 0.99
+                                                pts)
+                           96000 -> ~229 worlds regret 0.006 (0.40 pts)  gain
+                                                +0.034 +/- 0.009 (+2.79 +/- 0.84
+                                                pts)  <- NOW shipped. Unlike
+                                                trump this is a real further
+                                                gain, not noise: paired
+                                                24000->96000, same deals, is
+                                                +0.008 +/- 0.005 make-prob
+                                                (+0.78 +/- 0.52 pts, n=150) —
+                                                never crossed zero in any of
+                                                four independent 150-deal runs
+                                                (+0.008 to +0.013 paired each
+                                                time — an order of magnitude
+                                                tighter than the marginal CIs,
+                                                which DO overlap run to run;
+                                                the paired difference is what
+                                                this decision actually rests
+                                                on, not the marginal ranges). A
+                                                one-off 384000 check (regret
+                                                0.002, gain +0.043) shows that
+                                                curve flattening from 96000 on,
+                                                which is why the constant stops
+                                                there rather than higher.
 
    The trump and call rows above are each a 150-deal run
    (`node scripts/bench-auction-search.js regret`; deals come off the platform
    CSPRNG unseeded, so a rerun is an independent replication, not a replay —
-   see the "reproduced across four" note above). Confirmed out of model on 9991
-   played deals: +2.08 +/- 1.25 pts to the declaring side, +0.56 +/- 0.42 pp of
-   deals won. Both are asked once a deal and only of the seat that won it. That
-   9991-deal figure is ROADMAP D35's, not D36's: it predates both D42's
-   re-ranking and CALL_PLAY_BUDGET's raise to 96000 and was not re-measured by
-   this task — read it as the history behind D35's own cut, not as current
-   evidence for these two constants.
+   see the four-run ranges above). Both are evaluated at trumpSelect, from the
+   real declarer against the real winning contract — toTrumpSelect drives to
+   the hand-count-bid auction, not the search's own heavier bidding, so this
+   is the same contract distribution the hand-count table plays at (ROADMAP
+   Task 8: mean 150.3); checked directly on 300 fresh deals here: mean 149.8,
+   observed range 130-195. trump used to be evaluated from an arbitrary
+   pre-auction seat, targeting a fresh deal's 130-point minimum bid rather
+   than the contract it would actually be asked about. That barely mattered
+   under mean points; under make-probability the target IS the statistic, so
+   it was a bench bug, not a stylistic choice, and every trump figure above is
+   measured post-fix.
+   Confirmed out of model on 9991 played deals: +2.08 +/- 1.25 pts to the
+   declaring side, +0.56 +/- 0.42 pp of deals won. Both are asked once a deal
+   and only of the seat that won it. That 9991-deal figure is ROADMAP D35's,
+   not D36's: it predates both D42's re-ranking and CALL_PLAY_BUDGET's raise
+   to 96000 and was not re-measured by this task — read it as the history
+   behind D35's own cut, not as current evidence for these two constants.
 
    WHERE EACH OF THESE ACTUALLY RUNS, which the rows above do not say. Only
    aiBidDecisionSearch is routed server-side (ai/index.js, "hard" only). Trump
@@ -113,12 +144,16 @@ import { determinize, rolloutClone, playOutRound } from "./pimc.js";
    defaults and the bench's and tests' basis, not a figure any shipped call
    spends. ROADMAP D35 has the reasoning: a Durable Object bills per invocation,
    trump and call are one alarm each at ~8 ms where the alternative is ~0.01 ms,
-   and +0.56 +/- 0.42 pp is not distinguishable from zero. The bid buys
-   +2.77 +/- 0.91 pp for ~1.3 ms on a turn that is otherwise near-free.
+   and +0.56 +/- 0.42 pp (D35's figure, not re-measured by this task — see
+   above) is not distinguishable from zero. The bid buys +2.77 +/- 0.91 pp for
+   ~1.3 ms on a turn that is otherwise near-free.
 
    The bid alone costs the DO ~32000 plays a deal against PIMC's measured
-   ~124500 for the same deal's card play (+25%); all three together came to
-   ~79500 (+64%). PIMC's figure is measured, not 8000 x 13: 8000 is a per-
+   ~124500 for the same deal's card play (+25%); all three together now come
+   to ~151000 (+120%, `DEALS=60 node scripts/bench-auction-search.js cost`) —
+   was ~79500 (+64%) at the pre-raise CALL_PLAY_BUDGET=24000 this comment
+   quoted before CALL_PLAY_BUDGET became 96000. PIMC's figure is measured, not
+   8000 x 13: 8000 is a per-
    decision CAP, not a per-decision spend — evaluateMoves divides it by
    legal.length x cardsLeft, so maxDet GROWS toward its 24 ceiling as the deal
    empties while the per-decision cost falls, and a forced play short-circuits
@@ -183,7 +218,8 @@ function playOutWith(G, seat, world, trump, call, rnd) {
    sampled worlds, so the comparison is a true paired one.
    What changed is the statistic. Candidates used to be ranked on mean captured
    points; D35 retired that objective — a deal is scored made or set, so points
-   past the contract line buy nothing. makeProb is the fraction of shared worlds
+   past the contract line buy nothing — and D42 is this function's own switch
+   to ranking by it. makeProb is the fraction of shared worlds
    in which the declaring side reaches the contract, i.e. the same unit
    evaluateMoves already reports card play in. meanPoints is retained because
    scripts/bench-auction-search.js reports in it and D36's history is written

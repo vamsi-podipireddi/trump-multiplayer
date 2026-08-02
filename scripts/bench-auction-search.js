@@ -54,6 +54,7 @@ import { aiBidDecisionSearch, aiPickTrumpSearch, aiPickPartnerSearch,
          BID_PLAY_BUDGET, TRUMP_PLAY_BUDGET, CALL_PLAY_BUDGET,
          worldsFor, withTrump } from "../app/js/core/engine/ai/bid-search.js";
 import { sortHand } from "../app/js/core/engine/cards.js";
+import assert from "node:assert/strict";
 
 const mean = xs => xs.reduce((a, b) => a + b, 0) / xs.length;
 const sd = xs => { const m = mean(xs); return Math.sqrt(mean(xs.map(x => (x - m) ** 2))); };
@@ -93,6 +94,14 @@ function evalDeal(G, seat, world, trump, call) {
 }
 const worldsOf = (G, seat, n, rnd) => Array.from({ length: n }, () => E._determinize(G, seat, rnd));
 const truth = (G, seat, trump, call, ws) => mean(ws.map(w => evalDeal(G, seat, w, trump, call)));
+/* Same independent oracle as truth(), in make-probability instead of mean
+   points — what `cost`'s correctness guard needs post-D42, since comparing a
+   points-best against aiPickPartnerSearch's own make-probability argmax would
+   no longer be checking the same question. `shortlist`/`calibration` still
+   use truth() itself: neither re-ranks a candidate the way `cost`'s guard
+   does, so D42 doesn't touch what question they're asking. */
+const truthProb = (G, seat, trump, call, ws, target) =>
+  ws.filter(w => evalDeal(G, seat, w, trump, call) >= target).length / ws.length;
 
 /* Drive a whole deal, one seat's auction answers swapped for the search's. */
 function runDeal(snap, bidFor, trumpFor, callFor) {
@@ -162,12 +171,23 @@ if (on("cost")) {
     if (G.phase !== "trumpSelect") continue;
     nbids.push(n); contracts.push(G.bid);
     sls.push(1 + E.callableCards(G, G.declarer).filter(c => c.rank >= 12).length);
-    // the oracle above must still agree with the module's own playOutWith
+    /* the oracle above must still agree with the module's own playOutWith —
+       in MAKE-PROBABILITY, the statistic aiPickPartnerSearch has argmaxed via
+       bestOf since D42, not the mean captured points this compared in before.
+       A points-best and a makeProb-best are different questions and can
+       legitimately disagree even when both implementations are correct, so
+       comparing them here stopped being a correctness check the moment the
+       module's own ranking changed; it would just measure how often the two
+       objectives happen to agree. truthProb targets G.bid, the real contract
+       this deal is at (G.phase is trumpSelect here), matching exactly what
+       scoreCandidates targets inside evaluateCalls. Asserted below, not just
+       printed: a check that keeps running past its own violated invariant is
+       worse than no check, since a real regression would sit here silently. */
     const seat = G.declarer, h = aiPickPartner(withTrump(G, aiPickTrump(G, seat)), seat);
     const list = [h, ...E.callableCards(G, seat).filter(c => c.rank >= 12 && !E.sameCard(c, h))];
     const ws = worldsOf(withTrump(G, aiPickTrump(G, seat)), seat, worldsFor(list.length, CALL_PLAY_BUDGET), E.mulberry32(d));
-    let best = list[0], bestM = truth(G, seat, aiPickTrump(G, seat), list[0], ws);
-    for (const c of list.slice(1)) { const m = truth(G, seat, aiPickTrump(G, seat), c, ws); if (m > bestM) { bestM = m; best = c; } }
+    let best = list[0], bestM = truthProb(G, seat, aiPickTrump(G, seat), list[0], ws, G.bid);
+    for (const c of list.slice(1)) { const m = truthProb(G, seat, aiPickTrump(G, seat), c, ws, G.bid); if (m > bestM) { bestM = m; best = c; } }
     const mod = aiPickPartnerSearch(withTrump(G, aiPickTrump(G, seat)), seat, { rnd: E.mulberry32(d) });
     checked++; if (!E.sameCard(best, mod)) mismatch++;
     E.applyTrump(G, aiPickTrump(G, G.declarer));
@@ -180,6 +200,13 @@ if (on("cost")) {
   const call = worldsFor(sl, CALL_PLAY_BUDGET) * sl * 52;
   console.log(`== cost (${pimc.length} deals) ==`);
   console.log(`  independent oracle vs the module's own search: ${mismatch}/${checked} disagreements (must be 0)`);
+  /* Loud, not printed-and-ignored: a guard that keeps running past its own
+     violated invariant is worse than none, because a real regression in
+     aiPickPartnerSearch would then sit here silently, hidden behind a number
+     nobody is required to look at. */
+  assert.equal(mismatch, 0,
+    `${mismatch}/${checked} disagreements between the independent make-probability oracle and aiPickPartnerSearch — ` +
+    `both now argmax make-probability (D42), so this is a real regression, not an objective mismatch`);
   console.log(`  mean contract ${mean(contracts).toFixed(1)}, ${nb.toFixed(2)} bid decisions an auction, call shortlist ~${mean(sls).toFixed(1)}`);
   console.log(`  PIMC, all four seats, one deal : ${Math.round(P)} plays (${Math.round(P / 4)}/bot)`);
   console.log(`  auction search AS ROUTED (ai/index.js): bid ${Math.round(bid)} plays/deal  (+${(100 * bid / P).toFixed(1)}% of PIMC)`);
@@ -246,17 +273,27 @@ if (on("regret")) {
   for (const what of ["trump", "call"]) {
     const reg = {}, gain = {}, regPts = {}, gainPts = {}, worldsAt = {};
     BUDGETS.forEach(b => { reg[b] = []; gain[b] = []; regPts[b] = []; gainPts[b] = []; worldsAt[b] = []; });
-    const regH = [], regHPts = [], spread = [], spreadPts = [], oracleWorlds = [];
+    const regH = [], regHPts = [], spread = [], spreadPts = [], oracleWorlds = [], paired = [], pairedPts = [];
     const keyOf = what === "trump" ? (c => c.suit) : (c => key(c.card));
     for (let d = 0; d < DEALS; d++) {
       const G = fresh();
-      let seat, ev;
+      /* Both questions are driven to the position the shipped code actually
+         answers them from: trumpSelect, with G.declarer decided and G.bid the
+         real winning contract (mean 149.8, observed 130-195 in a 300-deal
+         check — not the 130 a fresh deal's first-to-act bidder would target).
+         Under mean points the
+         target barely mattered (points beyond it still counted); under
+         make-probability the target IS the statistic, so evaluating trump
+         from an arbitrary pre-auction seat (as this used to) answered a
+         different question than aiPickTrumpSearch is ever actually asked —
+         both coach/worker.js's hint and coach/auction.js's review call it
+         only at trumpSelect, against the real contract. */
+      if (!toTrumpSelect(G)) continue;
+      const seat = G.declarer;
+      let ev;
       if (what === "trump") {
-        seat = E.findBidActor(G);
         ev = evaluateTrumps(G, seat, { rnd: E.mulberry32(900000 + d), playBudget: ORACLE_BUDGET.trump });
       } else {
-        if (!toTrumpSelect(G)) continue;
-        seat = G.declarer;
         E.applyTrump(G, aiPickTrump(G, seat));
         ev = evaluateCalls(G, seat, { rnd: E.mulberry32(800000 + d), playBudget: ORACLE_BUDGET.call });
       }
@@ -270,6 +307,7 @@ if (on("regret")) {
       const h = ev.candidates[0]; // evaluateTrumps/evaluateCalls always place the heuristic's own pick first
       regH.push(oracleBest.makeProb - h.makeProb);
       regHPts.push(oracleBest.meanPoints - h.meanPoints);
+      const chosenAt = {};
       for (const b of BUDGETS) {
         const bev = what === "trump" ? evaluateTrumps(G, seat, { rnd: E.mulberry32(1000 + d), playBudget: b })
                                      : evaluateCalls(G, seat, { rnd: E.mulberry32(2000 + d), playBudget: b });
@@ -277,16 +315,28 @@ if (on("regret")) {
         worldsAt[b].push(bev.worlds);
         const chosenAtB = bev.candidates.reduce((a, c) => (c.makeProb > a.makeProb ? c : a));
         const chosen = byKey.get(keyOf(chosenAtB)); // scored against the oracle, not bev's own noisy self-estimate
+        chosenAt[b] = chosen;
         reg[b].push(oracleBest.makeProb - chosen.makeProb);
         regPts[b].push(oracleBest.meanPoints - chosen.meanPoints);
         gain[b].push(chosen.makeProb - h.makeProb);
         gainPts[b].push(chosen.meanPoints - h.meanPoints);
+      }
+      /* Paired, not marginal: 24000 and 96000 both draw from the same seed
+         (mulberry32(1000+d) for trump, mulberry32(2000+d) for call) for this
+         deal, so 96000's worlds are a superset of 24000's rather than an
+         independent sample — the marginal CIs printed above overstate the
+         true uncertainty in their difference. This within-deal difference is
+         the statistic the budget decision actually rests on. */
+      if (chosenAt[24000] && chosenAt[96000]) {
+        paired.push(chosenAt[96000].makeProb - chosenAt[24000].makeProb);
+        pairedPts.push(chosenAt[96000].meanPoints - chosenAt[24000].meanPoints);
       }
     }
     const shipped = what === "trump" ? TRUMP_PLAY_BUDGET : CALL_PLAY_BUDGET;
     console.log(`  ${what}: oracle ~${Math.round(mean(oracleWorlds))} worlds/cand · best-worst spread ${mean(spread).toFixed(3)} (${mean(spreadPts).toFixed(1)} pts) · hand-count regret ${mean(regH).toFixed(3)} (${mean(regHPts).toFixed(2)} pts)`);
     for (const b of BUDGETS)
       console.log(`    ${String(b).padStart(6)} (~${String(Math.round(mean(worldsAt[b]))).padStart(3)} worlds/cand) regret ${mean(reg[b]).toFixed(3)} (${mean(regPts[b]).toFixed(2)} pts)  gain vs hand-count ${pmP(gain[b])} (${pm(gainPts[b])} pts)${b === shipped ? "   <- shipped" : ""}`);
+    console.log(`    paired 24000->96000, same deals: ${pmP(paired)} make-prob (${pm(pairedPts)} pts)  n=${paired.length}`);
   }
 }
 
