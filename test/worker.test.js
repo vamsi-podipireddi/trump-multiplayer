@@ -8,6 +8,9 @@
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { writeMatchStats } from "../src/worker/stats.js";
 
 const load = () => import("../src/worker/index.js");
@@ -272,4 +275,145 @@ test("/stats recent form says nothing when the current tier does not have enough
   // which would let this pass vacuously if the key were simply missing
   // instead of explicitly null.
   assert.strictEqual(res.recentForm, null, "2 same-tier matches is too little to say anything, even with 12 lifetime games");
+});
+
+/* ============================================================
+   Fix round I2: /stats on a partially-migrated database.
+
+   readRecentForm reads `difficulty`/`difficulty_mixed`, which
+   migrations/0002-difficulty.sql adds. The totals query above it reads only
+   columns 0001 already had. Awaiting both inside one try meant a database
+   with 0001 but not 0002 threw out of a query that had already succeeded,
+   and answered {available:false} — the pre-existing "Your record" line
+   vanished, indistinguishable from having no database at all. That is the
+   guaranteed state in any window between deploying the Worker and running
+   0002, and the permanent state for anyone who applied only the migration
+   the earlier era documented.
+
+   The fake below knows exactly which columns its `matches` table has and
+   fails a query naming any other, the way real D1 does — at execution, not
+   at prepare. Real sqlite would be more faithful still, but node:sqlite
+   does not exist on Node 20 and needs a flag on Node 22 (both in this
+   repo's CI matrix) while `npm test` takes no flags — so the column sets
+   are read straight out of schema.sql and the two migration files instead,
+   which also means a third migration cannot leave this test describing a
+   schema that no longer exists.
+
+   It also honours ORDER BY and LIMIT rather than discarding the SQL: the
+   older fakes in this file ignore their `prepare()` argument entirely, so
+   deleting `ORDER BY ts DESC` from readRecentForm passed the whole suite
+   even though "your most recent match's tier" is exactly what it rests on.
+   ============================================================ */
+const sqlRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
+const sqlText = (f) => fs.readFileSync(path.join(sqlRoot, f), "utf8");
+const addedBy = (f) => [...sqlText(f).matchAll(/ADD COLUMN\s+(\w+)/g)].map(m => m[1]);
+
+// every column the current `matches` table has, off CREATE TABLE itself
+const ALL_COLUMNS = (() => {
+  const s = sqlText("schema.sql");
+  const body = s.slice(s.indexOf("CREATE TABLE"), s.indexOf(");", s.indexOf("CREATE TABLE")));
+  return [...body.matchAll(/^\s+(\w+)\s+(?:INTEGER|TEXT)\b/gm)].map(m => m[1]);
+})();
+const M0002 = addedBy("migrations/0002-difficulty.sql");
+const M0001 = addedBy("migrations/0001-report-card.sql");
+const AFTER_0002 = ALL_COLUMNS;
+const AFTER_0001 = ALL_COLUMNS.filter(c => !M0002.includes(c));
+const BEFORE_ANY = AFTER_0001.filter(c => !M0001.includes(c));
+
+function migratedD1(columns, rows) {
+  const have = new Set(columns);
+  const seen = [];
+  return {
+    seen,
+    prepare(sql) {
+      seen.push(sql);
+      const missing = ALL_COLUMNS.filter(c => new RegExp(`\\b${c}\\b`).test(sql) && !have.has(c));
+      if (missing.length) {
+        const fail = async () => { throw new Error(`D1_ERROR: no such column: ${missing[0]}`); };
+        return { bind: () => ({ first: fail, all: fail, run: fail }) };
+      }
+      return { bind: () => ({
+        first: async () => rows.reduce((a, r) => ({
+          games: a.games + 1, wins: a.wins + r.won,
+          bidsWon: a.bidsWon + r.bids_won, bidsMade: a.bidsMade + r.bids_made,
+        }), { games: 0, wins: 0, bidsWon: 0, bidsMade: 0 }),
+        // ORDER BY / LIMIT are the database's job, and readRecentForm trusts
+        // it to have done it — rows[0] is "your most recent match". Modelled,
+        // not assumed: with no ORDER BY in the SQL a real database is free to
+        // hand back any order at all, which insertion order stands in for.
+        all: async () => {
+          let out = rows.slice();
+          const ord = /ORDER BY (\w+) (ASC|DESC)/i.exec(sql);
+          if (ord) out.sort((a, b) => (ord[2].toUpperCase() === "DESC" ? b[ord[1]] - a[ord[1]] : a[ord[1]] - b[ord[1]]));
+          const lim = /LIMIT (\d+)/i.exec(sql);
+          if (lim) out = out.slice(0, Number(lim[1]));
+          return { results: out };
+        },
+      }) };
+    },
+  };
+}
+
+// Three of one tier and three of another, so both a scoped answer and a
+// pooled one exist and differ — enough same-tier rows to clear
+// MIN_RECENT_FORM either way, in ts-ascending (i.e. NOT query) order.
+const FORM_ROWS = [
+  { ts: 1, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+  { ts: 2, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+  { ts: 3, difficulty: "easy", difficulty_mixed: 0, won: 1, bids_won: 1, bids_made: 1 },
+  { ts: 4, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 2, bids_made: 0 },
+  { ts: 5, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 2, bids_made: 0 },
+  { ts: 6, difficulty: "hard", difficulty_mixed: 0, won: 0, bids_won: 2, bids_made: 0 },
+];
+
+test("/stats keeps the totals when only the recent-form query's migration is missing", async () => {
+  const { default: worker } = await load();
+  const url = "https://trump.example/stats?uid=player-1";
+
+  // Fully migrated: both halves answer. Establishes that this fixture WOULD
+  // produce a recent-form line — without which the partial case below proves
+  // nothing, since "absent" and "never there" would look identical.
+  const full = await (await worker.fetch(req(url), { DB: migratedD1(AFTER_0002, FORM_ROWS) })).json();
+  assert.strictEqual(full.available, true);
+  assert.strictEqual(full.games, 6);
+  assert.ok(full.recentForm, "the fixture must yield a recent-form line on a fully-migrated database");
+
+  // 0001 but not 0002: the recent-form query fails, the totals query does not.
+  const partial = await (await worker.fetch(req(url), { DB: migratedD1(AFTER_0001, FORM_ROWS) })).json();
+  assert.strictEqual(partial.available, true,
+    "a successful totals fetch must not be thrown away because the newer query failed — " +
+    "the whole 'Your record' line disappears, reading exactly like no database at all");
+  assert.strictEqual(partial.games, full.games);
+  assert.strictEqual(partial.wins, full.wins);
+  assert.strictEqual(partial.bidsWon, full.bidsWon);
+  assert.strictEqual(partial.bidsMade, full.bidsMade);
+  // …and the one line that genuinely could not be read is absent, not guessed.
+  assert.strictEqual(partial.recentForm, null,
+    "recent form must degrade to null on its own, never to a number the database could not supply");
+
+  // No migrations at all: the totals query fails too, and {available:false}
+  // is then the honest answer rather than a regression.
+  const bare = await (await worker.fetch(req(url), { DB: migratedD1(BEFORE_ANY, FORM_ROWS) })).json();
+  assert.deepStrictEqual(bare, { available: false });
+});
+
+test("the recent-form query asks the database for the ordering it then trusts", async () => {
+  const { default: worker } = await load();
+  const db = migratedD1(AFTER_0002, FORM_ROWS);
+  const res = await (await worker.fetch(req("https://trump.example/stats?uid=player-1"), { DB: db })).json();
+
+  const formSql = db.seen.find(s => /difficulty_mixed/.test(s));
+  assert.ok(formSql, "the recent-form query never reached the database");
+  assert.match(formSql, /ORDER BY ts DESC/,
+    "readRecentForm reads rows[0].difficulty as 'your most recent match's tier' — " +
+    "without ORDER BY ts DESC that is whichever row the database felt like returning first");
+  assert.match(formSql, /WHERE uid = \?/, "the recent-form query must be parameterised too");
+
+  /* And behaviourally, not only as text: FORM_ROWS is supplied oldest-first,
+     so insertion order and ts order disagree about which tier is current.
+     Ordered, the newest three are "hard" (0 wins of 3). Unordered, rows[0]
+     is the oldest "easy" row and the answer would be the easy tier's 3-of-3
+     instead — a different tier AND a different record. */
+  assert.deepStrictEqual(res.recentForm, { difficulty: "hard", n: 3, wins: 0, bidsWon: 6, bidsMade: 0 },
+    "the tier reported must be the most recent match's, not the oldest's");
 });

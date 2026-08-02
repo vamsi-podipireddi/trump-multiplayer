@@ -18,6 +18,9 @@ async function readStats(env, uid) {
       "SUM(COALESCE(bids_won, 0)) AS bidsWon, SUM(COALESCE(bids_made, 0)) AS bidsMade " +
       "FROM matches WHERE uid = ?"
     ).bind(uid).first();
+    /* Cannot throw — readRecentForm swallows its own failure and returns null
+       — deliberately, so a successful totals fetch is never discarded by the
+       newer query failing. See its own comment below. */
     const recentForm = await readRecentForm(env, uid);
     return json({ available: true, games: row.games | 0, wins: row.wins | 0, bidsWon: row.bidsWon | 0, bidsMade: row.bidsMade | 0, recentForm });
   } catch {
@@ -36,24 +39,38 @@ async function readStats(env, uid) {
    handlers.js's handleSettings) are dropped entirely: a match played across
    two tiers has no single difficulty its result can honestly be charged to.
    Below MIN_RECENT_FORM matches in that tier, returns null — silence beats a
-   number whose meaning depends on which bots the player happened to face. */
+   number whose meaning depends on which bots the player happened to face.
+
+   Its own try/catch, never the caller's (fix round I2). This query reads
+   `difficulty`/`difficulty_mixed`, which migrations/0002-difficulty.sql adds;
+   the totals query above reads only columns 0001 already had. Sharing one
+   try meant a database with 0001 but not 0002 — the guaranteed state in any
+   window between deploying this Worker and running 0002, and the permanent
+   state for anyone who applied only the migration the earlier era documented
+   — threw "no such column: difficulty" out of a query that had ALREADY
+   succeeded, and answered {available:false}: the pre-existing "Your record"
+   line vanished entirely, indistinguishable from having no database at all.
+   Recent form is the newer, optional line; it degrades to null on its own
+   and takes nothing else with it. */
 async function readRecentForm(env, uid) {
-  const res = await env.DB.prepare(
-    "SELECT difficulty, difficulty_mixed, won, bids_won, bids_made FROM matches " +
-    "WHERE uid = ? ORDER BY ts DESC LIMIT 20"
-  ).bind(uid).all();
-  const rows = (res && res.results) || [];
-  const tier = rows.length ? rows[0].difficulty : null;
-  if (!tier) return null; // no matches yet, or the newest predates this column
-  const scoped = rows.filter(r => r.difficulty === tier && !r.difficulty_mixed);
-  if (scoped.length < MIN_RECENT_FORM) return null;
-  return {
-    difficulty: tier,
-    n: scoped.length,
-    wins: scoped.reduce((s, r) => s + (r.won ? 1 : 0), 0),
-    bidsWon: scoped.reduce((s, r) => s + (r.bids_won || 0), 0),
-    bidsMade: scoped.reduce((s, r) => s + (r.bids_made || 0), 0),
-  };
+  try {
+    const res = await env.DB.prepare(
+      "SELECT difficulty, difficulty_mixed, won, bids_won, bids_made FROM matches " +
+      "WHERE uid = ? ORDER BY ts DESC LIMIT 20"
+    ).bind(uid).all();
+    const rows = (res && res.results) || [];
+    const tier = rows.length ? rows[0].difficulty : null;
+    if (!tier) return null; // no matches yet, or the newest predates this column
+    const scoped = rows.filter(r => r.difficulty === tier && !r.difficulty_mixed);
+    if (scoped.length < MIN_RECENT_FORM) return null;
+    return {
+      difficulty: tier,
+      n: scoped.length,
+      wins: scoped.reduce((s, r) => s + (r.won ? 1 : 0), 0),
+      bidsWon: scoped.reduce((s, r) => s + (r.bids_won || 0), 0),
+      bidsMade: scoped.reduce((s, r) => s + (r.bids_made || 0), 0),
+    };
+  } catch { return null; } // one line's worth of degradation, never the whole response
 }
 
 /* One row per human seat at matchOver, when a D1 binding exists (M8/D10). */
