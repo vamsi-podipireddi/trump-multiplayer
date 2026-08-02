@@ -57,9 +57,25 @@ function saveDeal(room, matchId, snapshot) {
   const rec = read(k) || { ts: 0, deals: [] };
   const i = rec.deals.findIndex(d => d.roundNumber === snapshot.roundNumber);
   if (i >= 0) rec.deals[i] = snapshot; else rec.deals.push(snapshot);
-  rec.ts = rec.deals.length;   // monotone without a clock; only used to order evictions
-  try { localStorage.setItem(k, JSON.stringify(rec)); } catch { return; }
+  /* What evict()'s cross-match sort orders by: real recency, not a count of
+     rounds recorded so far — two matches tied on round count are not tied on
+     age, and breaking that tie on localStorage's own key-iteration order would
+     evict by insertion order instead of by staleness. This file is browser-only
+     (it never runs in the Worker DO, unlike ai/pimc.js and ai/bid-search.js,
+     which budget in simulated plays instead of ms specifically because Workers
+     freeze Date.now() between I/O) — no engine constraint reaches here, so a
+     real clock is just correct. */
+  rec.ts = Date.now();
+  const write = () => { try { localStorage.setItem(k, JSON.stringify(rec)); return true; } catch { return false; } };
+  if (write()) { evict(room, matchId); return; }
+  /* The write failed — most plausibly QuotaExceededError, the one failure this
+     can actually remedy. Evict first (freeing space, including this room's own
+     other matches) so the retry has the best chance of fitting, then try
+     exactly once more; give up silently either way — a private-mode browser
+     that rejects every write can't be fixed by evicting, and this function
+     must never throw regardless of which one it was. */
   evict(room, matchId);
+  write();
 }
 
 function loadDeals(room, matchId) {
