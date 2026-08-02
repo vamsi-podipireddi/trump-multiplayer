@@ -245,11 +245,11 @@ This file is the source of truth for the in-progress upgrade; resume from the fi
   candidate count, so precision *falls* as the candidate list grows — but an argmax over more near-equal
   candidates needs *more* samples, not fewer, to tell them apart. At a uniform 6000, the bid (1
   candidate, ~115 worlds) was already over-provisioned, while the call ~~(~10 candidates, ~11
-  worlds)~~ — **CORRECTED, derived:** (~8 candidates, `worldsFor(8, 6000)` = **14** worlds). The 10
+  worlds)~~ — **CORRECTED, derived:** (~8 candidates, `worldsFor(8, 6000)` = **14** worlds; the 10
   came from counting the call shortlist without `evaluateCalls`' own dedupe of the heuristic out of
-  the honour list — the same error D44 corrects at the ceiling — and `ai/bid-search.js:86-91` already
+  the honour list, the same error D44 corrects at the ceiling, and `ai/bid-search.js:86-91` already
   publishes the right pair. D36's conclusion is untouched: it rests on the measured regret below, not
-  on the world count. — was measurably no better than the hand-count it was meant to replace (regret
+  on the world count) — was measurably no better than the hand-count it was meant to replace (regret
   3.60 vs. the heuristic's own 3.33).
   Shipped: three separate budgets — `BID_PLAY_BUDGET = 3000` (halving it from 6000 cost nothing
   measurable: −0.09 ± 0.38 pp of deals won over 7998 paired deals), ~~`TRUMP_PLAY_BUDGET =
